@@ -1,0 +1,2081 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard Ecotrans Ambiental</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --verde-escuro: #2d5a3d;
+    --verde-medio: #4a8c5c;
+    --verde-claro: #8bc34a;
+    --verde-claro-bg: #f0f7ec;
+    --verde-claro-bg-2: #e8f2dd;
+    --vermelho: #c53030;
+    --vermelho-bg: #fef2f2;
+    --vermelho-borda: #fecaca;
+    --laranja: #d97706;
+    --laranja-bg: #fffbeb;
+    --laranja-borda: #fde68a;
+    --amarelo: #ca8a04;
+    --amarelo-bg: #fefce8;
+    --amarelo-borda: #fde047;
+    --verde-ok: #16a34a;
+    --verde-ok-bg: #f0fdf4;
+    --verde-ok-borda: #bbf7d0;
+    --cinza-100: #f8f9fa;
+    --cinza-200: #e9ecef;
+    --cinza-300: #dee2e6;
+    --cinza-400: #ced4da;
+    --cinza-500: #adb5bd;
+    --cinza-600: #6c757d;
+    --cinza-700: #495057;
+    --cinza-800: #343a40;
+    --cinza-900: #212529;
+    --fonte-display: 'Outfit', sans-serif;
+    --fonte-corpo: 'Inter', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--fonte-corpo); background: #fafaf7; color: var(--cinza-900); }
+
+  /* ===================== LOGIN ===================== */
+  #tela-login {
+    position: fixed; inset: 0; z-index: 1000;
+    background: linear-gradient(135deg, var(--verde-escuro) 0%, #1f3f2b 100%);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .login-card {
+    background: white; border-radius: 16px; padding: 40px;
+    width: 380px; max-width: 90vw; box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  }
+  .login-logo { text-align: center; margin-bottom: 28px; }
+  .login-logo .nome { font-family: var(--fonte-display); font-size: 30px; font-weight: 700; color: var(--verde-escuro); }
+  .login-logo .nome .verde { color: var(--verde-claro); }
+  .login-logo .sub { font-size: 11px; letter-spacing: 4px; color: var(--verde-medio); margin-top: 2px; }
+  .login-campo { margin-bottom: 16px; }
+  .login-campo label { display: block; font-size: 13px; font-weight: 500; color: var(--cinza-700); margin-bottom: 6px; }
+  .login-campo select, .login-campo input {
+    width: 100%; padding: 11px 14px; border: 1.5px solid var(--cinza-300);
+    border-radius: 8px; font-family: var(--fonte-corpo); font-size: 14px; transition: border-color .15s;
+  }
+  .login-campo select:focus, .login-campo input:focus { outline: none; border-color: var(--verde-medio); }
+  .login-btn {
+    width: 100%; background: var(--verde-escuro); color: white; border: none;
+    padding: 13px; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer;
+    margin-top: 8px; transition: background .15s; font-family: var(--fonte-corpo);
+  }
+  .login-btn:hover { background: var(--verde-medio); }
+  .login-erro { color: var(--vermelho); font-size: 13px; margin-top: 12px; text-align: center; display: none; }
+  .login-rodape { text-align: center; font-size: 11px; color: var(--cinza-500); margin-top: 24px; }
+
+  /* ===================== APP ===================== */
+  #app { display: none; min-height: 100vh; }
+  .layout { display: flex; min-height: 100vh; }
+
+  /* Sidebar nível 1: módulos (verde escuro) */
+  .sidebar {
+    width: 230px; background: var(--verde-escuro); color: white;
+    padding: 24px 0 0; position: sticky; top: 0; height: 100vh;
+    display: flex; flex-direction: column; flex-shrink: 0;
+  }
+  .sidebar-logo { padding: 0 24px 20px; border-bottom: 1px solid rgba(255,255,255,0.1); margin-bottom: 16px; }
+  .sidebar-logo .nome { font-family: var(--fonte-display); font-size: 22px; font-weight: 700; }
+  .sidebar-logo .nome .verde { color: var(--verde-claro); }
+  .sidebar-logo .sub { font-size: 10px; letter-spacing: 3px; color: var(--verde-claro); margin-top: 2px; }
+  .sidebar-nav { padding: 0 12px; flex: 1; overflow-y: auto; }
+  .nav-mod {
+    display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+    border: none; background: transparent; color: rgba(255,255,255,0.85);
+    width: 100%; text-align: left; border-radius: 8px; cursor: pointer;
+    font-family: var(--fonte-corpo); font-size: 14px; font-weight: 500; margin-bottom: 4px; transition: all .15s;
+  }
+  .nav-mod:hover { background: rgba(255,255,255,0.08); color: white; }
+  .nav-mod.ativo { background: var(--verde-claro); color: var(--verde-escuro); font-weight: 600; }
+  .nav-mod .ti { font-size: 19px; }
+  .sidebar-footer { padding: 16px 20px; border-top: 1px solid rgba(255,255,255,0.1); }
+  .sidebar-footer .user-name { font-size: 13px; color: white; font-weight: 600; }
+  .sidebar-footer .user-role { font-size: 11px; color: rgba(255,255,255,0.65); margin-top: 1px; }
+  .sidebar-footer .sair {
+    margin-top: 12px; background: transparent; color: rgba(255,255,255,0.7);
+    border: 1px solid rgba(255,255,255,0.25); padding: 7px 12px; border-radius: 6px;
+    font-size: 12px; cursor: pointer; width: 100%; font-family: var(--fonte-corpo); transition: all .15s;
+  }
+  .sidebar-footer .sair:hover { background: rgba(255,255,255,0.1); color: white; }
+
+  /* Coluna nível 2: submódulos (branca) */
+  .subcoluna {
+    width: 220px; background: white; border-right: 1px solid var(--cinza-200);
+    padding: 24px 0; flex-shrink: 0; height: 100vh; position: sticky; top: 0; overflow-y: auto;
+  }
+  .subcoluna-titulo {
+    font-family: var(--fonte-display); font-size: 11px; letter-spacing: 2px; text-transform: uppercase;
+    color: var(--cinza-500); padding: 0 24px 14px; font-weight: 600;
+  }
+  .nav-sub {
+    display: flex; align-items: center; gap: 11px; padding: 10px 24px;
+    border: none; background: transparent; color: var(--cinza-700);
+    width: 100%; text-align: left; cursor: pointer;
+    font-family: var(--fonte-corpo); font-size: 13.5px; transition: all .12s; border-left: 3px solid transparent;
+  }
+  .nav-sub:hover { background: var(--verde-claro-bg); color: var(--verde-escuro); }
+  .nav-sub.ativo { background: var(--verde-claro-bg); color: var(--verde-escuro); font-weight: 600; border-left-color: var(--verde-claro); }
+  .nav-sub .ti { font-size: 17px; }
+  .nav-sub .badge {
+    margin-left: auto; background: var(--cinza-200); color: var(--cinza-700);
+    font-size: 11px; padding: 1px 8px; border-radius: 10px; font-weight: 600;
+  }
+  .nav-sub.ativo .badge { background: var(--verde-claro); color: var(--verde-escuro); }
+
+  /* Conteúdo */
+  .conteudo { flex: 1; padding: 32px 40px; overflow-y: auto; height: 100vh; }
+  .topo { display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; }
+  .topo h1 { font-family: var(--fonte-display); font-size: 26px; font-weight: 600; color: var(--cinza-900); }
+  .topo .subtitulo { font-size: 13px; color: var(--cinza-600); margin-top: 2px; }
+
+  .placeholder {
+    background: white; border: 2px dashed var(--cinza-300); border-radius: 14px;
+    padding: 60px 40px; text-align: center; color: var(--cinza-500);
+  }
+  .placeholder .ti { font-size: 48px; color: var(--cinza-400); }
+  .placeholder h2 { font-family: var(--fonte-display); font-size: 20px; color: var(--cinza-700); margin: 16px 0 8px; font-weight: 600; }
+  .placeholder p { font-size: 14px; max-width: 440px; margin: 0 auto; line-height: 1.6; }
+  .placeholder .onda { display: inline-block; margin-top: 16px; background: var(--verde-claro-bg); color: var(--verde-escuro); font-size: 12px; font-weight: 600; padding: 5px 14px; border-radius: 20px; }
+
+  .badge-perfil {
+    background: var(--verde-claro-bg); color: var(--verde-escuro);
+    font-size: 12px; font-weight: 600; padding: 6px 14px; border-radius: 20px;
+  }
+  .sem-acesso { background: var(--amarelo-bg); border: 1px solid var(--amarelo-borda); color: #92670a; padding: 16px 20px; border-radius: 10px; font-size: 14px; }
+
+  /* Busca */
+  .barra-busca { display: flex; align-items: center; gap: 10px; background: white; border: 1px solid var(--cinza-300); border-radius: 10px; padding: 11px 14px; margin-bottom: 16px; }
+  .barra-busca input { flex: 1; border: none; outline: none; font-family: var(--fonte-corpo); font-size: 14px; background: transparent; color: var(--cinza-900); }
+  .barra-busca .ti { font-size: 18px; color: var(--cinza-600); }
+  .barra-busca .contagem { background: var(--verde-claro-bg); color: var(--verde-escuro); font-size: 12px; padding: 4px 12px; border-radius: 14px; white-space: nowrap; }
+  .lupa-topo { background: var(--verde-claro-bg); border: none; width: 38px; height: 38px; border-radius: 9px; cursor: pointer; color: var(--verde-escuro); font-size: 18px; }
+  .lupa-topo:hover { background: var(--verde-claro-bg-2); }
+
+  /* Filtros */
+  .filtros { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+  .filtro-chip { background: white; color: var(--cinza-700); font-size: 12.5px; padding: 7px 14px; border-radius: 14px; border: 1px solid var(--cinza-300); cursor: pointer; transition: all .12s; }
+  .filtro-chip:hover { border-color: var(--verde-medio); }
+  .filtro-chip.ativo { background: var(--verde-escuro); color: white; border-color: var(--verde-escuro); }
+  .filtro-sel { padding: 7px 12px; border: 1px solid var(--cinza-300); border-radius: 14px; font-family: var(--fonte-corpo); font-size: 12.5px; background: white; color: var(--cinza-700); cursor: pointer; }
+  .filtro-sel:focus { outline: none; border-color: var(--verde-medio); }
+  .alternador { margin-left: auto; display: flex; gap: 4px; background: var(--cinza-200); border-radius: 8px; padding: 3px; }
+  .alternador button { border: none; background: transparent; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; color: var(--cinza-700); display: flex; align-items: center; gap: 5px; }
+  .alternador button.ativo { background: white; color: var(--verde-escuro); font-weight: 600; }
+
+  /* Cards de cliente */
+  .grid-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+  .card-cli { background: white; border: 1px solid var(--cinza-200); border-radius: 12px; padding: 16px; cursor: pointer; transition: all .12s; border-left: 4px solid var(--cinza-400); }
+  .card-cli:hover { border-color: var(--verde-medio); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
+  .card-cli.ativo-status { border-left-color: var(--verde-ok); }
+  .card-cli.suspenso { border-left-color: var(--laranja); }
+  .card-cli.cancelado { border-left-color: var(--vermelho); }
+  .card-cli-topo { display: flex; align-items: center; gap: 11px; margin-bottom: 12px; }
+  .card-cli-avatar { width: 42px; height: 42px; border-radius: 9px; background: var(--verde-claro-bg); display: flex; align-items: center; justify-content: center; font-weight: 600; color: var(--verde-escuro); font-size: 14px; flex-shrink: 0; }
+  .card-cli-nome { font-weight: 600; font-size: 14px; color: var(--cinza-900); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card-cli-cnpj { font-size: 12px; color: var(--cinza-600); }
+  .card-cli-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .tag { font-size: 11px; padding: 3px 9px; border-radius: 10px; }
+  .tag-contrato { background: var(--verde-ok-bg); color: var(--verde-ok); }
+  .tag-eventual { background: var(--cinza-100); color: var(--cinza-700); }
+  .tag-ativo { background: var(--verde-claro-bg); color: var(--verde-escuro); }
+  .tag-grupo { background: #eef; color: #4a3f9e; }
+  .card-cli-linha { display: flex; justify-content: space-between; font-size: 12px; color: var(--cinza-600); padding-top: 8px; }
+  .card-cli-linha.borda { border-top: 1px solid var(--cinza-100); }
+  .card-cli-linha b { color: var(--cinza-900); font-weight: 600; }
+
+  /* Lista compacta */
+  .lista-cli { background: white; border: 1px solid var(--cinza-200); border-radius: 12px; overflow: hidden; }
+  .lista-cli-item { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; padding: 11px 16px; cursor: pointer; border-top: 1px solid var(--cinza-100); font-size: 13px; }
+  .lista-cli-item:first-child { border-top: none; }
+  .lista-cli-item:hover { background: var(--verde-claro-bg); }
+
+  /* Ficha (modal) */
+  .ficha-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 500; display: flex; align-items: flex-start; justify-content: center; padding: 40px 20px; overflow-y: auto; }
+  .ficha { background: white; border-radius: 14px; width: 580px; max-width: 100%; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+  .ficha-topo { background: var(--verde-escuro); padding: 20px 24px; color: white; }
+  .ficha-topo .nome { font-family: var(--fonte-display); font-size: 20px; font-weight: 600; }
+  .ficha-topo .cnpj { font-size: 13px; color: rgba(255,255,255,0.8); margin-top: 2px; }
+  .ficha-topo .fechar { float: right; cursor: pointer; font-size: 22px; color: rgba(255,255,255,0.8); background: none; border: none; }
+  .ficha-tags { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+  .ficha-tags span { background: rgba(255,255,255,0.15); font-size: 12px; padding: 4px 12px; border-radius: 12px; color: white; }
+  .ficha-abas { display: flex; border-bottom: 1px solid var(--cinza-200); background: var(--cinza-100); font-size: 13px; overflow-x: auto; }
+  .ficha-aba { padding: 12px 18px; color: var(--cinza-600); cursor: pointer; white-space: nowrap; border-bottom: 2px solid transparent; }
+  .ficha-aba.ativa { color: var(--verde-escuro); font-weight: 600; border-bottom-color: var(--verde-escuro); }
+  .ficha-corpo { padding: 20px 24px; }
+  .ficha-kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px; }
+  .ficha-kpi { background: var(--cinza-100); border-radius: 8px; padding: 12px; }
+  .ficha-kpi .lbl { font-size: 12px; color: var(--cinza-600); }
+  .ficha-kpi .val { font-size: 22px; font-weight: 600; color: var(--cinza-900); font-family: var(--fonte-display); }
+  .ficha-tab { width: 100%; font-size: 13px; }
+  .ficha-tab td { padding: 7px 0; }
+  .ficha-tab td:first-child { color: var(--cinza-600); }
+  .ficha-tab td:last-child { text-align: right; color: var(--cinza-900); }
+  .ficha-tab tr + tr td { border-top: 1px solid var(--cinza-100); }
+  .ficha-botoes { display: flex; gap: 8px; margin-top: 18px; }
+  .ficha-botoes button { flex: 1; padding: 10px; border-radius: 8px; font-size: 13px; cursor: pointer; font-family: var(--fonte-corpo); border: none; }
+  .ficha-btn-primario { background: var(--verde-escuro); color: white; }
+  .ficha-btn-secundario { background: white; color: var(--cinza-700); border: 1px solid var(--cinza-300) !important; }
+
+  /* Kanban */
+  .kanban { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 12px; }
+  .kanban-col { min-width: 230px; max-width: 230px; background: var(--cinza-100); border-radius: 12px; padding: 12px; flex-shrink: 0; }
+  .kanban-col-titulo { font-size: 13px; font-weight: 600; color: var(--cinza-700); margin-bottom: 10px; display: flex; justify-content: space-between; }
+  .kanban-col-titulo .qtd { background: white; color: var(--cinza-600); font-size: 11px; padding: 1px 8px; border-radius: 10px; }
+  .kanban-card { background: white; border-radius: 9px; padding: 11px; margin-bottom: 8px; border-left: 3px solid var(--cinza-400); cursor: pointer; }
+  .kanban-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+  .kanban-card .cli { font-size: 13px; font-weight: 600; color: var(--cinza-900); margin-bottom: 3px; }
+  .kanban-card .meta { font-size: 11px; color: var(--cinza-600); }
+
+  /* KPIs do funil (cards de número no topo) */
+  .kpi-funil { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .kpi-card { background: white; border: 1px solid var(--cinza-200); border-radius: 10px; padding: 14px 16px; text-align: center; }
+  .kpi-num { font-family: var(--fonte-display); font-size: 30px; font-weight: 700; line-height: 1; }
+  .kpi-lbl { font-size: 12px; color: var(--cinza-600); margin-top: 5px; }
+
+  /* Reajustes — cards */
+  .reaj-card { background: white; border: 1px solid var(--cinza-200); border-radius: 12px; padding: 16px; cursor: pointer; transition: all .12s; border-left: 4px solid var(--cinza-400); }
+  .reaj-card:hover { border-color: var(--verde-medio); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
+  .reaj-card.venc { border-left-color: var(--vermelho); }
+  .reaj-card.r30 { border-left-color: var(--laranja); }
+  .reaj-card.r60 { border-left-color: var(--amarelo); }
+  .reaj-card.ok { border-left-color: var(--verde-ok); }
+  .reaj-topo { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+  .reaj-nome { font-weight: 600; font-size: 14px; color: var(--cinza-900); }
+  .reaj-cnpj { font-size: 12px; color: var(--cinza-600); }
+  .reaj-pill { font-size: 11px; padding: 3px 10px; border-radius: 10px; white-space: nowrap; }
+  .pill-venc { background: var(--vermelho-bg); color: var(--vermelho); }
+  .pill-r30 { background: var(--laranja-bg); color: var(--laranja); }
+  .pill-r60 { background: var(--amarelo-bg); color: var(--amarelo); }
+  .pill-ok { background: var(--verde-ok-bg); color: var(--verde-ok); }
+  .reaj-linhas { display: flex; gap: 16px; font-size: 12px; color: var(--cinza-600); border-top: 1px solid var(--cinza-100); padding-top: 10px; }
+  .reaj-linhas b { color: var(--cinza-900); font-weight: 600; display: block; font-size: 14px; }
+
+  /* Inadimplência */
+  .inad-card { background: white; border: 1px solid var(--cinza-200); border-radius: 12px; padding: 16px; border-left: 4px solid var(--vermelho); }
+  .inad-card.a30 { border-left-color: var(--amarelo); }
+  .inad-card.a60 { border-left-color: var(--laranja); }
+  .inad-card.a90 { border-left-color: var(--vermelho); }
+  .aging-badge { font-size: 11px; padding: 3px 10px; border-radius: 10px; }
+  .ag-30 { background: var(--amarelo-bg); color: var(--amarelo); }
+  .ag-60 { background: var(--laranja-bg); color: var(--laranja); }
+  .ag-90 { background: var(--vermelho-bg); color: var(--vermelho); }
+
+  /* Faturamento */
+  .fat-tabela { width: 100%; border-collapse: collapse; font-size: 13px; background: white; border-radius: 12px; overflow: hidden; border: 1px solid var(--cinza-200); }
+  .fat-tabela thead th { background: var(--verde-escuro); color: white; padding: 11px 14px; text-align: left; font-weight: 600; font-size: 12.5px; }
+  .fat-tabela thead th.num { text-align: right; }
+  .fat-tabela tbody td { padding: 10px 14px; border-top: 1px solid var(--cinza-100); }
+  .fat-tabela tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .fat-tabela tbody tr:hover { background: var(--verde-claro-bg); cursor: pointer; }
+  .fat-var-pos { color: var(--verde-ok); font-weight: 600; }
+  .fat-var-neg { color: var(--vermelho); font-weight: 600; }
+  .fat-var-zero { color: var(--cinza-500); }
+  .btn-importar { background: var(--verde-escuro); color: white; border: none; padding: 10px 18px; border-radius: 9px; font-size: 13px; cursor: pointer; font-family: var(--fonte-corpo); display: inline-flex; align-items: center; gap: 7px; }
+  .btn-importar:hover { background: var(--verde-medio); }
+  .kpi-fat { background: white; border: 1px solid var(--cinza-200); border-radius: 12px; padding: 16px 18px; }
+  .kpi-fat .tit { font-size: 12px; color: var(--cinza-600); display: flex; align-items: center; gap: 6px; }
+  .kpi-fat .val { font-family: var(--fonte-display); font-size: 26px; font-weight: 700; color: var(--cinza-900); margin: 6px 0 2px; }
+  .kpi-fat .var { font-size: 12px; }
+</style>
+</head>
+<body>
+
+<!-- ===================== TELA DE LOGIN ===================== -->
+<div id="tela-login">
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="nome">ECO<span class="verde">TRANS</span></div>
+      <div class="sub">AMBIENTAL</div>
+    </div>
+    <div class="login-campo">
+      <label for="login-user">Usuário</label>
+      <select id="login-user">
+        <option value="">Selecione seu nome...</option>
+      </select>
+    </div>
+    <div class="login-campo">
+      <label for="login-senha">Senha</label>
+      <input type="password" id="login-senha" placeholder="Digite sua senha" autocomplete="off">
+    </div>
+    <button class="login-btn" onclick="fazerLogin()">Entrar</button>
+    <div class="login-erro" id="login-erro">Usuário ou senha incorretos.</div>
+    <div class="login-rodape">Acesso restrito · Ecotrans Ambiental</div>
+  </div>
+</div>
+
+<!-- ===================== APP ===================== -->
+<div id="app">
+  <div class="layout">
+    <!-- Sidebar nível 1: módulos -->
+    <aside class="sidebar">
+      <div class="sidebar-logo">
+        <div class="nome">ECO<span class="verde">TRANS</span></div>
+        <div class="sub">AMBIENTAL</div>
+      </div>
+      <nav class="sidebar-nav" id="nav-modulos"></nav>
+      <div class="sidebar-footer">
+        <div class="user-name" id="footer-nome">—</div>
+        <div class="user-role" id="footer-role">—</div>
+        <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
+      </div>
+    </aside>
+
+    <!-- Coluna nível 2: submódulos -->
+    <div class="subcoluna" id="subcoluna">
+      <div class="subcoluna-titulo" id="subcoluna-titulo">MÓDULO</div>
+      <div id="nav-submodulos"></div>
+    </div>
+
+    <!-- Conteúdo -->
+    <main class="conteudo">
+      <div class="topo">
+        <div>
+          <h1 id="pagina-titulo">Visão Geral</h1>
+          <div class="subtitulo" id="pagina-subtitulo">Bem-vindo ao sistema Ecotrans</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <button class="lupa-topo" onclick="abrirBuscaGlobal()" aria-label="Buscar cliente"><i class="ti ti-search"></i></button>
+          <button class="lupa-topo" id="btn-sino" onclick="abrirAvisos()" aria-label="Avisos" style="position:relative;display:none;"><i class="ti ti-bell"></i><span id="sino-badge" style="position:absolute;top:-4px;right:-4px;background:var(--vermelho);color:white;font-size:10px;min-width:16px;height:16px;border-radius:8px;display:none;align-items:center;justify-content:center;padding:0 4px;"></span></button>
+          <span class="badge-perfil" id="badge-perfil">—</span>
+        </div>
+      </div>
+      <div id="area-conteudo"></div>
+    </main>
+  </div>
+</div>
+
+<!-- Ficha do cliente (modal) -->
+<div id="ficha-container"></div>
+
+<script>
+// ============================================================
+// CONEXÃO COM O GOOGLE SHEETS (via Apps Script)
+// ============================================================
+const API_URL = 'https://script.google.com/macros/s/AKfycbwpcfQ8LV-zZj31uHiOZT5neDNqk9x4zFXpy2pnFx7UqnIeNpaEL3tfwlWDlhSP69g_jw/exec';
+
+// ============================================================
+// CONFIGURAÇÃO — perfis e acessos
+// A lista abaixo serve para popular o dropdown de login e definir
+// quais módulos cada PERFIL enxerga. As senhas e a validação real
+// (incluindo horário) ficam no Apps Script / Google Sheets.
+// ============================================================
+const USUARIOS = [
+  { id: 'bruna',    nome: 'Bruna Campos',    role: 'Vendedora',                  perfil: 'vendedor' },
+  { id: 'elaine',   nome: 'Elaine Souza',    role: 'Vendedora',                  perfil: 'vendedor' },
+  { id: 'rogerio',  nome: 'Rogério Sabino',  role: 'Supervisor + Vendedor',      perfil: 'supervisor' },
+  { id: 'roberto',  nome: 'Roberto Fernandes', role: 'Diretor Comercial',        perfil: 'diretor' },
+  { id: 'mafe',     nome: 'Maria Fernanda Conte', role: 'Admin — Analista Comercial', perfil: 'admin' },
+  { id: 'danielly', nome: 'Danielly Santos', role: 'Assistente',                 perfil: 'assistente' },
+  { id: 'andrea',   nome: 'Andrea Fernandes', role: 'Admin — Diretora Adm.',     perfil: 'admin' },
+  { id: 'joyce',    nome: 'Joyce Freitas',   role: 'Financeiro',                 perfil: 'financeiro' },
+];
+
+// Definição dos módulos (nível 1) e submódulos (nível 2)
+const MODULOS = [
+  {
+    id: 'crm', nome: 'CRM', icone: 'ti-users',
+    subs: [
+      { id: 'crm-funil',      nome: 'Funil (Kanban)',    icone: 'ti-layout-kanban' },
+      { id: 'crm-leads',      nome: 'Leads',             icone: 'ti-user-plus' },
+      { id: 'crm-propostas',  nome: 'Propostas',         icone: 'ti-file-dollar' },
+      { id: 'crm-atividades', nome: 'Atividades',        icone: 'ti-checklist' },
+      { id: 'crm-relatorios', nome: 'Relatórios',        icone: 'ti-chart-bar' },
+    ]
+  },
+  {
+    id: 'carteira', nome: 'Carteira', icone: 'ti-briefcase',
+    subs: [
+      { id: 'cart-visao',       nome: 'Visão Geral',       icone: 'ti-layout-dashboard' },
+      { id: 'cart-clientes',    nome: 'Clientes',          icone: 'ti-building' },
+      { id: 'cart-contratos',   nome: 'Contratos',         icone: 'ti-file-text' },
+      { id: 'cart-reajustes',   nome: 'Reajustes',         icone: 'ti-trending-up' },
+      { id: 'cart-faturamento', nome: 'Faturamento',       icone: 'ti-cash' },
+      { id: 'cart-cancelados',  nome: 'Cancelamentos',     icone: 'ti-circle-x' },
+      { id: 'cart-inadimplencia', nome: 'Inadimplência',   icone: 'ti-alert-triangle' },
+      { id: 'cart-graficos',    nome: 'Gráficos',          icone: 'ti-chart-line' },
+      { id: 'cart-buscar',      nome: 'Buscar Cliente',    icone: 'ti-search' },
+    ]
+  },
+  {
+    id: 'agenda', nome: 'Agenda', icone: 'ti-calendar',
+    subs: [
+      { id: 'ag-dia',     nome: 'Dia',          icone: 'ti-list' },
+      { id: 'ag-mes',     nome: 'Mês',          icone: 'ti-calendar-month' },
+      { id: 'ag-semana',  nome: 'Semana',       icone: 'ti-calendar-week' },
+    ]
+  },
+  {
+    id: 'regula', nome: 'SP Regula', icone: 'ti-file-certificate',
+    subs: [
+      { id: 'reg-visao',  nome: 'Visão Geral',  icone: 'ti-layout-dashboard' },
+      { id: 'reg-rgg',    nome: 'SP Regula (RGG)', icone: 'ti-file-certificate' },
+      { id: 'reg-sigor',  nome: 'SIGOR (MTR)',  icone: 'ti-truck-delivery' },
+      { id: 'reg-renov',  nome: 'Renovados',    icone: 'ti-refresh' },
+    ]
+  },
+];
+
+// Quais módulos cada perfil enxerga
+const ACESSO = {
+  admin:       ['crm','carteira','agenda','regula'],          // Mafe, Andrea — tudo
+  diretor:     ['crm','carteira','agenda','regula'],          // Roberto — tudo
+  supervisor:  ['crm','carteira','agenda','regula'],          // Rogério — tudo
+  assistente:  ['crm','carteira','agenda','regula'],          // Danielly — tudo (operacional)
+  vendedor:    ['crm','agenda','regula'],                     // Bruna, Elaine — sem carteira completa
+  financeiro:  ['carteira'],                                  // Joyce — só carteira, sem CRM
+};
+
+let usuarioAtual = null;
+let moduloAtual = null;
+
+// ---- Popular dropdown de login ----
+const selUser = document.getElementById('login-user');
+USUARIOS.forEach(u => {
+  const o = document.createElement('option');
+  o.value = u.id; o.textContent = u.nome;
+  selUser.appendChild(o);
+});
+
+// ---- Login REAL: valida no Apps Script (senha + horário no servidor) ----
+let sessaoToken = null;
+
+async function fazerLogin() {
+  const uid = selUser.value;
+  const senha = document.getElementById('login-senha').value;
+  const erro = document.getElementById('login-erro');
+  const btn = document.querySelector('.login-btn');
+  if (!uid) { erro.textContent = 'Selecione seu nome.'; erro.style.display = 'block'; return; }
+  if (!senha) { erro.textContent = 'Digite sua senha.'; erro.style.display = 'block'; return; }
+
+  erro.style.display = 'none';
+  btn.textContent = 'Entrando...'; btn.disabled = true;
+
+  try {
+    const resp = await fetch(API_URL, {
+      method: 'POST',
+      body: JSON.stringify({ acao: 'login', usuario: uid, senha: senha })
+    });
+    const r = await resp.json();
+    if (!r.ok) {
+      erro.textContent = r.erro || 'Não foi possível entrar.';
+      erro.style.display = 'block';
+      btn.textContent = 'Entrar'; btn.disabled = false;
+      return;
+    }
+    // sucesso
+    sessaoToken = r.token;
+    usuarioAtual = { id: r.usuario.id, nome: r.usuario.nome, role: r.usuario.role, perfil: r.usuario.perfil };
+    // guardar sessão 8h
+    localStorage.setItem('ecotrans_sessao', JSON.stringify({
+      token: r.token, usuario: usuarioAtual, expira: Date.now() + 8*60*60*1000
+    }));
+    document.getElementById('login-senha').value = '';
+    btn.textContent = 'Entrar'; btn.disabled = false;
+    iniciarApp();
+  } catch (e) {
+    erro.textContent = 'Erro de conexão. Verifique a internet.';
+    erro.style.display = 'block';
+    btn.textContent = 'Entrar'; btn.disabled = false;
+  }
+}
+
+// ---- Retomar sessão se ainda válida (8h) ----
+function checarSessao() {
+  const s = localStorage.getItem('ecotrans_sessao');
+  if (!s) return;
+  try {
+    const obj = JSON.parse(s);
+    if (obj.expira && Date.now() < obj.expira) {
+      sessaoToken = obj.token; usuarioAtual = obj.usuario;
+      iniciarApp();
+    } else {
+      localStorage.removeItem('ecotrans_sessao');
+    }
+  } catch (e) { localStorage.removeItem('ecotrans_sessao'); }
+}
+
+document.getElementById('login-senha').addEventListener('keypress', e => {
+  if (e.key === 'Enter') fazerLogin();
+});
+
+function sair() {
+  usuarioAtual = null; moduloAtual = null; sessaoToken = null;
+  localStorage.removeItem('ecotrans_sessao');
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('tela-login').style.display = 'flex';
+  selUser.value = '';
+}
+
+// ---- Buscar dados de uma aba do Sheets ----
+async function buscarDados(aba) {
+  const resp = await fetch(API_URL, {
+    method: 'POST',
+    body: JSON.stringify({ acao: 'dados', token: sessaoToken, aba: aba })
+  });
+  return await resp.json();
+}
+
+// ---- Iniciar app após login ----
+function iniciarApp() {
+  document.getElementById('tela-login').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  document.getElementById('footer-nome').textContent = usuarioAtual.nome;
+  document.getElementById('footer-role').textContent = usuarioAtual.role;
+  document.getElementById('badge-perfil').textContent = usuarioAtual.role;
+  renderModulos();
+  atualizarSino();
+}
+
+
+// ---- Renderizar módulos (nível 1) conforme acesso do perfil ----
+function renderModulos() {
+  const permitidos = ACESSO[usuarioAtual.perfil] || [];
+  const nav = document.getElementById('nav-modulos');
+  nav.innerHTML = '';
+  const modsVisiveis = MODULOS.filter(m => permitidos.includes(m.id));
+  modsVisiveis.forEach((m, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'nav-mod' + (i === 0 ? ' ativo' : '');
+    btn.innerHTML = `<i class="ti ${m.icone}"></i> ${m.nome}`;
+    btn.onclick = () => selecionarModulo(m.id);
+    nav.appendChild(btn);
+  });
+  if (modsVisiveis.length) selecionarModulo(modsVisiveis[0].id);
+}
+
+// ---- Selecionar módulo → renderiza submódulos (nível 2) ----
+function selecionarModulo(modId) {
+  moduloAtual = modId;
+  const mod = MODULOS.find(m => m.id === modId);
+  document.querySelectorAll('.nav-mod').forEach(b => {
+    b.classList.toggle('ativo', b.textContent.trim() === mod.nome);
+  });
+  document.getElementById('subcoluna-titulo').textContent = mod.nome;
+  const navSub = document.getElementById('nav-submodulos');
+  navSub.innerHTML = '';
+  mod.subs.forEach((s, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'nav-sub' + (i === 0 ? ' ativo' : '');
+    btn.innerHTML = `<i class="ti ${s.icone}"></i> ${s.nome}`;
+    btn.onclick = () => selecionarSub(s.id, s.nome, btn);
+    navSub.appendChild(btn);
+  });
+  if (mod.subs.length) selecionarSub(mod.subs[0].id, mod.subs[0].nome, navSub.firstChild);
+}
+
+// ---- Selecionar submódulo → renderiza conteúdo ----
+function selecionarSub(subId, subNome, btnEl) {
+  document.querySelectorAll('.nav-sub').forEach(b => b.classList.remove('ativo'));
+  if (btnEl) btnEl.classList.add('ativo');
+  const mod = MODULOS.find(m => m.id === moduloAtual);
+  document.getElementById('pagina-titulo').textContent = subNome;
+  document.getElementById('pagina-subtitulo').textContent = mod.nome + ' › ' + subNome;
+  renderConteudo(subId, subNome);
+}
+
+// ---- Conteúdo: telas-chave já leem dados reais; resto é placeholder ----
+async function renderConteudo(subId, subNome) {
+  const area = document.getElementById('area-conteudo');
+
+  // Telas ricas (componentes próprios)
+  if (subId === 'cart-clientes') { renderClientes(area); return; }
+  if (subId === 'crm-funil')     { renderKanban(area); return; }
+  if (subId === 'cart-reajustes'){ renderReajustes(area); return; }
+  if (subId === 'cart-inadimplencia'){ renderInadimplencia(area); return; }
+  if (subId === 'cart-graficos'){ renderGraficos(area); return; }
+  if (subId === 'cart-faturamento'){ renderFaturamento(area); return; }
+  if (subId === 'cart-cancelados'){ renderCancelados(area); return; }
+
+  // Telas que ainda usam tabela genérica (serão estilizadas nas próximas etapas)
+  const TELAS_TABELA = {
+    'cart-contratos':   'Contratos',
+    'crm-leads':        'CRM_Leads',
+  };
+  const aba = TELAS_TABELA[subId];
+  if (!aba) {
+    area.innerHTML = `
+      <div class="placeholder">
+        <i class="ti ti-tools"></i>
+        <h2>${subNome}</h2>
+        <p>Esta tela faz parte da estrutura e será construída nas próximas etapas.</p>
+        <div class="onda">Estrutura pronta · aguardando construção</div>
+      </div>`;
+    return;
+  }
+  area.innerHTML = `<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando ${subNome}...</h2><p>Buscando dados da planilha.</p></div>`;
+  try {
+    const r = await buscarDados(aba);
+    if (!r.ok) { area.innerHTML = `<div class="sem-acesso">Não consegui ler os dados: ${r.erro}</div>`; return; }
+    renderTabela(r.colunas, r.linhas, area, subNome);
+  } catch (e) {
+    area.innerHTML = `<div class="sem-acesso">Erro de conexão ao buscar dados. Verifique a URL da API e a internet.</div>`;
+  }
+}
+
+// ---- Cache de dados carregados (pra busca e ficha) ----
+let cacheClientes = null, cacheFaturamento = null, cacheLeads = null;
+
+async function carregarClientes() {
+  if (cacheClientes) return cacheClientes;
+  const r = await buscarDados('Clientes');
+  cacheClientes = r.ok ? r.linhas : [];
+  // carregar faturamento pra cruzar
+  const rf = await buscarDados('Faturamento');
+  cacheFaturamento = {};
+  if (rf.ok) rf.linhas.forEach(l => { cacheFaturamento[String(l['CNPJ'])] = l['abr/26']; });
+  return cacheClientes;
+}
+
+function iniciais(nome) {
+  if (!nome) return '?';
+  const p = String(nome).trim().split(/\s+/);
+  return ((p[0]||'')[0]||'' ) + ((p[1]||'')[0]||'');
+}
+function fmtMoeda(v) {
+  if (v == null || v === '') return '—';
+  const n = Number(v);
+  if (isNaN(n)) return '—';
+  return 'R$ ' + n.toLocaleString('pt-BR', {minimumFractionDigits:0, maximumFractionDigits:0});
+}
+
+// Formata qualquer data (ISO, datetime, dd/mm) para DD/MM/AAAA
+function fmtDataBR(v) {
+  if (v == null || v === '') return '—';
+  const s = String(v).trim();
+  if (s.toLowerCase().includes('localiz') || s === '-') return s; // "Não localizei" etc
+  let d = null;
+  if (s.includes('T') || /^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const base = s.split('T')[0].split(' ')[0]; const p = base.split('-');
+    if (p.length===3) d = new Date(+p[0], +p[1]-1, +p[2]);
+  } else if (s.includes('/')) {
+    const p = s.split('/'); if (p.length===3){ let a=+p[2]; if(a<100)a+=2000; d=new Date(a,+p[1]-1,+p[0]); }
+  } else { const t = new Date(s); if (!isNaN(t)) d = t; }
+  if (!d || isNaN(d)) return s;
+  return ('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2)+'/'+d.getFullYear();
+}
+
+// ---- Tela de Clientes (cards + lista + busca + filtros) ----
+let modoVisao = 'cards';
+let filtroTipo = 'todos';
+let termoBusca = '';
+
+async function renderClientes(area) {
+  area.innerHTML = `<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando clientes...</h2></div>`;
+  const clientes = await carregarClientes();
+  if (!clientes.length) { area.innerHTML = `<div class="sem-acesso">Nenhum cliente encontrado.</div>`; return; }
+
+  area.innerHTML = `
+    <div class="barra-busca">
+      <i class="ti ti-search"></i>
+      <input type="text" id="busca-cli" placeholder="Buscar cliente por nome ou CNPJ..." value="${termoBusca}">
+      <span class="contagem" id="contagem-cli">${clientes.length} clientes</span>
+    </div>
+    <div class="filtros">
+      <span class="filtro-chip ${filtroTipo==='todos'?'ativo':''}" onclick="setFiltroTipo('todos')">Todos</span>
+      <span class="filtro-chip ${filtroTipo==='Contrato'?'ativo':''}" onclick="setFiltroTipo('Contrato')">Contrato</span>
+      <span class="filtro-chip ${filtroTipo==='Eventual'?'ativo':''}" onclick="setFiltroTipo('Eventual')">Eventual</span>
+      <select class="filtro-sel" id="filtro-consultor" onchange="aplicarFiltrosCli()">
+        <option value="">Todos consultores</option>
+        ${[...new Set(clientes.map(c=>c['CONSULTOR']).filter(Boolean))].sort().map(c=>`<option>${c}</option>`).join('')}
+      </select>
+      <div class="alternador">
+        <button class="${modoVisao==='cards'?'ativo':''}" onclick="setModo('cards')"><i class="ti ti-layout-grid"></i> Cards</button>
+        <button class="${modoVisao==='lista'?'ativo':''}" onclick="setModo('lista')"><i class="ti ti-list"></i> Lista</button>
+      </div>
+    </div>
+    <div id="resultado-cli"></div>`;
+
+  document.getElementById('busca-cli').addEventListener('input', e => { termoBusca = e.target.value; aplicarFiltrosCli(); });
+  aplicarFiltrosCli();
+}
+
+function setFiltroTipo(t) { filtroTipo = t; renderClientes(document.getElementById('area-conteudo')); }
+function setModo(m) { modoVisao = m; aplicarFiltrosCli(); document.querySelectorAll('.alternador button').forEach(b=>b.classList.toggle('ativo', b.textContent.trim().toLowerCase().includes(m))); }
+
+function aplicarFiltrosCli() {
+  const cons = (document.getElementById('filtro-consultor')||{}).value || '';
+  const termo = termoBusca.toLowerCase();
+  let filtrados = cacheClientes.filter(c => {
+    if (filtroTipo !== 'todos' && String(c['TIPO']||'') !== filtroTipo) return false;
+    if (cons && c['CONSULTOR'] !== cons) return false;
+    if (termo) {
+      const nome = String(c['CLIENTE']||'').toLowerCase();
+      const cnpj = String(c['CNPJ']||'').toLowerCase();
+      if (!nome.includes(termo) && !cnpj.includes(termo)) return false;
+    }
+    return true;
+  });
+  const cont = document.getElementById('contagem-cli');
+  if (cont) cont.textContent = filtrados.length + ' clientes';
+  const res = document.getElementById('resultado-cli');
+  if (modoVisao === 'cards') res.innerHTML = cardsClientes(filtrados);
+  else res.innerHTML = listaClientes(filtrados);
+}
+
+function cardsClientes(lista) {
+  if (!lista.length) return `<div class="sem-acesso">Nenhum cliente encontrado com esses filtros.</div>`;
+  let html = '<div class="grid-cards">';
+  lista.slice(0, 150).forEach(c => {
+    const cnpj = String(c['CNPJ']||'');
+    const fat = cacheFaturamento[cnpj];
+    const tipo = c['TIPO'] || '';
+    const grupo = c['GRUPO'] || '';
+    html += `<div class="card-cli ativo-status" onclick="abrirFicha('${cnpj.replace(/'/g,'')}')">
+      <div class="card-cli-topo">
+        <div class="card-cli-avatar">${iniciais(c['CLIENTE'])}</div>
+        <div style="min-width:0;">
+          <div class="card-cli-nome">${c['CLIENTE']||'—'}</div>
+          <div class="card-cli-cnpj">${cnpj||'—'}</div>
+        </div>
+      </div>
+      <div class="card-cli-tags">
+        ${tipo==='Eventual'?'<span class="tag tag-eventual">Eventual</span>':'<span class="tag tag-contrato">Contrato</span>'}
+        ${grupo?`<span class="tag tag-grupo">${grupo}</span>`:''}
+      </div>
+      <div class="card-cli-linha borda"><span>Faturamento abr</span><b>${fmtMoeda(fat)}</b></div>
+      <div class="card-cli-linha"><span>Consultor</span><span>${c['CONSULTOR']||'— a definir'}</span></div>
+    </div>`;
+  });
+  html += '</div>';
+  if (lista.length > 150) html += `<div style="margin-top:10px;color:var(--cinza-500);font-size:12px;text-align:center;">Mostrando 150 de ${lista.length}. Refine a busca pra ver outros.</div>`;
+  return html;
+}
+
+function listaClientes(lista) {
+  if (!lista.length) return `<div class="sem-acesso">Nenhum cliente encontrado.</div>`;
+  let html = '<div class="lista-cli">';
+  lista.slice(0, 300).forEach(c => {
+    const cnpj = String(c['CNPJ']||'');
+    html += `<div class="lista-cli-item" onclick="abrirFicha('${cnpj.replace(/'/g,'')}')">
+      <div><b style="color:var(--cinza-900);">${c['CLIENTE']||'—'}</b><br><span style="color:var(--cinza-500);font-size:12px;">${cnpj}</span></div>
+      <span style="color:var(--cinza-600);">${c['CONSULTOR']||'—'}</span>
+      <span style="color:var(--verde-escuro);font-weight:600;">${fmtMoeda(cacheFaturamento[cnpj])}</span>
+    </div>`;
+  });
+  html += '</div>';
+  return html;
+}
+
+// ---- Ficha do cliente (modal) ----
+let fichaAbaAtual = 'geral';
+function abrirFicha(cnpj) {
+  const c = cacheClientes.find(x => String(x['CNPJ']) === cnpj);
+  if (!c) return;
+  fichaAbaAtual = 'geral';
+  const fat = cacheFaturamento[cnpj];
+  const cont = document.getElementById('ficha-container');
+  cont.innerHTML = `
+    <div class="ficha-overlay" onclick="if(event.target===this)fecharFicha()">
+      <div class="ficha">
+        <div class="ficha-topo">
+          <button class="fechar" onclick="fecharFicha()"><i class="ti ti-x"></i></button>
+          <div class="nome">${c['CLIENTE']||'—'}</div>
+          <div class="cnpj">${c['CNPJ']||''}${c['GRUPO']?' · Grupo '+c['GRUPO']:''}</div>
+          <div class="ficha-tags">
+            <span>${c['TIPO']==='Eventual'?'Eventual':'Contrato'}</span>
+            <span>Ativo</span>
+            ${c['CONSULTOR']?`<span>${c['CONSULTOR']}</span>`:''}
+          </div>
+        </div>
+        <div class="ficha-abas">
+          <span class="ficha-aba ativa" onclick="trocarAbaFicha(this,'geral')">Geral</span>
+          <span class="ficha-aba" onclick="trocarAbaFicha(this,'contratos')">Contratos</span>
+          <span class="ficha-aba" onclick="trocarAbaFicha(this,'reajustes')">Reajustes</span>
+          <span class="ficha-aba" onclick="trocarAbaFicha(this,'faturamento')">Faturamento</span>
+        </div>
+        <div class="ficha-corpo" id="ficha-corpo">
+          <div class="ficha-kpis">
+            <div class="ficha-kpi"><div class="lbl">Faturamento abril</div><div class="val">${fmtMoeda(fat)}</div></div>
+            <div class="ficha-kpi"><div class="lbl">Tipo</div><div class="val" style="font-size:16px;">${c['TIPO']||'Contrato'}</div></div>
+          </div>
+          <table class="ficha-tab">
+            <tr><td><i class="ti ti-user" style="vertical-align:-2px;margin-right:6px;"></i>Contato</td><td>${c['CONTATO']||'—'}</td></tr>
+            <tr><td><i class="ti ti-mail" style="vertical-align:-2px;margin-right:6px;"></i>E-mail</td><td>${c['EMAIL']||'—'}</td></tr>
+            <tr><td><i class="ti ti-phone" style="vertical-align:-2px;margin-right:6px;"></i>Telefone</td><td>${c['TELEFONE']||'—'}</td></tr>
+            <tr><td><i class="ti ti-briefcase" style="vertical-align:-2px;margin-right:6px;"></i>Consultor</td><td>${c['CONSULTOR']||'— a definir'}</td></tr>
+            <tr><td><i class="ti ti-building" style="vertical-align:-2px;margin-right:6px;"></i>Assessoria</td><td>${c['ASSESSORIA']||'—'}</td></tr>
+          </table>
+          <div class="ficha-botoes">
+            <button class="ficha-btn-primario"><i class="ti ti-printer"></i> Imprimir ficha</button>
+            <button class="ficha-btn-secundario" onclick="abrirFormInadimplencia('${cnpj.replace(/'/g,'')}')"><i class="ti ti-alert-triangle"></i> Marcar inadimplente</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+function fecharFicha() { document.getElementById('ficha-container').innerHTML = ''; }
+function trocarAbaFicha(el, aba) {
+  document.querySelectorAll('.ficha-aba').forEach(a=>a.classList.remove('ativa'));
+  el.classList.add('ativa');
+  const corpo = document.getElementById('ficha-corpo');
+  if (aba === 'geral') { abrirFicha(cacheClientes.find(c=>document.querySelector('.ficha .nome').textContent===c['CLIENTE'])['CNPJ']); return; }
+  corpo.innerHTML = `<div style="text-align:center;color:var(--cinza-500);padding:30px;font-size:14px;"><i class="ti ti-tools" style="font-size:32px;"></i><br><br>A aba "${aba}" será preenchida na próxima etapa, puxando os dados das abas Contratos / Reajustes / Faturamento.</div>`;
+}
+
+// ---- Busca global (lupa do topo) ----
+async function abrirBuscaGlobal() {
+  await carregarClientes();
+  const cont = document.getElementById('ficha-container');
+  cont.innerHTML = `
+    <div class="ficha-overlay" onclick="if(event.target===this)fecharFicha()">
+      <div class="ficha" style="width:520px;">
+        <div class="ficha-topo">
+          <button class="fechar" onclick="fecharFicha()"><i class="ti ti-x"></i></button>
+          <div class="nome"><i class="ti ti-search"></i> Buscar cliente</div>
+          <div class="cnpj">Digite nome ou CNPJ</div>
+        </div>
+        <div style="padding:16px 24px;">
+          <input type="text" id="busca-global" placeholder="Ex: Hospital, 19.373..." autofocus
+            style="width:100%;padding:11px 14px;border:1.5px solid var(--cinza-300);border-radius:8px;font-size:14px;font-family:var(--fonte-corpo);">
+          <div id="busca-global-res" style="margin-top:12px;max-height:340px;overflow-y:auto;"></div>
+        </div>
+      </div>
+    </div>`;
+  const inp = document.getElementById('busca-global');
+  inp.focus();
+  inp.addEventListener('input', e => {
+    const t = e.target.value.toLowerCase();
+    const res = document.getElementById('busca-global-res');
+    if (t.length < 2) { res.innerHTML = '<div style="color:var(--cinza-500);font-size:13px;padding:8px;">Digite ao menos 2 letras...</div>'; return; }
+    const achados = cacheClientes.filter(c =>
+      String(c['CLIENTE']||'').toLowerCase().includes(t) || String(c['CNPJ']||'').toLowerCase().includes(t)
+    ).slice(0, 20);
+    if (!achados.length) { res.innerHTML = '<div style="color:var(--cinza-500);font-size:13px;padding:8px;">Nenhum cliente encontrado.</div>'; return; }
+    res.innerHTML = achados.map(c => `
+      <div onclick="abrirFicha('${String(c['CNPJ']).replace(/'/g,'')}')" style="padding:10px 12px;border-radius:8px;cursor:pointer;border-bottom:1px solid var(--cinza-100);" onmouseover="this.style.background='var(--verde-claro-bg)'" onmouseout="this.style.background=''">
+        <b style="font-size:13px;color:var(--cinza-900);">${c['CLIENTE']}</b><br>
+        <span style="font-size:12px;color:var(--cinza-500);">${c['CNPJ']||''} · ${c['CONSULTOR']||'sem consultor'}</span>
+      </div>`).join('');
+  });
+}
+
+// ---- Tabela genérica (pras abas ainda não estilizadas) ----
+function renderTabela(colunas, linhas, area, titulo) {
+  const mostrar = colunas.slice(0, 7);
+  let html = `<div style="margin-bottom:14px;color:var(--cinza-600);font-size:14px;"><strong>${linhas.length}</strong> registros em ${titulo}</div>
+    <div style="overflow-x:auto;background:white;border:1px solid var(--cinza-200);border-radius:12px;">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr style="background:var(--verde-claro-bg);">`;
+  mostrar.forEach(c => html += `<th style="padding:10px 12px;text-align:left;color:var(--verde-escuro);font-weight:600;white-space:nowrap;">${c}</th>`);
+  html += `</tr></thead><tbody>`;
+  linhas.slice(0, 100).forEach((l, i) => {
+    html += `<tr style="border-top:1px solid var(--cinza-200);${i%2?'background:var(--cinza-100);':''}">`;
+    mostrar.forEach(c => { let v = l[c]==null?'':l[c]; html += `<td style="padding:9px 12px;white-space:nowrap;max-width:240px;overflow:hidden;text-overflow:ellipsis;">${v}</td>`; });
+    html += `</tr>`;
+  });
+  html += `</tbody></table></div>`;
+  if (linhas.length > 100) html += `<div style="margin-top:10px;color:var(--cinza-500);font-size:12px;">Mostrando 100 de ${linhas.length}.</div>`;
+  area.innerHTML = html;
+}
+
+// ---- Kanban com filtros (datas, consultor, etapa, fonte) ----
+let kanbanLeads = null;
+async function renderKanban(area) {
+  area.innerHTML = `<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando funil...</h2></div>`;
+  if (!kanbanLeads) {
+    const r = await buscarDados('CRM_Leads');
+    kanbanLeads = r.ok ? r.linhas : [];
+  }
+  const consultores = [...new Set(kanbanLeads.map(l=>l['CONSULTOR']).filter(Boolean))].sort();
+  const fontes = [...new Set(kanbanLeads.map(l=>l['FONTE']).filter(Boolean))].sort();
+  area.innerHTML = `
+    <div id="kanban-numeros"></div>
+    <div class="barra-busca" style="margin-top:4px;">
+      <i class="ti ti-search"></i>
+      <input type="text" id="k-busca" placeholder="Buscar chamado por cliente..." oninput="aplicarKanban()">
+    </div>
+    <div class="filtros">
+      <select class="filtro-sel" id="k-consultor" onchange="aplicarKanban()"><option value="">Todos consultores</option>${consultores.map(c=>`<option>${c}</option>`).join('')}</select>
+      <select class="filtro-sel" id="k-fonte" onchange="aplicarKanban()"><option value="">Todas fontes</option>${fontes.map(f=>`<option>${f}</option>`).join('')}</select>
+      <select class="filtro-sel" id="k-etapa" onchange="aplicarKanban()"><option value="">Todas etapas</option><option>Prospecção</option><option>Em Contato</option><option>Proposta Enviada</option><option>Fechado</option><option>Declinado</option></select>
+      <span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--cinza-600);">
+        <i class="ti ti-calendar" style="font-size:15px;"></i> De
+        <input type="date" class="filtro-sel" id="k-data-ini" onchange="aplicarKanban()" style="padding:6px 8px;">
+        até
+        <input type="date" class="filtro-sel" id="k-data-fim" onchange="aplicarKanban()" style="padding:6px 8px;">
+        <button class="filtro-chip" onclick="limparDataKanban()" title="Limpar datas"><i class="ti ti-x"></i></button>
+      </span>
+    </div>
+    <div id="kanban-area"></div>`;
+  aplicarKanban();
+}
+
+function limparDataKanban() {
+  const a=document.getElementById('k-data-ini'), b=document.getElementById('k-data-fim');
+  if(a) a.value=''; if(b) b.value=''; aplicarKanban();
+}
+
+// etapas principais (entram nos números) + Prospecção à parte
+const ETAPAS_CFG = [
+  { nome: 'Em Contato',       cor: '#185FA5', bg: '#E6F1FB' },
+  { nome: 'Proposta Enviada', cor: '#BA7517', bg: '#FAEEDA' },
+  { nome: 'Fechado',          cor: '#3B6D11', bg: '#EAF3DE' },
+  { nome: 'Declinado',        cor: '#A32D2D', bg: '#FCEBEB' },
+];
+const COR_PROSPECCAO = { cor: '#5F5E5A', bg: '#F1EFE8' };
+
+function dataLeadDate(dataStr) {
+  if (!dataStr) return null;
+  const p = String(dataStr).split('/');
+  if (p.length !== 3) return null;
+  let ano = +p[2]; if (ano < 100) ano += 2000;
+  return new Date(ano, +p[1]-1, +p[0]);
+}
+
+function aplicarKanban() {
+  const cons = (document.getElementById('k-consultor')||{}).value||'';
+  const fonte = (document.getElementById('k-fonte')||{}).value||'';
+  const etapa = (document.getElementById('k-etapa')||{}).value||'';
+  const dIni = (document.getElementById('k-data-ini')||{}).value||'';
+  const dFim = (document.getElementById('k-data-fim')||{}).value||'';
+  const busca = ((document.getElementById('k-busca')||{}).value||'').toLowerCase();
+
+  // mapear "Indicação/Prospecção" -> "Prospecção" (coluna à parte)
+  function etapaDe(l) { return l['ETAPA']==='Indicação/Prospecção' ? 'Prospecção' : l['ETAPA']; }
+
+  let leads = kanbanLeads.filter(l => l['ETAPA'] !== 'Cobertura');
+  const cobertura = kanbanLeads.filter(l => l['ETAPA'] === 'Cobertura').length;
+  if (cons) leads = leads.filter(l => l['CONSULTOR']===cons);
+  if (fonte) leads = leads.filter(l => l['FONTE']===fonte);
+  if (etapa) leads = leads.filter(l => etapaDe(l)===etapa);
+  if (busca) leads = leads.filter(l => String(l['CLIENTE']||'').toLowerCase().includes(busca));
+  if (dIni || dFim) {
+    const ini = dIni ? new Date(dIni) : null;
+    const fim = dFim ? new Date(dFim) : null;
+    leads = leads.filter(l => {
+      const d = dataLeadDate(l['DATA_CONTATO']);
+      if (!d) return false;
+      if (ini && d < ini) return false;
+      if (fim && d > fim) return false;
+      return true;
+    });
+  }
+
+  // ---- Cards de números no topo (só etapas principais; Prospecção à parte) ----
+  const contagem = {};
+  ETAPAS_CFG.forEach(e => contagem[e.nome] = 0);
+  let prospec = 0;
+  leads.forEach(l => {
+    const et = etapaDe(l);
+    if (et === 'Prospecção') prospec++;
+    else if (contagem[et] !== undefined) contagem[et]++;
+  });
+  let numHtml = '<div class="kpi-funil">';
+  ETAPAS_CFG.forEach(e => {
+    numHtml += `<div class="kpi-card" style="border-top:3px solid ${e.cor};">
+      <div class="kpi-num" style="color:${e.cor};">${contagem[e.nome]}</div>
+      <div class="kpi-lbl">${e.nome}</div></div>`;
+  });
+  numHtml += `<div class="kpi-card" style="border-top:3px solid ${COR_PROSPECCAO.cor};">
+    <div class="kpi-num" style="color:${COR_PROSPECCAO.cor};">${prospec}</div>
+    <div class="kpi-lbl">Prospecção</div></div>`;
+  numHtml += '</div>';
+  document.getElementById('kanban-numeros').innerHTML = numHtml;
+
+  // ---- Colunas do Kanban: principais coloridas + Prospecção à parte ----
+  const COLS = ETAPAS_CFG.concat([{ nome:'Prospecção', cor:COR_PROSPECCAO.cor, bg:COR_PROSPECCAO.bg, aparte:true }]);
+  let html = `<div style="margin:8px 0 14px;color:var(--cinza-600);font-size:13px;">${leads.length} leads · ${cobertura} coberturas não entram nos números · <i class="ti ti-hand-finger"></i> arraste os cards para mudar a etapa</div><div class="kanban">`;
+  COLS.forEach(col => {
+    const doEtapa = leads.filter(l => etapaDe(l)===col.nome);
+    html += `<div class="kanban-col" style="background:${col.bg};" ondragover="event.preventDefault();this.style.outline='2px dashed ${col.cor}'" ondragleave="this.style.outline='none'" ondrop="soltarCard(event,'${col.nome}')">
+      <div class="kanban-col-titulo" style="color:${col.cor};">${col.nome}${col.aparte?' <span style="font-size:10px;font-weight:400;">(fora dos nº)</span>':''}<span class="qtd">${doEtapa.length}</span></div>`;
+    doEtapa.slice(0, 40).forEach(l => {
+      html += `<div class="kanban-card" draggable="true" ondragstart="pegarCard(event,'${String(l['ID_LEAD']||'').replace(/'/g,'')}')" style="border-left-color:${col.cor};">
+        <div class="cli">${l['CLIENTE']||'—'}</div>
+        <div class="meta">${l['CONSULTOR']||'—'}${l['FONTE']?' · '+l['FONTE']:''}</div>
+      </div>`;
+    });
+    if (doEtapa.length > 40) html += `<div style="font-size:11px;color:var(--cinza-500);text-align:center;padding:4px;">+${doEtapa.length-40} mais</div>`;
+    html += `</div>`;
+  });
+  html += `</div>`;
+  document.getElementById('kanban-area').innerHTML = html;
+}
+
+// ---- Drag and drop do Kanban ----
+let cardArrastado = null;
+function pegarCard(ev, idLead) {
+  cardArrastado = idLead;
+  ev.dataTransfer.effectAllowed = 'move';
+}
+async function soltarCard(ev, novaEtapaCol) {
+  ev.preventDefault();
+  ev.currentTarget.style.outline = 'none';
+  if (!cardArrastado) return;
+  const idLead = cardArrastado; cardArrastado = null;
+
+  // mapear nome de coluna -> etapa real no Sheets (Prospecção -> Indicação/Prospecção)
+  const novaEtapa = novaEtapaCol === 'Prospecção' ? 'Indicação/Prospecção' : novaEtapaCol;
+  const lead = kanbanLeads.find(l => String(l['ID_LEAD'])===idLead);
+  if (!lead) return;
+  if (etapaDeGlobal(lead) === novaEtapaCol) return; // não mudou
+
+  // otimista: move já na tela
+  const etapaAntiga = lead['ETAPA'];
+  lead['ETAPA'] = novaEtapa;
+  aplicarKanban();
+
+  try {
+    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
+      acao:'moverLead', token: sessaoToken,
+      dados: { idLead, novaEtapa, nomeUsuario: usuarioAtual.nome }
+    })});
+    const r = await resp.json();
+    if (!r.ok) {
+      // reverte e avisa
+      lead['ETAPA'] = etapaAntiga;
+      aplicarKanban();
+      alert(r.erro || 'Não foi possível mover o lead.');
+    }
+  } catch(e) {
+    lead['ETAPA'] = etapaAntiga; aplicarKanban();
+    alert('Erro de conexão ao mover o lead.');
+  }
+}
+function etapaDeGlobal(l) { return l['ETAPA']==='Indicação/Prospecção' ? 'Prospecção' : l['ETAPA']; }
+
+// ============================================================
+// REAJUSTES — cards estilo RGG, filtro de data, detalhe ao clicar
+// ============================================================
+let cacheReajustes = null;
+let modoReaj = 'cards';
+
+function parseMoedaReaj(v) {
+  if (v == null || v === '') return null;
+  if (typeof v === 'number') return v;
+  // pega o último número da string (casos "R$ 850,00/Ton R$221,40")
+  const matches = String(v).match(/[\d.,]+/g);
+  if (!matches) return null;
+  let s = matches[matches.length-1].replace(/\./g,'').replace(',','.');
+  const n = parseFloat(s);
+  return isNaN(n) ? null : n;
+}
+
+function parseDataReaj(v) {
+  if (!v) return null;
+  if (v instanceof Date) return isNaN(v) ? null : v;
+  const s = String(v).trim();
+  // ISO: 2025-06-01T07:00:00.000Z ou 2025-06-01
+  if (s.includes('T') || /^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const base = s.split('T')[0].split(' ')[0];
+    const p = base.split('-');
+    if (p.length === 3) return new Date(+p[0], +p[1]-1, +p[2]);
+  }
+  // dd/mm/aaaa
+  if (s.includes('/')) {
+    const p = s.split('/');
+    if (p.length === 3) { let a=+p[2]; if(a<100)a+=2000; return new Date(a, +p[1]-1, +p[0]); }
+  }
+  const d = new Date(s);
+  return isNaN(d) ? null : d;
+}
+
+function proximoReajuste(dataUltimo) {
+  const d = parseDataReaj(dataUltimo);
+  if (!d) return null;
+  return new Date(d.getFullYear()+1, d.getMonth(), d.getDate()); // +12 meses (anual)
+}
+
+function classifReaj(prox) {
+  if (!prox) return { cls:'ok', pill:'pill-ok', txt:'Sem data', dias:99999 };
+  const dias = Math.round((prox - Date.now())/(1000*60*60*24));
+  if (dias < 0) return { cls:'venc', pill:'pill-venc', txt:'Vencido', dias };
+  if (dias <= 30) return { cls:'r30', pill:'pill-r30', txt:`${dias}d`, dias };
+  if (dias <= 60) return { cls:'r60', pill:'pill-r60', txt:`${dias}d`, dias };
+  return { cls:'ok', pill:'pill-ok', txt:`${dias}d`, dias };
+}
+
+async function renderReajustes(area) {
+  area.innerHTML = `<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando reajustes...</h2></div>`;
+  if (!cacheReajustes) {
+    const r = await buscarDados('Reajustes');
+    cacheReajustes = r.ok ? r.linhas : [];
+  }
+  area.innerHTML = `
+    <div class="barra-busca">
+      <i class="ti ti-search"></i>
+      <input type="text" id="reaj-busca" placeholder="Buscar cliente..." oninput="aplicarReaj()">
+      <span class="contagem" id="reaj-contagem">${cacheReajustes.length} reajustes</span>
+    </div>
+    <div class="filtros">
+      <span class="filtro-chip ativo" id="rf-todos" onclick="setFiltroReaj('todos',this)">Todos</span>
+      <span class="filtro-chip" id="rf-venc" onclick="setFiltroReaj('venc',this)">Vencidos</span>
+      <span class="filtro-chip" id="rf-30" onclick="setFiltroReaj('30',this)">Próx. 30 dias</span>
+      <span class="filtro-chip" id="rf-60" onclick="setFiltroReaj('60',this)">Próx. 60 dias</span>
+      <span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--cinza-600);">
+        <i class="ti ti-calendar" style="font-size:15px;"></i>
+        <input type="date" class="filtro-sel" id="reaj-ini" onchange="aplicarReaj()" style="padding:6px 8px;">
+        até
+        <input type="date" class="filtro-sel" id="reaj-fim" onchange="aplicarReaj()" style="padding:6px 8px;">
+      </span>
+      <div class="alternador">
+        <button class="${modoReaj==='cards'?'ativo':''}" onclick="setModoReaj('cards')"><i class="ti ti-layout-grid"></i> Cards</button>
+        <button class="${modoReaj==='lista'?'ativo':''}" onclick="setModoReaj('lista')"><i class="ti ti-list"></i> Lista</button>
+      </div>
+    </div>
+    <div id="reaj-resultado"></div>`;
+  aplicarReaj();
+}
+
+let filtroReaj = 'todos';
+function setFiltroReaj(f, el) {
+  filtroReaj = f;
+  document.querySelectorAll('[id^="rf-"]').forEach(c=>c.classList.remove('ativo'));
+  if (el) el.classList.add('ativo');
+  aplicarReaj();
+}
+function setModoReaj(m) { modoReaj = m; document.querySelectorAll('.alternador button').forEach(b=>b.classList.toggle('ativo', b.textContent.trim().toLowerCase().includes(m))); aplicarReaj(); }
+
+function aplicarReaj() {
+  const busca = ((document.getElementById('reaj-busca')||{}).value||'').toLowerCase();
+  const dIni = (document.getElementById('reaj-ini')||{}).value||'';
+  const dFim = (document.getElementById('reaj-fim')||{}).value||'';
+
+  let lista = cacheReajustes.map((r, idx) => {
+    const prox = proximoReajuste(r['DATA ÚLTIMO REAJUSTE '] || r['DATA ÚLTIMO REAJUSTE']);
+    return { ...r, _idx: idx, _prox: prox, _cls: classifReaj(prox) };
+  });
+
+  if (busca) lista = lista.filter(r => String(r['CLIENTE']||'').toLowerCase().includes(busca));
+  if (filtroReaj==='venc') lista = lista.filter(r => r._cls.dias < 0);
+  else if (filtroReaj==='30') lista = lista.filter(r => r._cls.dias >= 0 && r._cls.dias <= 30);
+  else if (filtroReaj==='60') lista = lista.filter(r => r._cls.dias >= 0 && r._cls.dias <= 60);
+  if (dIni || dFim) {
+    const ini = dIni?new Date(dIni):null, fim = dFim?new Date(dFim):null;
+    lista = lista.filter(r => r._prox && (!ini||r._prox>=ini) && (!fim||r._prox<=fim));
+  }
+  // ordenar por proximidade
+  lista.sort((a,b)=>a._cls.dias-b._cls.dias);
+
+  const cont = document.getElementById('reaj-contagem');
+  if (cont) cont.textContent = lista.length + ' reajustes';
+  const res = document.getElementById('reaj-resultado');
+  res.innerHTML = modoReaj==='cards' ? cardsReaj(lista) : listaReaj(lista);
+}
+
+function fmtData(d) {
+  if (!d) return '—';
+  return ('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2)+'/'+d.getFullYear();
+}
+function fmtDataLonga(d) {
+  if (!d) return '—';
+  return ('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2)+'/'+d.getFullYear();
+}
+
+function cardsReaj(lista) {
+  if (!lista.length) return `<div class="sem-acesso">Nenhum reajuste com esses filtros.</div>`;
+  let html = '<div class="grid-cards">';
+  lista.slice(0,150).forEach(r => {
+    const ant = parseMoedaReaj(r['PREÇO ANTERIOR']);
+    const novo = parseMoedaReaj(r['VALOR REAJUSTADO']);
+    const aliq = r['ALIQUOTA'];
+    html += `<div class="reaj-card ${r._cls.cls}" onclick="detalheReaj(${r._idx})">
+      <div class="reaj-topo">
+        <div style="min-width:0;">
+          <div class="reaj-nome">${r['CLIENTE']||'—'}</div>
+          <div class="reaj-cnpj">${r['TP DE SERVIÇO']||''}</div>
+        </div>
+        <span class="reaj-pill ${r._cls.pill}">${r._cls.txt}</span>
+      </div>
+      <div class="reaj-linhas">
+        <div><span>Próx. reajuste</span><b>${fmtData(r._prox)}</b></div>
+        <div><span>Índice</span><b>${r['ÍNDICE']||'—'}</b></div>
+        <div><span>Reajuste</span><b>${aliq!=null?(Math.round(aliq*100))+'%':'—'}</b></div>
+      </div>
+    </div>`;
+  });
+  html += '</div>';
+  return html;
+}
+
+function listaReaj(lista) {
+  if (!lista.length) return `<div class="sem-acesso">Nenhum reajuste.</div>`;
+  let html = '<div class="lista-cli">';
+  lista.slice(0,300).forEach(r => {
+    html += `<div class="lista-cli-item" onclick="detalheReaj(${r._idx})">
+      <div><b style="color:var(--cinza-900);">${r['CLIENTE']||'—'}</b><br><span style="color:var(--cinza-500);font-size:12px;">${r['TP DE SERVIÇO']||''}</span></div>
+      <span class="reaj-pill ${r._cls.pill}">${r._cls.txt}</span>
+      <span style="color:var(--cinza-700);">${fmtData(r._prox)}</span>
+    </div>`;
+  });
+  html += '</div>';
+  return html;
+}
+
+function detalheReaj(idx) {
+  const r = cacheReajustes[idx];
+  const prox = proximoReajuste(r['DATA ÚLTIMO REAJUSTE '] || r['DATA ÚLTIMO REAJUSTE']);
+  const ant = parseMoedaReaj(r['PREÇO ANTERIOR']);
+  const novo = parseMoedaReaj(r['VALOR REAJUSTADO']);
+  const dif = parseMoedaReaj(r['DIFERENÇA R$']);
+  const aliq = r['ALIQUOTA'];
+  const cont = document.getElementById('ficha-container');
+  cont.innerHTML = `
+    <div class="ficha-overlay" onclick="if(event.target===this)fecharFicha()">
+      <div class="ficha">
+        <div class="ficha-topo">
+          <button class="fechar" onclick="fecharFicha()"><i class="ti ti-x"></i></button>
+          <div class="nome">${r['CLIENTE']||'—'}</div>
+          <div class="cnpj">${r['CNPJ']||''} · ${r['TP DE SERVIÇO']||''}</div>
+          <div class="ficha-tags">
+            <span>Próx: ${fmtData(prox)}</span>
+            <span>Índice ${r['ÍNDICE']||'—'}</span>
+          </div>
+        </div>
+        <div class="ficha-corpo">
+          <div class="ficha-kpis">
+            <div class="ficha-kpi"><div class="lbl">Preço anterior</div><div class="val">${ant!=null?fmtMoeda(ant):'—'}</div></div>
+            <div class="ficha-kpi"><div class="lbl">Valor reajustado</div><div class="val">${novo!=null?fmtMoeda(novo):'—'}</div></div>
+          </div>
+          <table class="ficha-tab">
+            <tr><td>% de reajuste aplicado</td><td>${aliq!=null?(Math.round(aliq*100))+'%':'—'}</td></tr>
+            <tr><td>Diferença (R$)</td><td>${dif!=null?fmtMoeda(dif):'—'}</td></tr>
+            <tr><td>Índice de referência</td><td>${r['ÍNDICE']||'—'}</td></tr>
+            <tr><td>Mínima contratual</td><td>${r['MÍN. CONTRATUAL']||'—'}</td></tr>
+            <tr><td>Mês-base</td><td>${r['MÊS']||'—'}</td></tr>
+            <tr><td>Último reajuste</td><td>${fmtDataLonga(parseDataReaj(r['DATA ÚLTIMO REAJUSTE ']))}</td></tr>
+            <tr><td>Próximo reajuste</td><td><b>${fmtDataLonga(prox)}</b></td></tr>
+          </table>
+          <div id="reaj-acao" style="margin-top:18px;">
+            <div class="ficha-botoes">
+              <button class="ficha-btn-primario" onclick="abrirFormReajuste(${idx})"><i class="ti ti-trending-up"></i> Reajustar</button>
+              <button class="ficha-btn-secundario" onclick="verHistoricoReaj('${(r['CNPJ']||'').replace(/'/g,'')}','${(r['TP DE SERVIÇO']||'').replace(/'/g,'')}')"><i class="ti ti-history"></i> Histórico</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ---- Form de reajuste: digita %, calcula ao vivo, confirma ----
+function abrirFormReajuste(idx) {
+  const r = cacheReajustes[idx];
+  const valorBase = parseMoedaReaj(r['VALOR REAJUSTADO']) || parseMoedaReaj(r['PREÇO ANTERIOR']) || 0;
+  const area = document.getElementById('reaj-acao');
+  area.innerHTML = `
+    <div style="background:var(--verde-claro-bg);border-radius:10px;padding:16px;">
+      <div style="font-size:13px;font-weight:600;color:var(--verde-escuro);margin-bottom:10px;">Aplicar reajuste</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <label style="font-size:13px;color:var(--cinza-700);">% de reajuste:</label>
+        <input type="number" id="reaj-pct" step="0.01" placeholder="ex: 4.5" oninput="calcReaj(${valorBase})"
+          style="width:90px;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;font-size:14px;">
+        <span style="font-size:13px;color:var(--cinza-600);">%</span>
+      </div>
+      <div style="display:flex;gap:20px;font-size:13px;margin-bottom:14px;">
+        <div><span style="color:var(--cinza-600);">Valor atual:</span><br><b style="font-size:16px;">${fmtMoeda(valorBase)}</b></div>
+        <div style="align-self:center;color:var(--cinza-400);"><i class="ti ti-arrow-right"></i></div>
+        <div><span style="color:var(--cinza-600);">Novo valor:</span><br><b id="reaj-novo" style="font-size:16px;color:var(--verde-escuro);">—</b></div>
+      </div>
+      <div class="ficha-botoes">
+        <button class="ficha-btn-primario" onclick="confirmarReajuste(${idx}, ${valorBase})"><i class="ti ti-check"></i> Confirmar reajuste</button>
+        <button class="ficha-btn-secundario" onclick="detalheReaj(${idx})">Cancelar</button>
+      </div>
+      <div style="font-size:11px;color:var(--cinza-500);margin-top:10px;">O valor atual vai para o histórico (Reajuste ${new Date().getFullYear()}) e o novo passa a valer.</div>
+    </div>`;
+}
+
+function calcReaj(base) {
+  const pct = parseFloat(document.getElementById('reaj-pct').value);
+  const out = document.getElementById('reaj-novo');
+  if (isNaN(pct)) { out.textContent = '—'; return; }
+  out.textContent = fmtMoeda(Math.round(base * (1 + pct/100) * 100)/100);
+}
+
+async function confirmarReajuste(idx, base) {
+  const r = cacheReajustes[idx];
+  const pct = parseFloat(document.getElementById('reaj-pct').value);
+  if (isNaN(pct)) { alert('Digite o % de reajuste.'); return; }
+  const area = document.getElementById('reaj-acao');
+  area.innerHTML = `<div style="text-align:center;padding:16px;color:var(--cinza-500);">Aplicando reajuste...</div>`;
+  try {
+    const resp = await fetch(API_URL, {
+      method: 'POST',
+      body: JSON.stringify({ acao: 'reajustar', token: sessaoToken,
+        dados: { cnpj: r['CNPJ'], servico: r['TP DE SERVIÇO'], percentual: pct } })
+    });
+    const res = await resp.json();
+    if (!res.ok) { area.innerHTML = `<div class="sem-acesso">${res.erro}</div>`; return; }
+    // atualizar cache local
+    cacheReajustes[idx]['PREÇO ANTERIOR'] = res.valorAntigo;
+    cacheReajustes[idx]['VALOR REAJUSTADO'] = res.valorNovo;
+    cacheReajustes[idx]['ALIQUOTA'] = pct/100;
+    cacheReajustes[idx]['DATA ÚLTIMO REAJUSTE '] = new Date().toISOString();
+    area.innerHTML = `<div style="background:var(--verde-ok-bg);border:1px solid var(--verde-ok-borda);border-radius:10px;padding:16px;color:var(--verde-ok);font-size:14px;">
+      <i class="ti ti-circle-check"></i> Reajuste aplicado! Valor antigo (${fmtMoeda(res.valorAntigo)}) salvo no histórico. Novo valor: <b>${fmtMoeda(res.valorNovo)}</b>.</div>`;
+    setTimeout(()=>{ fecharFicha(); if(document.getElementById('reaj-resultado')) aplicarReaj(); }, 2000);
+  } catch (e) {
+    area.innerHTML = `<div class="sem-acesso">Erro de conexão ao aplicar reajuste.</div>`;
+  }
+}
+
+async function verHistoricoReaj(cnpj, servico) {
+  const cont = document.getElementById('ficha-container');
+  cont.innerHTML = `<div class="ficha-overlay"><div class="ficha"><div class="ficha-corpo" style="text-align:center;padding:40px;color:var(--cinza-500);">Carregando histórico...</div></div></div>`;
+  const r = await buscarDados('Historico_Reajustes');
+  const hist = (r.ok ? r.linhas : []).filter(h => String(h['CNPJ'])===cnpj && String(h['TP_SERVICO'])===servico);
+  let linhas = hist.length
+    ? hist.map(h => `<tr><td>${h['ANO']||''}</td><td>${fmtMoeda(h['VALOR_ANTIGO'])}</td><td>${h['PERCENTUAL']||''}</td><td>${fmtMoeda(h['VALOR_NOVO'])}</td></tr>`).join('')
+    : `<tr><td colspan="4" style="text-align:center;color:var(--cinza-500);padding:20px;">Nenhum reajuste registrado ainda. O histórico começa a partir do primeiro reajuste feito pelo sistema.</td></tr>`;
+  cont.innerHTML = `
+    <div class="ficha-overlay" onclick="if(event.target===this)fecharFicha()">
+      <div class="ficha">
+        <div class="ficha-topo">
+          <button class="fechar" onclick="fecharFicha()"><i class="ti ti-x"></i></button>
+          <div class="nome">Histórico de reajustes</div>
+          <div class="cnpj">${servico}</div>
+        </div>
+        <div class="ficha-corpo">
+          <table class="ficha-tab"><thead><tr style="color:var(--cinza-600);font-weight:600;"><td>Ano</td><td>Valor antigo</td><td>%</td><td>Valor novo</td></tr></thead>
+          <tbody>${linhas}</tbody></table>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ============================================================
+// INADIMPLÊNCIA
+// ============================================================
+let cacheInad = null;
+
+function abrirFormInadimplencia(cnpj) {
+  const c = cacheClientes.find(x => String(x['CNPJ']) === cnpj);
+  if (!c) return;
+  const cont = document.getElementById('ficha-container');
+  cont.innerHTML = `
+    <div class="ficha-overlay" onclick="if(event.target===this)fecharFicha()">
+      <div class="ficha" style="width:480px;">
+        <div class="ficha-topo" style="background:var(--vermelho);">
+          <button class="fechar" onclick="fecharFicha()"><i class="ti ti-x"></i></button>
+          <div class="nome"><i class="ti ti-alert-triangle"></i> Marcar inadimplente</div>
+          <div class="cnpj">${c['CLIENTE']} · ${c['CNPJ']}</div>
+        </div>
+        <div class="ficha-corpo">
+          <div style="margin-bottom:14px;">
+            <label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Valor em aberto (R$)</label>
+            <input type="number" id="inad-valor" step="0.01" placeholder="ex: 4500.00" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;">
+          </div>
+          <div style="margin-bottom:14px;">
+            <label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Dias de atraso</label>
+            <input type="number" id="inad-dias" placeholder="ex: 45" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;">
+          </div>
+          <div style="margin-bottom:16px;">
+            <label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Observação</label>
+            <textarea id="inad-obs" rows="2" placeholder="ex: cliente não respondeu cobranças" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;font-family:var(--fonte-corpo);"></textarea>
+          </div>
+          <div class="ficha-botoes">
+            <button class="ficha-btn-primario" style="background:var(--vermelho);" onclick="salvarInadimplencia('${cnpj.replace(/'/g,'')}','${(c['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-check"></i> Confirmar</button>
+            <button class="ficha-btn-secundario" onclick="abrirFicha('${cnpj.replace(/'/g,'')}')">Cancelar</button>
+          </div>
+          <div id="inad-msg"></div>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function salvarInadimplencia(cnpj, cliente) {
+  const valor = document.getElementById('inad-valor').value;
+  const dias = document.getElementById('inad-dias').value;
+  const obs = document.getElementById('inad-obs').value;
+  if (!valor || !dias) { document.getElementById('inad-msg').innerHTML = '<div class="sem-acesso" style="margin-top:12px;">Preencha valor e dias.</div>'; return; }
+  document.getElementById('inad-msg').innerHTML = '<div style="text-align:center;padding:12px;color:var(--cinza-500);">Salvando...</div>';
+  try {
+    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
+      acao:'inadimplencia', token: sessaoToken,
+      dados: { cnpj, cliente, valor, dias, obs }
+    })});
+    const r = await resp.json();
+    if (!r.ok) { document.getElementById('inad-msg').innerHTML = `<div class="sem-acesso" style="margin-top:12px;">${r.erro}</div>`; return; }
+    cacheInad = null; // recarregar depois
+    document.getElementById('inad-msg').innerHTML = `<div style="background:var(--verde-ok-bg);border:1px solid var(--verde-ok-borda);border-radius:8px;padding:12px;margin-top:12px;color:var(--verde-ok);font-size:13px;"><i class="ti ti-circle-check"></i> Registrado! Roberto e Andrea serão avisados no painel. A Joyce pode disparar o e-mail pela aba Inadimplência.</div>`;
+    atualizarSino();
+    setTimeout(fecharFicha, 2200);
+  } catch(e) { document.getElementById('inad-msg').innerHTML = '<div class="sem-acesso" style="margin-top:12px;">Erro de conexão.</div>'; }
+}
+
+async function carregarInad() {
+  const r = await buscarDados('Inadimplencia');
+  cacheInad = r.ok ? r.linhas.filter(l => String(l['STATUS'])==='Inadimplente') : [];
+  return cacheInad;
+}
+
+async function renderInadimplencia(area) {
+  area.innerHTML = `<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando inadimplência...</h2></div>`;
+  const lista = await carregarInad();
+  if (!lista.length) {
+    area.innerHTML = `<div class="placeholder"><i class="ti ti-circle-check" style="color:var(--verde-ok);"></i><h2>Nenhum inadimplente</h2><p>Quando um cliente for marcado como inadimplente (pela ficha), ele aparece aqui.</p></div>`;
+    return;
+  }
+  const total = lista.reduce((s,l)=>s+(parseFloat(l['VALOR_ABERTO'])||0),0);
+  const podeEnviar = usuarioAtual.perfil==='financeiro' || usuarioAtual.perfil==='admin';
+  let html = `
+    <div class="kpi-funil" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));">
+      <div class="kpi-card" style="border-top:3px solid var(--vermelho);"><div class="kpi-num" style="color:var(--vermelho);">${lista.length}</div><div class="kpi-lbl">Inadimplentes</div></div>
+      <div class="kpi-card" style="border-top:3px solid var(--vermelho);"><div class="kpi-num" style="color:var(--vermelho);font-size:22px;">${fmtMoeda(total)}</div><div class="kpi-lbl">Total em aberto</div></div>
+      <div class="kpi-card" style="border-top:3px solid var(--laranja);"><div class="kpi-num" style="color:var(--laranja);">${lista.filter(l=>l['AGING']==='90+').length}</div><div class="kpi-lbl">Mais de 90 dias</div></div>
+    </div>
+    <div class="grid-cards">`;
+  lista.forEach(l => {
+    const ag = String(l['AGING']||'');
+    const agCls = ag==='0-30'?'a30':ag==='31-60'?'a30':ag==='61-90'?'a60':'a90';
+    const agBadge = ag==='0-30'?'ag-30':ag==='31-60'?'ag-30':ag==='61-90'?'ag-60':'ag-90';
+    html += `<div class="inad-card ${agCls}">
+      <div class="reaj-topo">
+        <div style="min-width:0;"><div class="reaj-nome">${l['CLIENTE']||'—'}</div><div class="reaj-cnpj">${l['CNPJ']||''}</div></div>
+        <span class="aging-badge ${agBadge}">${ag} dias</span>
+      </div>
+      <div class="reaj-linhas">
+        <div><span>Valor aberto</span><b>${fmtMoeda(l['VALOR_ABERTO'])}</b></div>
+        <div><span>Atraso</span><b>${l['DIAS_ATRASO']||'—'}d</b></div>
+      </div>
+      ${l['OBS']?`<div style="font-size:12px;color:var(--cinza-600);margin-top:8px;font-style:italic;">"${l['OBS']}"</div>`:''}
+      <div style="margin-top:12px;display:flex;gap:8px;align-items:center;">
+        ${podeEnviar
+          ? `<button class="ficha-btn-primario" style="flex:1;padding:8px;border:none;border-radius:8px;font-size:12px;cursor:pointer;" onclick="enviarEmailInad('${String(l['CNPJ']).replace(/'/g,'')}','${(l['CLIENTE']||'').replace(/'/g,'')}','${l['VALOR_ABERTO']}','${l['DIAS_ATRASO']}','${(l['OBS']||'').replace(/'/g,'')}')"><i class="ti ti-mail"></i> Enviar e-mail</button>`
+          : ''}
+        ${l['EMAIL_ENVIADO'] && String(l['EMAIL_ENVIADO']).startsWith('Sim')?`<span style="font-size:11px;color:var(--verde-ok);"><i class="ti ti-check"></i> ${l['EMAIL_ENVIADO']}</span>`:''}
+      </div>
+    </div>`;
+  });
+  html += '</div>';
+  area.innerHTML = html;
+}
+
+async function enviarEmailInad(cnpj, cliente, valor, dias, obs) {
+  if (!confirm('Enviar e-mail de inadimplência de "'+cliente+'" para Roberto e Andrea?')) return;
+  try {
+    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
+      acao:'enviarEmail', token: sessaoToken,
+      dados: { cnpj, cliente, valor: fmtMoeda(valor), dias, obs }
+    })});
+    const r = await resp.json();
+    alert(r.ok ? 'E-mail enviado para Roberto e Andrea!' : ('Erro: '+r.erro));
+    if (r.ok) { cacheInad = null; renderInadimplencia(document.getElementById('area-conteudo')); }
+  } catch(e) { alert('Erro de conexão ao enviar e-mail.'); }
+}
+
+// ---- Sininho de avisos (Roberto, Andrea, admin) ----
+async function atualizarSino() {
+  if (!usuarioAtual) return;
+  const veAvisos = ['diretor','admin'].includes(usuarioAtual.perfil);
+  const btn = document.getElementById('btn-sino');
+  if (!veAvisos) { btn.style.display='none'; return; }
+  btn.style.display='inline-block';
+  try {
+    const lista = await carregarInad();
+    const badge = document.getElementById('sino-badge');
+    if (lista.length) { badge.textContent = lista.length; badge.style.display='flex'; }
+    else badge.style.display='none';
+  } catch(e) {}
+}
+
+function abrirAvisos() {
+  const lista = cacheInad || [];
+  const cont = document.getElementById('ficha-container');
+  let itens = lista.length
+    ? lista.map(l=>`<div style="padding:10px 12px;border-bottom:1px solid var(--cinza-100);font-size:13px;"><b>${l['CLIENTE']}</b> — ${fmtMoeda(l['VALOR_ABERTO'])} · ${l['DIAS_ATRASO']}d atraso <span class="aging-badge ag-90" style="margin-left:6px;">${l['AGING']}</span></div>`).join('')
+    : '<div style="padding:16px;color:var(--cinza-500);font-size:13px;">Sem avisos no momento.</div>';
+  cont.innerHTML = `
+    <div class="ficha-overlay" onclick="if(event.target===this)fecharFicha()">
+      <div class="ficha" style="width:460px;">
+        <div class="ficha-topo"><button class="fechar" onclick="fecharFicha()"><i class="ti ti-x"></i></button>
+          <div class="nome"><i class="ti ti-bell"></i> Avisos</div><div class="cnpj">Clientes inadimplentes</div></div>
+        <div class="ficha-corpo" style="padding:8px 0;">${itens}</div>
+      </div>
+    </div>`;
+}
+
+// ============================================================
+// GRÁFICOS
+// ============================================================
+let chartsAtivos = [];
+function destruirCharts() { chartsAtivos.forEach(c=>{try{c.destroy()}catch(e){}}); chartsAtivos = []; }
+
+async function renderGraficos(area) {
+  area.innerHTML = `<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando gráficos...</h2></div>`;
+  destruirCharts();
+
+  // carregar dados necessários
+  await carregarClientes();
+  const rf = await buscarDados('Faturamento');
+  const fatLinhas = rf.ok ? rf.linhas : [];
+  const rr = await buscarDados('Reajustes');
+  const reajLinhas = rr.ok ? rr.linhas : [];
+  const inad = await carregarInad();
+
+  // detectar colunas de mês (abr/26, mai/26...) na aba Faturamento
+  const mesesCols = (rf.ok ? rf.colunas : []).filter(c => {
+    const s = String(c).trim();
+    if (s === 'CNPJ' || s === 'CLIENTE') return false;
+    if (s.toUpperCase().startsWith('COLETAS')) return false;
+    if (s.toUpperCase().startsWith('COB_FIXA') || s.toUpperCase().startsWith('COB FIXA')) return false;
+    return true;
+  }).map(c => String(c).trim());
+
+  area.innerHTML = `
+    <div style="margin-bottom:18px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+        <h3 style="font-family:var(--fonte-display);font-size:16px;color:var(--cinza-900);margin:0;">Variação de faturamento</h3>
+        <select class="filtro-sel" id="g-cliente" onchange="atualizaGraficoFat()" style="margin-left:auto;min-width:200px;">
+          <option value="__todos">Empresa toda (somado)</option>
+          ${fatLinhas.map(l=>`<option value="${String(l['CNPJ'])}">${l['CLIENTE']}</option>`).join('')}
+        </select>
+      </div>
+      <div style="background:white;border:1px solid var(--cinza-200);border-radius:12px;padding:16px;height:280px;"><canvas id="chart-fat"></canvas></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+      <div>
+        <h3 style="font-family:var(--fonte-display);font-size:16px;color:var(--cinza-900);margin:0 0 10px;">Inadimplência por faixa</h3>
+        <div style="background:white;border:1px solid var(--cinza-200);border-radius:12px;padding:16px;height:260px;"><canvas id="chart-inad"></canvas></div>
+      </div>
+      <div>
+        <h3 style="font-family:var(--fonte-display);font-size:16px;color:var(--cinza-900);margin:0 0 10px;">Evolução por reajustes</h3>
+        <div style="background:white;border:1px solid var(--cinza-200);border-radius:12px;padding:16px;height:260px;"><canvas id="chart-reaj"></canvas></div>
+      </div>
+    </div>
+
+    <div style="margin-top:24px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+        <h3 style="font-family:var(--fonte-display);font-size:16px;color:var(--cinza-900);margin:0;">Impacto dos reajustes no faturamento</h3>
+        <select class="filtro-sel" id="g-mes-reaj" onchange="calcImpactoReaj()" style="margin-left:auto;min-width:140px;">
+          <option value="">Escolha o mês do reajuste</option>
+        </select>
+      </div>
+      <div id="impacto-reaj" style="background:white;border:1px solid var(--cinza-200);border-radius:12px;padding:18px;">
+        <div style="color:var(--cinza-500);font-size:13px;text-align:center;padding:20px;">Escolha um mês para ver os clientes reajustados nele e o aumento em R$ (comparando o faturamento do mês anterior com o mês do reajuste).</div>
+      </div>
+    </div>`;
+
+  // guardar dados pro filtro
+  window._fatLinhas = fatLinhas;
+  window._mesesCols = mesesCols;
+  window._reajLinhas = reajLinhas;
+
+  // popular dropdown de meses de reajuste (a partir das datas de último reajuste)
+  setTimeout(()=>{
+    const sel = document.getElementById('g-mes-reaj');
+    if (sel) {
+      const meses = new Set();
+      reajLinhas.forEach(r => {
+        const d = parseDataReaj(r['DATA ÚLTIMO REAJUSTE '] || r['DATA ÚLTIMO REAJUSTE']);
+        if (d) meses.add((d.getMonth()+1).toString().padStart(2,'0')+'/'+d.getFullYear());
+      });
+      [...meses].sort().forEach(m => { const o=document.createElement('option'); o.value=m; o.textContent=m; sel.appendChild(o); });
+    }
+    atualizaGraficoFat(); graficoInad(inad); graficoReaj(reajLinhas);
+  }, 60);
+}
+
+function calcImpactoReaj() {
+  const mesEsc = (document.getElementById('g-mes-reaj')||{}).value;
+  const cont = document.getElementById('impacto-reaj');
+  if (!mesEsc) { cont.innerHTML = '<div style="color:var(--cinza-500);font-size:13px;text-align:center;padding:20px;">Escolha um mês.</div>'; return; }
+
+  const reajLinhas = window._reajLinhas || [];
+  const fatLinhas = window._fatLinhas || [];
+  const mesesFat = window._mesesCols || [];
+
+  // clientes reajustados no mês escolhido
+  const doMes = reajLinhas.filter(r => {
+    const d = parseDataReaj(r['DATA ÚLTIMO REAJUSTE '] || r['DATA ÚLTIMO REAJUSTE']);
+    return d && ((d.getMonth()+1).toString().padStart(2,'0')+'/'+d.getFullYear()) === mesEsc;
+  });
+
+  if (!doMes.length) { cont.innerHTML = '<div style="color:var(--cinza-500);font-size:13px;text-align:center;padding:20px;">Nenhum cliente reajustado neste mês.</div>'; return; }
+
+  // tentar comparar faturamento: mês do reajuste vs mês anterior (se existirem na aba Faturamento)
+  // como hoje só há 1 mês de faturamento, usa o % do reajuste sobre o faturamento disponível
+  const fatPorCnpj = {};
+  fatLinhas.forEach(l => { fatPorCnpj[String(l['CNPJ'])] = l; });
+  const ultimoMesFat = mesesFat[mesesFat.length-1];
+
+  let totalAumento = 0;
+  let linhas = '';
+  doMes.forEach(r => {
+    const cnpj = String(r['CNPJ']);
+    const pct = parseFloat(r['ALIQUOTA'])*100 || 0;
+    const fatCli = fatPorCnpj[cnpj];
+    const fatBase = fatCli ? (parseFloat(fatCli[ultimoMesFat])||0) : 0;
+    // aumento estimado = faturamento × (pct / (100+pct))  [parte do faturamento que veio do reajuste]
+    const aumento = fatBase>0 && pct>0 ? fatBase * (pct/(100+pct)) : 0;
+    totalAumento += aumento;
+    linhas += `<tr style="border-top:1px solid var(--cinza-100);">
+      <td style="padding:8px 10px;">${r['CLIENTE']||'—'}</td>
+      <td style="padding:8px 10px;text-align:right;">${pct.toFixed(1)}%</td>
+      <td style="padding:8px 10px;text-align:right;color:var(--cinza-600);">${fatBase>0?fmtMoeda(fatBase):'—'}</td>
+      <td style="padding:8px 10px;text-align:right;color:var(--verde-ok);font-weight:600;">${aumento>0?'+'+fmtMoeda(aumento):'—'}</td>
+    </tr>`;
+  });
+
+  cont.innerHTML = `
+    <div style="display:flex;gap:16px;margin-bottom:16px;flex-wrap:wrap;">
+      <div class="kpi-fat" style="flex:1;min-width:160px;border-top:3px solid var(--verde-ok);">
+        <div class="tit"><i class="ti ti-trending-up"></i> Aumento total no mês</div>
+        <div class="val" style="color:var(--verde-ok);">+${fmtMoeda(totalAumento)}</div>
+        <div class="var" style="color:var(--cinza-600);">${doMes.length} clientes reajustados</div>
+      </div>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead><tr style="background:var(--verde-claro-bg);">
+        <th style="padding:9px 10px;text-align:left;color:var(--verde-escuro);">Cliente</th>
+        <th style="padding:9px 10px;text-align:right;color:var(--verde-escuro);">% reajuste</th>
+        <th style="padding:9px 10px;text-align:right;color:var(--verde-escuro);">Faturamento</th>
+        <th style="padding:9px 10px;text-align:right;color:var(--verde-escuro);">Aumento R$</th>
+      </tr></thead>
+      <tbody>${linhas}</tbody>
+    </table>
+    <div style="font-size:11px;color:var(--cinza-500);margin-top:10px;"><i class="ti ti-info-circle"></i> Quando houver faturamento de vários meses, o aumento será calculado comparando o mês anterior ao reajuste com o mês do reajuste. Por ora, é estimado sobre o faturamento disponível.</div>`;
+}
+
+function corVerde(a){ return `rgba(45,90,61,${a})`; }
+
+// unifica variações: IPC FIPE / IPC-FIPE / IPC F / IPCF -> IPC-F
+function normalizaIndice(ind) {
+  if (!ind) return 'Outro';
+  let s = String(ind).toUpperCase().replace(/\s+/g,' ').trim();
+  if (s.includes('IPC') && s.includes('FIPE')) return 'IPC-F';
+  if (s.replace(/[\s\-]/g,'') === 'IPCF') return 'IPC-F';
+  if (s.includes('IGPM') || s.includes('IGP-M') || s.includes('IGP M')) return 'IGP-M';
+  if (s.includes('IPCA')) return 'IPCA';
+  if (s.includes('INPC')) return 'INPC';
+  return s;
+}
+
+function atualizaGraficoFat() {
+  const cnpj = (document.getElementById('g-cliente')||{}).value || '__todos';
+  const meses = window._mesesCols || [];
+  const linhas = window._fatLinhas || [];
+  let valores;
+  if (cnpj === '__todos') {
+    valores = meses.map(m => Math.round(linhas.reduce((s,l)=>s+(parseFloat(l[m])||0),0)));
+  } else {
+    const cli = linhas.find(l=>String(l['CNPJ'])===cnpj);
+    valores = meses.map(m => cli ? Math.round(parseFloat(cli[m])||0) : 0);
+  }
+  const ctx = document.getElementById('chart-fat');
+  if (!ctx) return;
+  const existente = chartsAtivos.find(c=>c.canvas===ctx);
+  if (existente) existente.destroy();
+  const ch = new Chart(ctx, {
+    type: 'line',
+    data: { labels: meses.length?meses:['(sem dados)'],
+      datasets: [{ label:'Faturamento', data: valores, borderColor: corVerde(1), backgroundColor: corVerde(0.1), fill:true, tension:0.3, pointRadius:5, pointBackgroundColor: corVerde(1) }] },
+    options: { responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false},
+        tooltip:{ callbacks:{ label: c => 'R$ ' + c.parsed.y.toLocaleString('pt-BR') } } },
+      scales:{ y:{ beginAtZero:true, ticks:{ callback: v => {
+        if (v >= 1000000) return 'R$ ' + (v/1000000).toFixed(1) + 'mi';
+        if (v >= 1000) return 'R$ ' + Math.round(v/1000) + 'k';
+        return 'R$ ' + v;
+      } } } } }
+  });
+  chartsAtivos.push(ch);
+  if (meses.length < 2) {
+    const aviso = document.getElementById('g-aviso');
+    if (!aviso) {
+      const d = document.createElement('div');
+      d.id='g-aviso'; d.style.cssText='font-size:12px;color:var(--cinza-500);margin-top:8px;';
+      d.innerHTML='<i class="ti ti-info-circle"></i> Só temos abril por enquanto. A linha ganha forma quando você importar maio, junho...';
+      ctx.parentElement.after(d);
+    }
+  }
+}
+
+function graficoInad(inad) {
+  const faixas = ['0-30','31-60','61-90','90+'];
+  const dados = faixas.map(f => inad.filter(l=>String(l['AGING'])===f).reduce((s,l)=>s+(parseFloat(l['VALOR_ABERTO'])||0),0));
+  const ctx = document.getElementById('chart-inad');
+  if (!ctx) return;
+  const ch = new Chart(ctx, {
+    type:'doughnut',
+    data:{ labels:faixas.map(f=>f+' dias'),
+      datasets:[{ data:dados, backgroundColor:['#ca8a04','#d97706','#e24b4a','#a32d2d'] }] },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom',labels:{font:{size:11}}}} }
+  });
+  chartsAtivos.push(ch);
+  if (!inad.length) ctx.parentElement.innerHTML = '<div style="text-align:center;color:var(--cinza-500);padding-top:90px;font-size:13px;"><i class="ti ti-circle-check" style="font-size:28px;color:var(--verde-ok);"></i><br>Nenhum inadimplente</div>';
+}
+
+function graficoReaj(reajLinhas) {
+  // Substituído pela seção interativa de impacto de reajustes (montada em renderGraficos)
+  const ctx = document.getElementById('chart-reaj');
+  if (!ctx) return;
+  // mantém um gráfico simples de % médio por índice como visão geral
+  const validos = reajLinhas.filter(r => r['ALIQUOTA']!=null && r['ALIQUOTA']!=='');
+  const porIndice = {};
+  validos.forEach(r => { const ind=normalizaIndice(r['ÍNDICE']); (porIndice[ind]=porIndice[ind]||[]).push(parseFloat(r['ALIQUOTA'])*100); });
+  const labels = Object.keys(porIndice);
+  const medias = labels.map(k => Math.round(porIndice[k].reduce((a,b)=>a+b,0)/porIndice[k].length*10)/10);
+  const ch = new Chart(ctx, {
+    type:'bar',
+    data:{ labels: labels.length?labels:['(sem dados)'], datasets:[{ label:'% médio', data: medias, backgroundColor: corVerde(0.7) }] },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ y:{ ticks:{ callback:v=>v+'%' } } } }
+  });
+  chartsAtivos.push(ch);
+}
+
+// ============================================================
+// FATURAMENTO — cards (contrato/eventual), tabela, importar CSV
+// ============================================================
+let cacheFat = null, cacheFatCols = null;
+
+async function renderFaturamento(area) {
+  area.innerHTML = `<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando faturamento...</h2></div>`;
+  await carregarClientes(); // pra saber tipo (Contrato/Eventual)
+  const r = await buscarDados('Faturamento');
+  cacheFat = r.ok ? r.linhas : [];
+  cacheFatCols = r.ok ? r.colunas : [];
+  // detectar meses por EXCLUSÃO (não depende de regex no nome — o Sheets pode alterar "abr/26")
+  const meses = cacheFatCols.filter(c => {
+    const s = String(c).trim();
+    if (s === 'CNPJ' || s === 'CLIENTE') return false;
+    if (s.toUpperCase().startsWith('COLETAS')) return false;
+    if (s.toUpperCase().startsWith('COB_FIXA') || s.toUpperCase().startsWith('COB FIXA')) return false;
+    return true; // o que sobra é coluna de valor mensal
+  }).map(c => String(c).trim());
+  // mês escolhido: usa o que já estava selecionado, senão o último disponível
+  const selAnterior = (document.getElementById('fat-mes')||{}).value;
+  const mesAtual = (selAnterior && meses.includes(selAnterior)) ? selAnterior : (meses[meses.length-1] || meses[0]);
+  const idxMes = meses.indexOf(mesAtual);
+  const mesAnterior = idxMes > 0 ? meses[idxMes-1] : null;
+
+  // mapa de tipo por CNPJ
+  const tipoPorCnpj = {};
+  cacheClientes.forEach(c => { tipoPorCnpj[String(c['CNPJ'])] = (c['TIPO']==='Eventual'?'Eventual':'Contrato'); });
+
+  // valor do mês de uma linha, tolerante a espaço/variação na chave e formato BR
+  function valMes(linha, mes) {
+    let v = linha[mes];
+    if (v == null) {
+      const k = Object.keys(linha).find(kk => String(kk).trim() === String(mes).trim());
+      v = k ? linha[k] : null;
+    }
+    if (v == null || v === '') return 0;
+    if (typeof v === 'number') return v;
+    let s = String(v).replace(/[^\d,.-]/g,'');
+    if (s.includes(',') && s.lastIndexOf(',') > s.lastIndexOf('.')) s = s.replace(/\./g,'').replace(',','.');
+    const n = parseFloat(s); return isNaN(n)?0:n;
+  }
+  // somatórios
+  function somaTipo(mes, tipo) {
+    return cacheFat.reduce((s,l) => {
+      const t = tipoPorCnpj[String(l['CNPJ'])] || 'Contrato';
+      if (tipo && t !== tipo) return s;
+      return s + valMes(l, mes);
+    }, 0);
+  }
+  const totAtual = somaTipo(mesAtual, null);
+  const totAnt = mesAnterior ? somaTipo(mesAnterior, null) : null;
+  const contrAtual = somaTipo(mesAtual, 'Contrato');
+  const contrAnt = mesAnterior ? somaTipo(mesAnterior, 'Contrato') : null;
+  const evAtual = somaTipo(mesAtual, 'Eventual');
+  const evAnt = mesAnterior ? somaTipo(mesAnterior, 'Eventual') : null;
+
+  function varHtml(atual, ant) {
+    if (ant == null || ant === 0) return '<span class="fat-var-zero">sem mês anterior</span>';
+    const pct = ((atual-ant)/ant*100);
+    const cls = pct > 0.05 ? 'fat-var-pos' : pct < -0.05 ? 'fat-var-neg' : 'fat-var-zero';
+    const ico = pct > 0.05 ? 'ti-trending-up' : pct < -0.05 ? 'ti-trending-down' : 'ti-minus';
+    return `<span class="${cls}"><i class="ti ${ico}"></i> ${pct>0?'+':''}${pct.toFixed(1)}% vs ${mesAnterior}</span>`;
+  }
+
+  area.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+      <select class="filtro-sel" id="fat-mes" onchange="renderFaturamento(document.getElementById('area-conteudo'))" style="min-width:140px;">
+        ${meses.map(m=>`<option ${m===mesAtual?'selected':''}>${m}</option>`).join('')}
+      </select>
+      <button class="btn-importar" onclick="abrirImportarFat()"><i class="ti ti-upload"></i> Importar faturamento do mês</button>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:20px;">
+      <div class="kpi-fat" style="border-top:3px solid var(--verde-escuro);">
+        <div class="tit"><i class="ti ti-cash"></i> Total faturado · ${mesAtual}</div>
+        <div class="val">${fmtMoeda(totAtual)}</div>
+        <div class="var">${varHtml(totAtual, totAnt)}</div>
+      </div>
+      <div class="kpi-fat" style="border-top:3px solid var(--verde-ok);">
+        <div class="tit"><i class="ti ti-file-text"></i> Contratos</div>
+        <div class="val" style="font-size:22px;">${fmtMoeda(contrAtual)}</div>
+        <div class="var">${varHtml(contrAtual, contrAnt)}</div>
+      </div>
+      <div class="kpi-fat" style="border-top:3px solid var(--cinza-500);">
+        <div class="tit"><i class="ti ti-calendar-event"></i> Eventuais</div>
+        <div class="val" style="font-size:22px;">${fmtMoeda(evAtual)}</div>
+        <div class="var">${varHtml(evAtual, evAnt)}</div>
+      </div>
+    </div>
+
+    <div class="barra-busca">
+      <i class="ti ti-search"></i>
+      <input type="text" id="fat-busca" placeholder="Buscar cliente..." oninput="filtraTabelaFat()">
+      <span class="contagem">${cacheFat.length} clientes</span>
+    </div>
+    <div id="fat-tabela-area"></div>`;
+
+  window._fatMes = mesAtual;
+  window._fatMesAnt = mesAnterior;
+  window._tipoPorCnpj = tipoPorCnpj;
+  window._valMes = valMes;
+  filtraTabelaFat();
+}
+
+function filtraTabelaFat() {
+  const termo = ((document.getElementById('fat-busca')||{}).value||'').toLowerCase();
+  const mes = window._fatMes, mesAnt = window._fatMesAnt, tipos = window._tipoPorCnpj;
+  const vm = window._valMes || ((l,m)=>parseFloat(l[m])||0);
+  let lista = cacheFat.slice();
+  if (termo) lista = lista.filter(l => String(l['CLIENTE']||'').toLowerCase().includes(termo));
+  lista = lista.sort((a,b)=>vm(b,mes)-vm(a,mes));
+
+  let html = `<table class="fat-tabela"><thead><tr>
+    <th>Cliente</th><th>Tipo</th><th class="num">${mes}</th>${mesAnt?`<th class="num">${mesAnt}</th><th class="num">Variação</th>`:''}
+    </tr></thead><tbody>`;
+  lista.slice(0,200).forEach(l => {
+    const atual = vm(l, mes);
+    const ant = mesAnt ? vm(l, mesAnt) : null;
+    const tipo = tipos[String(l['CNPJ'])] || 'Contrato';
+    let varCol = '';
+    if (mesAnt) {
+      if (ant === 0) varCol = `<td class="num fat-var-zero">novo</td>`;
+      else { const p=((atual-ant)/ant*100); varCol = `<td class="num ${p>0.05?'fat-var-pos':p<-0.05?'fat-var-neg':'fat-var-zero'}">${p>0?'+':''}${p.toFixed(1)}%</td>`; }
+    }
+    html += `<tr onclick="abrirFicha('${String(l['CNPJ']).replace(/'/g,'')}')">
+      <td><b style="color:var(--cinza-900);">${l['CLIENTE']||'—'}</b></td>
+      <td><span class="tag ${tipo==='Eventual'?'tag-eventual':'tag-contrato'}">${tipo}</span></td>
+      <td class="num"><b>${fmtMoeda(atual)}</b></td>
+      ${mesAnt?`<td class="num" style="color:var(--cinza-600);">${fmtMoeda(ant)}</td>${varCol}`:''}
+    </tr>`;
+  });
+  html += `</tbody></table>`;
+  if (lista.length > 200) html += `<div style="margin-top:8px;font-size:12px;color:var(--cinza-500);">Mostrando 200 de ${lista.length}. Use a busca.</div>`;
+  document.getElementById('fat-tabela-area').innerHTML = html;
+}
+
+// ---- Importar CSV de faturamento (processa no navegador) ----
+function abrirImportarFat() {
+  const cont = document.getElementById('ficha-container');
+  cont.innerHTML = `
+    <div class="ficha-overlay" onclick="if(event.target===this)fecharFicha()">
+      <div class="ficha" style="width:520px;">
+        <div class="ficha-topo">
+          <button class="fechar" onclick="fecharFicha()"><i class="ti ti-x"></i></button>
+          <div class="nome"><i class="ti ti-upload"></i> Importar faturamento</div>
+          <div class="cnpj">Suba o CSV do Relatório de Serviços do mês</div>
+        </div>
+        <div class="ficha-corpo">
+          <div style="margin-bottom:14px;">
+            <label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Mês de competência</label>
+            <input type="month" id="imp-mes" style="padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;">
+          </div>
+          <div style="border:2px dashed var(--cinza-300);border-radius:10px;padding:24px;text-align:center;">
+            <i class="ti ti-file-spreadsheet" style="font-size:32px;color:var(--cinza-400);"></i>
+            <div style="margin:10px 0;font-size:13px;color:var(--cinza-600);">Selecione o arquivo CSV (delimitado por ;)</div>
+            <input type="file" id="imp-arquivo" accept=".csv">
+          </div>
+          <div id="imp-preview" style="margin-top:14px;"></div>
+          <div class="ficha-botoes">
+            <button class="ficha-btn-primario" onclick="processarCSVFat()"><i class="ti ti-check"></i> Processar e visualizar</button>
+            <button class="ficha-btn-secundario" onclick="fecharFicha()">Cancelar</button>
+          </div>
+          <div style="font-size:11px;color:var(--cinza-500);margin-top:10px;">O sistema aplica a lógica: soma serviço+taxa (contêiner/saco), mantém Brooks/Roll on separados, e captura a cobrança fixa.</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function moedaCSV(s) {
+  s = String(s).replace(/[^\d,.-]/g,'').replace(/\./g,'').replace(',','.');
+  const n = parseFloat(s); return isNaN(n)?0:n;
+}
+
+async function processarCSVFat() {
+  const arq = document.getElementById('imp-arquivo').files[0];
+  const mes = document.getElementById('imp-mes').value;
+  const prev = document.getElementById('imp-preview');
+  if (!arq) { prev.innerHTML = '<div class="sem-acesso">Selecione um arquivo CSV.</div>'; return; }
+  if (!mes) { prev.innerHTML = '<div class="sem-acesso">Escolha o mês de competência.</div>'; return; }
+  prev.innerHTML = '<div style="text-align:center;color:var(--cinza-500);padding:12px;">Lendo arquivo...</div>';
+
+  const texto = await arq.text();
+  const linhas = texto.split('\n').map(l => l.split(';'));
+  // consolidar por CNPJ: somar coluna Total (idx 24) das linhas de dados + cobrança fixa
+  const fat = {};
+  for (let i=0;i<linhas.length;i++) {
+    const r = linhas[i];
+    if (r.length > 24 && /^\s*\d+\s*$/.test((r[0]||'').replace(/\s/g,''))) {
+      const cnpj = (r[6]||'').replace(/\D/g,'');
+      if (cnpj.length===14) {
+        if (!fat[cnpj]) fat[cnpj] = { nome:(r[5]||'').trim(), total:0, coletas:0 };
+        fat[cnpj].total += moedaCSV(r[24]); fat[cnpj].coletas++;
+      }
+    } else if (r[1] && String(r[1]).includes('Cob. Fixa') && i+1 < linhas.length) {
+      const nx = linhas[i+1];
+      let v = moedaCSV(nx[3]); if (v===0) v = moedaCSV(nx[4]);
+      // achar cliente acima
+      for (let j=i;j>=Math.max(0,i-40);j--) {
+        if (linhas[j].length>6 && /^\s*\d+\s*$/.test((linhas[j][0]||'').replace(/\s/g,''))) {
+          const cn=(linhas[j][6]||'').replace(/\D/g,'');
+          if (cn.length===14 && fat[cn]) fat[cn].total += v;
+          break;
+        }
+      }
+    }
+  }
+  const arr = Object.entries(fat).map(([cnpj,d])=>({cnpj,...d}));
+  const total = arr.reduce((s,x)=>s+x.total,0);
+  window._fatImportado = { mes, arr };
+  // converter "2026-05" do input month para "mai/26"
+  const mesesAbrev = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+  const [ano, mm] = mes.split('-');
+  const mesLabel = mesesAbrev[parseInt(mm,10)-1] + '/' + ano.slice(-2);
+  window._fatMesLabel = mesLabel;
+  prev.innerHTML = `
+    <div style="background:var(--verde-claro-bg);border-radius:8px;padding:14px;">
+      <div style="font-size:14px;color:var(--verde-escuro);font-weight:600;margin-bottom:6px;"><i class="ti ti-circle-check"></i> Processado!</div>
+      <div style="font-size:13px;color:var(--cinza-700);">${arr.length} clientes · Total: <b>${fmtMoeda(total)}</b> · Competência: <b>${mesLabel}</b></div>
+      <button class="ficha-btn-primario" style="width:100%;margin-top:12px;padding:10px;border:none;border-radius:8px;cursor:pointer;" onclick="gravarFaturamento()"><i class="ti ti-device-floppy"></i> Gravar na planilha (coluna ${mesLabel})</button>
+      <div id="grava-msg" style="margin-top:8px;"></div>
+    </div>`;
+}
+
+async function gravarFaturamento() {
+  const imp = window._fatImportado;
+  const mesLabel = window._fatMesLabel;
+  if (!imp || !imp.arr.length) return;
+  const msg = document.getElementById('grava-msg');
+  msg.innerHTML = '<div style="text-align:center;color:var(--cinza-500);font-size:13px;">Gravando na planilha...</div>';
+  try {
+    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
+      acao:'importarFat', token: sessaoToken,
+      dados: { mes: mesLabel, valores: imp.arr.map(x=>({cnpj:x.cnpj, nome:x.nome, total:Math.round(x.total*100)/100})) }
+    })});
+    const r = await resp.json();
+    if (!r.ok) { msg.innerHTML = `<div class="sem-acesso">${r.erro}</div>`; return; }
+    cacheFat = null; // forçar recarga
+    msg.innerHTML = `<div style="background:white;border:1px solid var(--verde-ok-borda);border-radius:8px;padding:10px;font-size:13px;color:var(--verde-ok);"><i class="ti ti-circle-check"></i> Gravado! ${r.atualizados} atualizados${r.novos?', '+r.novos+' novos':''}. Coluna ${r.mes} criada/atualizada.</div>`;
+    setTimeout(()=>{ fecharFicha(); renderFaturamento(document.getElementById('area-conteudo')); }, 2200);
+  } catch(e) { msg.innerHTML = '<div class="sem-acesso">Erro de conexão ao gravar.</div>'; }
+}
+
+// ============================================================
+// CANCELADOS — cards com motivo, data, valor
+// ============================================================
+let cacheCanc = null;
+async function renderCancelados(area) {
+  area.innerHTML = `<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando cancelamentos...</h2></div>`;
+  if (!cacheCanc) {
+    const r = await buscarDados('Cancelados');
+    cacheCanc = r.ok ? r.linhas : [];
+  }
+  const motivos = [...new Set(cacheCanc.map(c=>c['MOTIVO']).filter(Boolean))].sort();
+  area.innerHTML = `
+    <div id="canc-kpis"></div>
+    <div class="barra-busca">
+      <i class="ti ti-search"></i>
+      <input type="text" id="canc-busca" placeholder="Buscar cliente..." oninput="filtraCanc()">
+      <span class="contagem">${cacheCanc.length} cancelamentos</span>
+    </div>
+    <div class="filtros">
+      <select class="filtro-sel" id="canc-motivo" onchange="filtraCanc()"><option value="">Todos motivos</option>${motivos.map(m=>`<option>${m}</option>`).join('')}</select>
+      <span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--cinza-600);">
+        <i class="ti ti-calendar" style="font-size:15px;"></i> De
+        <input type="date" class="filtro-sel" id="canc-ini" onchange="filtraCanc()" style="padding:6px 8px;">
+        até
+        <input type="date" class="filtro-sel" id="canc-fim" onchange="filtraCanc()" style="padding:6px 8px;">
+        <button class="filtro-chip" onclick="document.getElementById('canc-ini').value='';document.getElementById('canc-fim').value='';filtraCanc()"><i class="ti ti-x"></i></button>
+      </span>
+      <div class="alternador">
+        <button class="ativo" onclick="setModoCanc('cards',this)"><i class="ti ti-layout-grid"></i> Cards</button>
+        <button onclick="setModoCanc('lista',this)"><i class="ti ti-list"></i> Lista</button>
+      </div>
+    </div>
+    <div id="canc-resultado"></div>`;
+  window._modoCanc = 'cards';
+  filtraCanc();
+}
+function setModoCanc(m, el) { window._modoCanc = m; document.querySelectorAll('.alternador button').forEach(b=>b.classList.remove('ativo')); el.classList.add('ativo'); filtraCanc(); }
+
+function valorPerdidoCanc(c) {
+  // valor pago (média últimos 3 meses) é o melhor proxy de receita perdida; senão valor contrato
+  let v = parseFloat(String(c['VALOR PAGO (média últimos 3 meses)']||'').replace(/[^\d,.-]/g,'').replace(/\./g,'').replace(',','.'));
+  if (isNaN(v) || v===0) v = parseFloat(String(c['VALOR CONTRATO']||'').replace(/[^\d,.-]/g,'').replace(/\./g,'').replace(',','.'));
+  return isNaN(v) ? 0 : v;
+}
+
+function filtraCanc() {
+  const termo = ((document.getElementById('canc-busca')||{}).value||'').toLowerCase();
+  const motivo = (document.getElementById('canc-motivo')||{}).value||'';
+  const dIni = (document.getElementById('canc-ini')||{}).value||'';
+  const dFim = (document.getElementById('canc-fim')||{}).value||'';
+  let lista = cacheCanc.filter(c => {
+    if (termo && !String(c['CLIENTE']||'').toLowerCase().includes(termo)) return false;
+    if (motivo && c['MOTIVO']!==motivo) return false;
+    if (dIni || dFim) {
+      const d = parseDataReaj(c['DATA DE CANCELAMENTO']);
+      if (!d) return false;
+      if (dIni && d < new Date(dIni)) return false;
+      if (dFim && d > new Date(dFim)) return false;
+    }
+    return true;
+  });
+
+  // card de R$ perdidos
+  const totalPerdido = lista.reduce((s,c)=>s+valorPerdidoCanc(c),0);
+  const kpiArea = document.getElementById('canc-kpis');
+  if (kpiArea) {
+    const periodo = (dIni||dFim) ? `${dIni?fmtDataBR(dIni):'...'} a ${dFim?fmtDataBR(dFim):'...'}` : 'todo o período';
+    kpiArea.innerHTML = `<div class="kpi-funil" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));">
+      <div class="kpi-card" style="border-top:3px solid var(--vermelho);"><div class="kpi-num" style="color:var(--vermelho);">${lista.length}</div><div class="kpi-lbl">Cancelamentos</div></div>
+      <div class="kpi-card" style="border-top:3px solid var(--vermelho);"><div class="kpi-num" style="color:var(--vermelho);font-size:22px;">${fmtMoeda(totalPerdido)}</div><div class="kpi-lbl">R$ perdidos · ${periodo}</div></div>
+    </div>`;
+  }
+
+  const res = document.getElementById('canc-resultado');
+  if (window._modoCanc === 'lista') {
+    let html = '<div class="lista-cli">';
+    lista.slice(0,300).forEach(c => {
+      html += `<div class="lista-cli-item" style="grid-template-columns:1fr auto auto;">
+        <div><b style="color:var(--cinza-900);">${c['CLIENTE']||'—'}</b><br><span style="color:var(--cinza-500);font-size:12px;">${c['MOTIVO']||'Motivo não informado'}</span></div>
+        <span style="color:var(--cinza-600);">${fmtDataBR(c['DATA DE CANCELAMENTO'])}</span>
+        <span style="color:var(--vermelho);font-weight:600;">${c['CONSULTOR']||''}</span>
+      </div>`;
+    });
+    res.innerHTML = html + '</div>';
+    return;
+  }
+  if (!lista.length) { res.innerHTML = '<div class="sem-acesso">Nenhum cancelamento com esses filtros.</div>'; return; }
+  let html = '<div class="grid-cards">';
+  lista.slice(0,150).forEach(c => {
+    html += `<div class="card-cli cancelado" style="cursor:default;">
+      <div class="card-cli-topo">
+        <div class="card-cli-avatar" style="background:var(--vermelho-bg);color:var(--vermelho);">${iniciais(c['CLIENTE'])}</div>
+        <div style="min-width:0;">
+          <div class="card-cli-nome">${c['CLIENTE']||'—'}</div>
+          <div class="card-cli-cnpj">${c['CNPJ']||'—'}</div>
+        </div>
+      </div>
+      <div class="card-cli-tags">
+        <span class="tag" style="background:var(--vermelho-bg);color:var(--vermelho);">${c['MOTIVO']||'Motivo n/d'}</span>
+      </div>
+      <div class="card-cli-linha borda"><span>Data cancelamento</span><b>${fmtDataBR(c['DATA DE CANCELAMENTO'])}</b></div>
+      <div class="card-cli-linha"><span>Consultor</span><span>${c['CONSULTOR']||'—'}</span></div>
+      ${c['MULTA']?`<div class="card-cli-linha"><span>Multa</span><span>${c['MULTA']}</span></div>`:''}
+    </div>`;
+  });
+  res.innerHTML = html + '</div>';
+}
+
+// ---- Retomar sessão ao abrir ----
+checarSessao();
+
+</script>
+</body>
+</html>
