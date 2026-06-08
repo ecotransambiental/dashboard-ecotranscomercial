@@ -1254,10 +1254,10 @@ function aplicarKanban() {
   if (etapa) leads = leads.filter(l => etapaDe(l)===etapa);
   if (busca) leads = leads.filter(l => String(l['CLIENTE']||'').toLowerCase().includes(busca));
   if (dIni || dFim) {
-    const ini = dIni ? new Date(dIni) : null;
-    const fim = dFim ? new Date(dFim) : null;
+    const ini = dIni ? new Date(dIni+'T00:00:00') : null;
+    const fim = dFim ? new Date(dFim+'T23:59:59') : null;
     leads = leads.filter(l => {
-      const d = dataLeadDate(l['DATA_CONTATO']);
+      const d = parseDataReaj(l['DATA_CONTATO']);
       if (!d) return false;
       if (ini && d < ini) return false;
       if (fim && d > fim) return false;
@@ -1456,7 +1456,7 @@ function aplicarReaj() {
   else if (filtroReaj==='30') lista = lista.filter(r => r._cls.dias >= 0 && r._cls.dias <= 30);
   else if (filtroReaj==='60') lista = lista.filter(r => r._cls.dias >= 0 && r._cls.dias <= 60);
   if (dIni || dFim) {
-    const ini = dIni?new Date(dIni):null, fim = dFim?new Date(dFim):null;
+    const ini = dIni?new Date(dIni+'T00:00:00'):null, fim = dFim?new Date(dFim+'T23:59:59'):null;
     lista = lista.filter(r => r._prox && (!ini||r._prox>=ini) && (!fim||r._prox<=fim));
   }
   // ordenar por proximidade
