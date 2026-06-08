@@ -3903,43 +3903,47 @@ function calcResultados() {
   const dIni = new Date(ini+'T00:00:00'), dFim = new Date(fim+'T23:59:59');
   const corpo = document.getElementById('rt-corpo');
 
-  // mudanças de etapa registradas NO período (fonte da verdade para conversão)
   const movs = (window._histEtapas||[]).map(e=>({...e,_d:parseDataReaj(e['DATA'])})).filter(e=>e._d&&e._d>=dIni&&e._d<=dFim);
   const temHistorico = movs.length > 0;
-
-  // leads cujo PRIMEIRO contato caiu no período
   const leadsPeriodo = kanbanLeads.filter(l=>{ const d=parseDataReaj(l['DATA_CONTATO']); return d&&d>=dIni&&d<=dFim; });
 
-  let totalLeads, propostas, fechados, prospeccoes;
-
-  if (temHistorico) {
-    // baseado nas movimentações do período (coerente: tudo é "no período")
-    totalLeads = leadsPeriodo.length;
-    propostas   = movs.filter(m=>m['ETAPA_NOVA']==='Proposta Enviada').length;
-    fechados    = movs.filter(m=>m['ETAPA_NOVA']==='Fechado').length;
-    // prospecções = leads que entraram como prospecção/indicação no período
-    prospeccoes = leadsPeriodo.filter(l=>{ const e=String(l['ETAPA']).toLowerCase(); return e.includes('prospec')||e.includes('indica'); }).length
-               || movs.filter(m=>{ const e=String(m['ETAPA_ANTERIOR']||'').toLowerCase(); return e.includes('prospec')||e.includes('indica'); }).length;
-  } else {
-    // sem histórico ainda: usa o estado atual do funil como aproximação (tudo "estado", coerente entre si)
+  if (!temHistorico) {
     const ativos = kanbanLeads.filter(l=>l['ETAPA']!=='Cobertura');
-    totalLeads = ativos.length;
-    propostas   = ativos.filter(l=>l['ETAPA']==='Proposta Enviada').length;
-    fechados    = ativos.filter(l=>l['ETAPA']==='Fechado').length;
-    prospeccoes = ativos.filter(l=>{ const e=String(l['ETAPA']).toLowerCase(); return e.includes('prospec')||e.includes('indica'); }).length;
+    const emProposta = ativos.filter(l=>l['ETAPA']==='Proposta Enviada').length;
+    const emFechado = ativos.filter(l=>l['ETAPA']==='Fechado').length;
+    const emProspec = ativos.filter(l=>{ const e=String(l['ETAPA']).toLowerCase(); return e.includes('prospec')||e.includes('indica'); }).length;
+    const emContato = ativos.filter(l=>l['ETAPA']==='Em Contato').length;
+    const emDeclinado = ativos.filter(l=>l['ETAPA']==='Declinado').length;
+    corpo.innerHTML = `
+      <div style="background:var(--amarelo-bg);border-radius:12px;padding:16px;margin-bottom:16px;font-size:13px;color:#8a6d00;line-height:1.6;">
+        <i class="ti ti-info-circle"></i> <b>As taxas de conversão por período ainda não estão disponíveis.</b> Elas dependem do registro de movimentação dos cards (de uma etapa para outra), que começa a contar agora que o Apps Script foi republicado. Conforme a equipe arrastar os cards no Funil, as taxas vão aparecer aqui. Por enquanto, mostro a <b>foto atual do funil</b>:
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;">
+        <div class="kpi-card" style="border-top:3px solid var(--cinza-500);"><div class="kpi-num" style="color:var(--cinza-600);">${emProspec}</div><div class="kpi-lbl">Em prospecção</div></div>
+        <div class="kpi-card" style="border-top:3px solid #185FA5;"><div class="kpi-num" style="color:#185FA5;">${emContato}</div><div class="kpi-lbl">Em contato</div></div>
+        <div class="kpi-card" style="border-top:3px solid #BA7517;"><div class="kpi-num" style="color:#BA7517;">${emProposta}</div><div class="kpi-lbl">Proposta enviada</div></div>
+        <div class="kpi-card" style="border-top:3px solid var(--verde-ok);"><div class="kpi-num" style="color:var(--verde-ok);">${emFechado}</div><div class="kpi-lbl">Fechado</div></div>
+        <div class="kpi-card" style="border-top:3px solid var(--vermelho);"><div class="kpi-num" style="color:var(--vermelho);">${emDeclinado}</div><div class="kpi-lbl">Declinado</div></div>
+      </div>`;
+    return;
   }
 
+  const totalLeads = leadsPeriodo.length;
+  const propostas = movs.filter(m=>m['ETAPA_NOVA']==='Proposta Enviada').length;
+  const fechados = movs.filter(m=>m['ETAPA_NOVA']==='Fechado').length;
+  const prospParaProp = movs.filter(m=>{ const a=String(m['ETAPA_ANTERIOR']||'').toLowerCase(); return (a.includes('prospec')||a.includes('indica')) && m['ETAPA_NOVA']==='Proposta Enviada'; }).length;
+  const totalProspec = leadsPeriodo.filter(l=>{ const e=String(l['ETAPA']).toLowerCase(); return e.includes('prospec')||e.includes('indica'); }).length;
+
   const pct = (a,b)=> b>0 ? (a/b*100) : 0;
-  // garantir taxas coerentes (nunca >100% por mistura de bases)
   const taxaLeadProposta  = pct(propostas, totalLeads);
   const taxaPropFechado   = pct(fechados, propostas);
-  const taxaProspProposta = pct(propostas, prospeccoes);
+  const taxaProspProposta = pct(prospParaProp, totalProspec);
 
   function cardTaxa(titulo, num, den, taxa, cor, exemplo) {
     const semBase = den===0;
     return `<div style="background:white;border:1px solid var(--cinza-200);border-radius:12px;padding:20px;border-top:3px solid ${cor};">
       <div style="font-size:13px;color:var(--cinza-600);margin-bottom:8px;">${titulo}</div>
-      <div style="font-size:34px;font-weight:700;font-family:var(--fonte-display);color:${semBase?'var(--cinza-400)':cor};">${semBase?'—':taxa.toFixed(1)+'%'}</div>
+      <div style="font-size:34px;font-weight:700;font-family:var(--fonte-display);color:${semBase?'var(--cinza-400)':cor};">${semBase?'\u2014':taxa.toFixed(1)+'%'}</div>
       <div style="font-size:13px;color:var(--cinza-700);margin-top:4px;">${num} de ${den}</div>
       <div style="font-size:11px;color:var(--cinza-500);margin-top:8px;">${exemplo}</div>
     </div>`;
@@ -3947,22 +3951,18 @@ function calcResultados() {
 
   corpo.innerHTML = `
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;">
-      ${cardTaxa('Leads → Proposta enviada', propostas, totalLeads, taxaLeadProposta, 'var(--verde-escuro)', `De ${totalLeads} leads, ${propostas} viraram proposta no período`)}
-      ${cardTaxa('Propostas → Fechamento', fechados, propostas, taxaPropFechado, 'var(--verde-ok)', `${fechados} fechados a partir de ${propostas} propostas do período`)}
-      ${cardTaxa('Prospecção → Proposta', propostas, prospeccoes, taxaProspProposta, '#BA7517', `De ${prospeccoes} prospecções, ${propostas} viraram proposta`)}
+      ${cardTaxa('Leads \u2192 Proposta enviada', propostas, totalLeads, taxaLeadProposta, 'var(--verde-escuro)', `${propostas} propostas de ${totalLeads} leads novos no período`)}
+      ${cardTaxa('Propostas \u2192 Fechamento', fechados, propostas, taxaPropFechado, 'var(--verde-ok)', `${fechados} fechados de ${propostas} propostas no período`)}
+      ${cardTaxa('Prospecção \u2192 Proposta', prospParaProp, totalProspec, taxaProspProposta, '#BA7517', `${prospParaProp} prospecções viraram proposta de ${totalProspec}`)}
     </div>
-
     <div style="background:white;border:1px solid var(--cinza-200);border-radius:12px;padding:20px;margin-top:18px;">
       <h3 style="font-family:var(--fonte-display);font-size:15px;margin:0 0 14px;">Resumo do período (${fmtDataBR(ini)} a ${fmtDataBR(fim)})</h3>
       <table style="width:100%;font-size:13px;border-collapse:collapse;">
-        <tr style="border-bottom:1px solid var(--cinza-100);"><td style="padding:8px 0;color:var(--cinza-700);">Leads no período</td><td style="text-align:right;font-weight:600;">${totalLeads}</td></tr>
-        <tr style="border-bottom:1px solid var(--cinza-100);"><td style="padding:8px 0;color:var(--cinza-700);">Propostas enviadas no período</td><td style="text-align:right;font-weight:600;">${propostas}</td></tr>
-        <tr style="border-bottom:1px solid var(--cinza-100);"><td style="padding:8px 0;color:var(--cinza-700);">Fechados no período</td><td style="text-align:right;font-weight:600;color:var(--verde-ok);">${fechados}</td></tr>
-        <tr><td style="padding:8px 0;color:var(--cinza-700);">Prospecções no período</td><td style="text-align:right;font-weight:600;">${prospeccoes}</td></tr>
+        <tr style="border-bottom:1px solid var(--cinza-100);"><td style="padding:8px 0;color:var(--cinza-700);">Leads novos no período</td><td style="text-align:right;font-weight:600;">${totalLeads}</td></tr>
+        <tr style="border-bottom:1px solid var(--cinza-100);"><td style="padding:8px 0;color:var(--cinza-700);">Movidos para "Proposta Enviada"</td><td style="text-align:right;font-weight:600;">${propostas}</td></tr>
+        <tr style="border-bottom:1px solid var(--cinza-100);"><td style="padding:8px 0;color:var(--cinza-700);">Movidos para "Fechado"</td><td style="text-align:right;font-weight:600;color:var(--verde-ok);">${fechados}</td></tr>
+        <tr><td style="padding:8px 0;color:var(--cinza-700);">Prospecções no período</td><td style="text-align:right;font-weight:600;">${totalProspec}</td></tr>
       </table>
-      <div style="font-size:11px;color:var(--cinza-500);margin-top:12px;">${temHistorico
-        ? 'As taxas usam as mudanças de etapa registradas no período selecionado.'
-        : 'Ainda não há mudanças de etapa registradas neste período, então mostro o estado atual do funil como base. Conforme a equipe move os cards (após a republicação), as taxas passam a refletir o período exato.'}</div>
     </div>`;
 }
 
