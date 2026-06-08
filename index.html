@@ -347,6 +347,7 @@
       <div class="sidebar-footer">
         <div class="user-name" id="footer-nome">—</div>
         <div class="user-role" id="footer-role">—</div>
+        <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
       </div>
     </aside>
@@ -591,6 +592,24 @@ function sair() {
   selUser.value = '';
 }
 
+// limpa todos os caches e recarrega a tela atual (pra ver mudanças feitas no Google Sheets)
+function recarregarDados() {
+  cacheClientes = null; cacheFaturamento = null; cacheLeads = null;
+  kanbanLeads = null; cacheReajustes = null; cacheInad = null;
+  cacheFat = null; cacheFatCols = null; cacheCanc = null;
+  cacheRGG = null; cacheSIGOR = null; cacheRenov = null;
+  cacheContratos = null; cacheAgenda = null;
+  if (typeof window !== 'undefined') { window._histEtapas = null; window._propostas = null; window._atividadesCRM = null; }
+  // recarrega o submódulo atual
+  if (subAtual) { renderConteudo(subAtual, subNomeAtual||''); }
+  // aviso rápido
+  const av = document.createElement('div');
+  av.textContent = 'Dados atualizados!';
+  av.style.cssText = 'position:fixed;bottom:20px;right:20px;background:var(--verde-escuro);color:white;padding:10px 18px;border-radius:8px;font-size:13px;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.2);';
+  document.body.appendChild(av);
+  setTimeout(()=>av.remove(), 2000);
+}
+
 // ---- Buscar dados de uma aba do Sheets ----
 async function buscarDados(aba) {
   const resp = await fetch(API_URL, {
@@ -652,7 +671,9 @@ function selecionarModulo(modId) {
 }
 
 // ---- Selecionar submódulo → renderiza conteúdo ----
+let subAtual = null, subNomeAtual = '';
 function selecionarSub(subId, subNome, btnEl) {
+  subAtual = subId; subNomeAtual = subNome;
   document.querySelectorAll('.nav-sub').forEach(b => b.classList.remove('ativo'));
   if (btnEl) btnEl.classList.add('ativo');
   const mod = MODULOS.find(m => m.id === moduloAtual);
@@ -927,6 +948,7 @@ async function abrirFicha(cnpj) {
             <button class="ficha-btn-primario" onclick="abrirFormAtividade('${cnpj.replace(/'/g,'')}','${(c['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-plus"></i> Registrar atividade</button>
             ${c['TIPO']==='Eventual'?`<button class="ficha-btn-secundario" style="color:var(--verde-escuro);border-color:var(--verde-medio);" onclick="virarContrato('${cnpj.replace(/'/g,'')}','${(c['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-file-text"></i> Mudar para Contrato</button>`:''}
             <button class="ficha-btn-secundario" onclick="abrirFormInadimplencia('${cnpj.replace(/'/g,'')}')"><i class="ti ti-alert-triangle"></i> Marcar inadimplente</button>
+            <button class="ficha-btn-secundario" style="color:var(--vermelho);border-color:var(--vermelho);" onclick="abrirFormCancelar('${cnpj.replace(/'/g,'')}','${(c['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-circle-x"></i> Cancelar cliente</button>
           </div>
         </div>
       </div>
@@ -3950,6 +3972,56 @@ function abrirLead(id) {
         </div>
       </div>
     </div>`;
+}
+
+// ---- Cancelar cliente (move para Cancelados) ----
+const MOTIVOS_CANCELAMENTO = ["Preço","Concorrência","Encerramento de atividades","Mudança de endereço","Insatisfação com serviço","Redução de custos","Terceirização","Inadimplência","Fim de contrato","Outros"];
+function abrirFormCancelar(cnpj, cliente) {
+  const cont = document.getElementById('ficha-container');
+  cont.innerHTML = `
+    <div class="ficha-overlay" onclick="if(event.target===this)fecharFicha()">
+      <div class="ficha" style="width:460px;">
+        <div class="ficha-topo" style="background:linear-gradient(135deg,#c53030,#9b2020);">
+          <button class="fechar" onclick="fecharFicha()"><i class="ti ti-x"></i></button>
+          <div class="nome"><i class="ti ti-circle-x"></i> Cancelar cliente</div><div class="cnpj">${cliente}</div></div>
+        <div class="ficha-corpo">
+          <div style="background:var(--vermelho-bg);border-radius:8px;padding:10px;margin-bottom:14px;font-size:12.5px;color:var(--vermelho);">
+            <i class="ti ti-alert-triangle"></i> O cliente será registrado na aba Cancelamentos com a data e o motivo. Os dados do contrato são herdados automaticamente.
+          </div>
+          <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Data do cancelamento *</label>
+            <input type="date" id="cc-data" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+          <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Motivo *</label>
+            <select id="cc-motivo" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"><option value="">— selecione —</option>${MOTIVOS_CANCELAMENTO.map(m=>`<option>${m}</option>`).join('')}</select></div>
+          <div style="margin-bottom:14px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Observação (opcional)</label>
+            <textarea id="cc-obs" rows="2" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;font-family:var(--fonte-corpo);"></textarea></div>
+          <div class="ficha-botoes">
+            <button class="ficha-btn-primario" style="background:var(--vermelho);" onclick="salvarCancelamento('${cnpj.replace(/'/g,'')}','${cliente.replace(/'/g,'')}')"><i class="ti ti-check"></i> Confirmar cancelamento</button>
+            <button class="ficha-btn-secundario" onclick="fecharFicha()">Voltar</button>
+          </div>
+          <div id="cc-msg"></div>
+        </div>
+      </div>
+    </div>`;
+}
+async function salvarCancelamento(cnpj, cliente) {
+  const dataCancelamento = document.getElementById('cc-data').value;
+  const motivoSel = document.getElementById('cc-motivo').value;
+  const obs = document.getElementById('cc-obs').value;
+  if (!dataCancelamento) { document.getElementById('cc-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Informe a data do cancelamento.</div>'; return; }
+  if (!motivoSel) { document.getElementById('cc-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Escolha o motivo.</div>'; return; }
+  const motivo = obs ? `${motivoSel} — ${obs}` : motivoSel;
+  document.getElementById('cc-msg').innerHTML = '<div style="text-align:center;padding:10px;color:var(--cinza-500);">Registrando...</div>';
+  try {
+    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
+      acao:'cancelarCliente', token: sessaoToken,
+      dados:{ cnpj, cliente, dataCancelamento, motivo, consultor: (fichaClienteAtual&&fichaClienteAtual['CONSULTOR'])||'' }
+    })});
+    const r = await resp.json();
+    if (!r.ok) { document.getElementById('cc-msg').innerHTML=`<div class="sem-acesso">${r.erro}</div>`; return; }
+    cacheCanc = null;
+    document.getElementById('cc-msg').innerHTML = '<div style="background:var(--verde-ok-bg);border-radius:8px;padding:10px;margin-top:10px;color:var(--verde-ok);font-size:13px;"><i class="ti ti-circle-check"></i> Cliente cancelado e registrado na aba Cancelamentos.</div>';
+    setTimeout(fecharFicha, 1800);
+  } catch(e) { document.getElementById('cc-msg').innerHTML='<div class="sem-acesso">Erro de conexão.</div>'; }
 }
 
 // ---- Retomar sessão ao abrir ----
