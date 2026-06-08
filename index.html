@@ -454,9 +454,9 @@ const MODULOS = [
 const ACESSO = {
   admin:       ['crm','carteira','agenda','regula'],          // Mafe, Andrea — tudo
   diretor:     ['crm','carteira','agenda','regula'],          // Roberto — tudo
-  supervisor:  ['crm','carteira','agenda','regula'],          // Rogério — tudo menos financeiro (ver SUBMODULOS_BLOQUEADOS)
-  assistente:  ['crm','carteira','agenda','regula'],          // Danielly — tudo (operacional)
-  vendedor:    ['crm','carteira','agenda','regula'],          // Bruna, Elaine — carteira limitada (ver SUBMODULOS_BLOQUEADOS)
+  supervisor:  ['crm','carteira','agenda'],                  // Rogério — sem SP Regula; financeiro bloqueado (ver SUBMODULOS_BLOQUEADOS)
+  assistente:  ['crm','carteira','agenda','regula'],          // Danielly — operacional
+  vendedor:    ['crm','carteira','agenda'],                  // Bruna, Elaine — sem SP Regula; carteira limitada (ver SUBMODULOS_BLOQUEADOS)
   financeiro:  ['carteira'],                                  // Joyce — só carteira, sem CRM
 };
 
@@ -546,13 +546,14 @@ async function fazerLogin() {
     }
     // sucesso
     sessaoToken = r.token;
-    // reforço: se o Apps Script não devolveu perfil/nome corretos, completa pela lista local (USUARIOS)
+    // a lista local (USUARIOS) é a fonte confiável de perfil/nome — ela manda.
+    // só usa o que o Apps Script devolveu se a pessoa não estiver na lista local.
     const local = (typeof USUARIOS!=='undefined') ? USUARIOS.find(u => String(u.id).toLowerCase() === String(r.usuario.id).toLowerCase()) : null;
     usuarioAtual = {
       id: r.usuario.id,
-      nome: r.usuario.nome || (local && local.nome),
-      role: r.usuario.role || (local && local.role),
-      perfil: (r.usuario.perfil && String(r.usuario.perfil).trim()) ? String(r.usuario.perfil).trim().toLowerCase() : (local && local.perfil)
+      nome: (local && local.nome) || r.usuario.nome,
+      role: (local && local.role) || r.usuario.role,
+      perfil: (local && local.perfil) || (r.usuario.perfil ? String(r.usuario.perfil).trim().toLowerCase() : '')
     };
     // guardar sessão 8h
     localStorage.setItem('ecotrans_sessao', JSON.stringify({
@@ -576,6 +577,9 @@ function checarSessao() {
     const obj = JSON.parse(s);
     if (obj.expira && Date.now() < obj.expira) {
       sessaoToken = obj.token; usuarioAtual = obj.usuario;
+      // reforço: lista local manda no perfil/nome (caso a sessão tenha sido salva com perfil errado)
+      const local = (typeof USUARIOS!=='undefined' && usuarioAtual) ? USUARIOS.find(u => String(u.id).toLowerCase() === String(usuarioAtual.id).toLowerCase()) : null;
+      if (local) { usuarioAtual.perfil = local.perfil; usuarioAtual.nome = local.nome; usuarioAtual.role = local.role; }
       iniciarApp();
     } else {
       localStorage.removeItem('ecotrans_sessao');
@@ -1165,9 +1169,10 @@ async function salvarAtividade(cnpj, cliente) {
     const r = await resp.json();
     if (!r.ok) { document.getElementById('at-msg').innerHTML=`<div class="sem-acesso">${r.erro}</div>`; return; }
     document.getElementById('form-ativ-overlay').remove();
-    // recarregar histórico se estiver na ficha
+    // recarregar histórico se estiver na ficha do cliente
     const corpo = document.getElementById('ficha-corpo');
-    if (corpo) renderHistoricoCliente(corpo);
+    if (corpo && document.getElementById('lead-hist')) { carregarHistoricoLead(cliente, cnpj); }
+    else if (corpo) renderHistoricoCliente(corpo);
   } catch(e) { document.getElementById('at-msg').innerHTML='<div class="sem-acesso">Erro de conexão.</div>'; }
 }
 
@@ -1252,7 +1257,7 @@ async function renderKanban(area) {
       <select class="filtro-sel" id="k-consultor" onchange="aplicarKanban()"><option value="">Todos consultores</option>${consultores.map(c=>`<option>${c}</option>`).join('')}</select>
       <select class="filtro-sel" id="k-fonte" onchange="aplicarKanban()"><option value="">Todas fontes</option>${fontes.map(f=>`<option>${f}</option>`).join('')}</select>
       <select class="filtro-sel" id="k-transp" onchange="aplicarKanban()"><option value="">Todas transportadoras</option>${[...new Set(kanbanLeads.map(l=>l['EMPRESA_COLETA_ATUAL']).filter(Boolean).map(t=>String(t).trim()))].sort().map(t=>`<option>${t}</option>`).join('')}</select>
-      <select class="filtro-sel" id="k-etapa" onchange="aplicarKanban()"><option value="">Todas etapas</option><option>Prospecção</option><option>Em Contato</option><option>Proposta Enviada</option><option>Fechado</option><option>Declinado</option></select>
+      <select class="filtro-sel" id="k-etapa" onchange="aplicarKanban()"><option value="">Todas etapas</option><option>Prospecção</option><option>Em Contato</option><option>Proposta Solicitada</option><option>Proposta Enviada</option><option>Fechado</option><option>Declinado</option></select>
       <span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--cinza-600);">
         <i class="ti ti-calendar" style="font-size:15px;"></i> De
         <input type="date" class="filtro-sel" id="k-data-ini" onchange="aplicarKanban()" style="padding:6px 8px;">
@@ -1272,10 +1277,11 @@ function limparDataKanban() {
 
 // etapas principais (entram nos números) + Prospecção à parte
 const ETAPAS_CFG = [
-  { nome: 'Em Contato',       cor: '#185FA5', bg: '#E6F1FB' },
-  { nome: 'Proposta Enviada', cor: '#BA7517', bg: '#FAEEDA' },
-  { nome: 'Fechado',          cor: '#3B6D11', bg: '#EAF3DE' },
-  { nome: 'Declinado',        cor: '#A32D2D', bg: '#FCEBEB' },
+  { nome: 'Em Contato',          cor: '#185FA5', bg: '#E6F1FB' },
+  { nome: 'Proposta Solicitada', cor: '#7C3AED', bg: '#F1EAFB' },
+  { nome: 'Proposta Enviada',    cor: '#BA7517', bg: '#FAEEDA' },
+  { nome: 'Fechado',             cor: '#3B6D11', bg: '#EAF3DE' },
+  { nome: 'Declinado',           cor: '#A32D2D', bg: '#FCEBEB' },
 ];
 const COR_PROSPECCAO = { cor: '#5F5E5A', bg: '#F1EFE8' };
 
@@ -1347,8 +1353,9 @@ function aplicarKanban() {
     html += `<div class="kanban-col" style="background:${col.bg};" ondragover="event.preventDefault();this.style.outline='2px dashed ${col.cor}'" ondragleave="this.style.outline='none'" ondrop="soltarCard(event,'${col.nome}')">
       <div class="kanban-col-titulo" style="color:${col.cor};">${col.nome}${col.aparte?' <span style="font-size:10px;font-weight:400;">(fora dos nº)</span>':''}<span class="qtd">${doEtapa.length}</span></div>`;
     doEtapa.slice(0, 40).forEach(l => {
-      html += `<div class="kanban-card" draggable="true" ondragstart="pegarCard(event,'${String(l['ID_LEAD']||'').replace(/'/g,'')}')" onclick="abrirLead('${String(l['ID_LEAD']||'').replace(/'/g,'')}')" style="border-left-color:${col.cor};">
-        <div class="cli">${l['CLIENTE']||'—'}</div>
+      const ehNovo = String(l['NOVO']||'').toLowerCase()==='sim';
+      html += `<div class="kanban-card${ehNovo?' card-novo':''}" draggable="true" ondragstart="pegarCard(event,'${String(l['ID_LEAD']||'').replace(/'/g,'')}')" onclick="abrirLead('${String(l['ID_LEAD']||'').replace(/'/g,'')}')" style="border-left-color:${col.cor};${ehNovo?'background:#FFFBEA;box-shadow:0 0 0 1.5px #F0C808;':''}">
+        <div class="cli">${ehNovo?'<span style="display:inline-block;background:#F0C808;color:#5a4a00;font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:5px;vertical-align:1px;">NOVO</span>':''}${l['CLIENTE']||'—'}</div>
         <div class="meta">${l['CONSULTOR']||'—'}${l['FONTE']?' · '+l['FONTE']:''}</div>
         ${l['EMPRESA_COLETA_ATUAL']?`<div class="meta" style="margin-top:3px;"><i class="ti ti-truck" style="font-size:12px;vertical-align:-1px;"></i> ${l['EMPRESA_COLETA_ATUAL']}</div>`:''}
       </div>`;
@@ -1371,36 +1378,94 @@ async function soltarCard(ev, novaEtapaCol) {
   ev.currentTarget.style.outline = 'none';
   if (!cardArrastado) return;
   const idLead = cardArrastado; cardArrastado = null;
-
   // mapear nome de coluna -> etapa real no Sheets (Prospecção -> Indicação/Prospecção)
   const novaEtapa = novaEtapaCol === 'Prospecção' ? 'Indicação/Prospecção' : novaEtapaCol;
-  const lead = kanbanLeads.find(l => String(l['ID_LEAD'])===idLead);
+  await mudarEtapaLead(idLead, novaEtapa);
+}
+function etapaDeGlobal(l) { return l['ETAPA']==='Indicação/Prospecção' ? 'Prospecção' : l['ETAPA']; }
+
+// modal que exige o motivo da perda ao declinar um lead (motivos da planilha de Propostas e Chamados)
+function abrirModalMotivoPerda(idLead) {
+  const lead = kanbanLeads.find(l => String(l['ID_LEAD'])===String(idLead));
+  const nome = lead ? (lead['CLIENTE']||'') : '';
+  const cont = document.getElementById('ficha-container');
+  cont.insertAdjacentHTML('beforeend', `
+    <div class="ficha-overlay" id="modal-motivo-overlay" onclick="if(event.target===this)document.getElementById('modal-motivo-overlay').remove()" style="z-index:700;">
+      <div class="ficha" style="width:440px;">
+        <div class="ficha-topo" style="background:linear-gradient(135deg,#A32D2D,#7d2020);">
+          <button class="fechar" onclick="document.getElementById('modal-motivo-overlay').remove()"><i class="ti ti-x"></i></button>
+          <div class="nome"><i class="ti ti-circle-x"></i> Motivo do declínio</div><div class="cnpj">${nome}</div></div>
+        <div class="ficha-corpo">
+          <div style="font-size:13px;color:var(--cinza-600);margin-bottom:12px;">Informe por que este lead foi declinado (obrigatório):</div>
+          <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Motivo *</label>
+            <select id="mp-motivo" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"><option value="">— selecione —</option>${LISTA_MOTIVOS_PERDA.map(m=>`<option>${m}</option>`).join('')}</select></div>
+          <div style="margin-bottom:14px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Detalhe (opcional)</label>
+            <textarea id="mp-obs" rows="2" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;font-family:var(--fonte-corpo);"></textarea></div>
+          <div class="ficha-botoes">
+            <button class="ficha-btn-primario" style="background:var(--vermelho);" onclick="confirmarDeclinio('${String(idLead).replace(/'/g,'')}')"><i class="ti ti-check"></i> Confirmar declínio</button>
+            <button class="ficha-btn-secundario" onclick="document.getElementById('modal-motivo-overlay').remove()">Cancelar</button>
+          </div>
+          <div id="mp-msg"></div>
+        </div>
+      </div>
+    </div>`);
+}
+async function confirmarDeclinio(idLead) {
+  const motivoSel = document.getElementById('mp-motivo').value;
+  const obs = document.getElementById('mp-obs').value;
+  if (!motivoSel) { document.getElementById('mp-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Escolha o motivo.</div>'; return; }
+  const motivo = obs ? `${motivoSel} — ${obs}` : motivoSel;
+  const overlay = document.getElementById('modal-motivo-overlay');
+  if (overlay) overlay.remove();
+  await mudarEtapaLead(idLead, 'Declinado', motivo);
+  fecharFicha();
+}
+
+// muda a etapa de um lead (usado pelo arrastar E pelo seletor no card). Grava no Sheets.
+// Se "Proposta Solicitada", abre precificação. Se "Declinado", exige o motivo da perda primeiro.
+async function mudarEtapaLead(idLead, novaEtapa, motivoPerda) {
+  const lead = kanbanLeads.find(l => String(l['ID_LEAD'])===String(idLead));
   if (!lead) return;
-  if (etapaDeGlobal(lead) === novaEtapaCol) return; // não mudou
+  const etapaAntiga = lead['ETAPA'];
+  const colAntiga = etapaDeGlobal(lead);
+  const colNova = novaEtapa === 'Indicação/Prospecção' ? 'Prospecção' : novaEtapa;
+  if (colAntiga === colNova) return; // não mudou
+
+  // Declinado exige motivo — se ainda não veio, abre o modal e interrompe (o modal chama de novo com o motivo)
+  if (novaEtapa === 'Declinado' && !motivoPerda) {
+    aplicarKanban(); // garante que o card volte visualmente caso tenha sido arrastado
+    abrirModalMotivoPerda(idLead);
+    return;
+  }
 
   // otimista: move já na tela
-  const etapaAntiga = lead['ETAPA'];
   lead['ETAPA'] = novaEtapa;
+  lead['NOVO'] = ''; // deixou de ser intocado
+  if (motivoPerda) lead['MOTIVO_PERDA'] = motivoPerda;
   aplicarKanban();
 
   try {
     const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
       acao:'moverLead', token: sessaoToken,
-      dados: { idLead, novaEtapa, nomeUsuario: usuarioAtual.nome }
+      dados: { idLead: String(idLead), novaEtapa, nomeUsuario: usuarioAtual.nome, motivoPerda: motivoPerda||'' }
     })});
     const r = await resp.json();
     if (!r.ok) {
-      // reverte e avisa
       lead['ETAPA'] = etapaAntiga;
       aplicarKanban();
       alert(r.erro || 'Não foi possível mover o lead.');
+      return;
+    }
+    // se virou "Proposta Solicitada", abre a precificação já preenchida com este lead
+    if (novaEtapa === 'Proposta Solicitada') {
+      fecharFicha();
+      abrirFormPrecoLead(lead);
     }
   } catch(e) {
     lead['ETAPA'] = etapaAntiga; aplicarKanban();
     alert('Erro de conexão ao mover o lead.');
   }
 }
-function etapaDeGlobal(l) { return l['ETAPA']==='Indicação/Prospecção' ? 'Prospecção' : l['ETAPA']; }
 
 // ============================================================
 // REAJUSTES — cards estilo RGG, filtro de data, detalhe ao clicar
@@ -1673,20 +1738,35 @@ async function solicitarAprovacaoReaj(idx, base) {
   } catch(e) { area.innerHTML = `<div class="sem-acesso">Erro de conexão.</div>`; }
 }
 
-async function emailReajusteUnico(idx, base) {
+function emailReajusteUnico(idx, base) {
   const r = cacheReajustes[idx];
   const pct = parseFloat(document.getElementById('reaj-pct').value);
   const indice = (document.getElementById('reaj-indice')||{}).value||'';
   if (isNaN(pct)) { alert('Digite o % primeiro.'); return; }
   const novo = Math.round(base*(1+pct/100)*100)/100;
-  try {
-    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
-      acao:'emailAprovacaoReajuste', token: sessaoToken,
-      dados: { cliente:r['CLIENTE'], cnpj:r['CNPJ'], servico:r['TP DE SERVIÇO'], valorAtual:fmtMoeda(base), percentual:pct+'%', valorNovo:fmtMoeda(novo), indice }
-    })});
-    const res = await resp.json();
-    alert(res.ok ? 'E-mail enviado para Roberto e Andrea!' : ('Erro: '+res.erro));
-  } catch(e) { alert('Erro de conexão ao enviar e-mail.'); }
+  const para = DIRETORES_CC.join(',');
+  const assunto = encodeURIComponent(`Solicitação de aprovação de reajuste — ${r['CLIENTE']}`);
+  const corpo = encodeURIComponent(
+`Prezados,
+
+Solicito aprovação para o reajuste abaixo:
+
+Cliente: ${r['CLIENTE']}
+CNPJ: ${r['CNPJ']||'—'}
+Serviço: ${r['TP DE SERVIÇO']||'—'}
+Índice de referência: ${indice||'—'}
+Percentual aplicado: ${pct}%
+
+Valor atual: ${fmtMoeda(base)}
+Valor reajustado: ${fmtMoeda(novo)}
+Diferença: ${fmtMoeda(novo-base)}
+
+Aguardo a aprovação para prosseguir.
+
+Atenciosamente,
+${usuarioAtual.nome}
+Ecotrans Ambiental`);
+  window.location.href = `mailto:${para}?subject=${assunto}&body=${corpo}`;
 }
 
 async function confirmarReajuste(idx, base) {
@@ -1826,17 +1906,24 @@ async function renderInadimplencia(area) {
   area.innerHTML = html;
 }
 
-async function enviarEmailInad(cnpj, cliente, valor, dias, obs) {
-  if (!confirm('Enviar e-mail de inadimplência de "'+cliente+'" para Roberto e Andrea?')) return;
-  try {
-    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
-      acao:'enviarEmail', token: sessaoToken,
-      dados: { cnpj, cliente, valor: fmtMoeda(valor), dias, obs }
-    })});
-    const r = await resp.json();
-    alert(r.ok ? 'E-mail enviado para Roberto e Andrea!' : ('Erro: '+r.erro));
-    if (r.ok) { cacheInad = null; renderInadimplencia(document.getElementById('area-conteudo')); }
-  } catch(e) { alert('Erro de conexão ao enviar e-mail.'); }
+function enviarEmailInad(cnpj, cliente, valor, dias, obs) {
+  const para = DIRETORES_CC.join(',');
+  const assunto = encodeURIComponent(`Inadimplência — ${cliente}`);
+  const corpo = encodeURIComponent(
+`Prezados,
+
+Comunico a seguinte pendência financeira:
+
+Cliente: ${cliente}
+CNPJ: ${cnpj||'—'}
+Valor em aberto: ${fmtMoeda(valor)}
+Dias de atraso: ${dias||'—'}
+${obs?`Observação: ${obs}`:''}
+
+Atenciosamente,
+${usuarioAtual.nome}
+Ecotrans Ambiental`);
+  window.location.href = `mailto:${para}?subject=${assunto}&body=${corpo}`;
 }
 
 // ---- Sininho de avisos (Roberto, Andrea, admin) ----
@@ -3127,13 +3214,25 @@ async function abrirEmailLoteReaj() {
     const pct = parseFloat(r['ALIQUOTA'])*100||0;
     return { cliente:r['CLIENTE'], valorAtual:fmtMoeda(base), valorNovo:fmtMoeda(base*(1+pct/100)), percentual:pct.toFixed(1)+'%', indice:r['ÍNDICE']||'—' };
   });
-  try {
-    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
-      acao:'emailAprovacaoReajuste', token: sessaoToken, dados:{ lista:listaEmail, mes }
-    })});
-    const r = await resp.json();
-    alert(r.ok ? `E-mail com ${listaEmail.length} reajustes enviado para Roberto e Andrea!` : ('Erro: '+r.erro));
-  } catch(e) { alert('Erro de conexão.'); }
+  // montar corpo do e-mail em texto (tabela alinhada) e abrir o Outlook via mailto
+  const linhas = listaEmail.map((e,i) =>
+    `${(i+1)}. ${e.cliente}\n   Atual: ${e.valorAtual}  |  Reajuste: ${e.percentual} (${e.indice})  |  Novo: ${e.valorNovo}`
+  ).join('\n\n');
+  const para = DIRETORES_CC.join(',');
+  const assunto = encodeURIComponent(`Reajustes previstos para ${mes} — aprovação`);
+  const corpo = encodeURIComponent(
+`Prezados,
+
+Seguem os ${listaEmail.length} reajustes previstos para ${mes}, para aprovação:
+
+${linhas}
+
+Aguardo a aprovação para aplicar os reajustes acima.
+
+Atenciosamente,
+${usuarioAtual.nome}
+Ecotrans Ambiental`);
+  window.location.href = `mailto:${para}?subject=${assunto}&body=${corpo}`;
 }
 
 // ============================================================
@@ -3187,6 +3286,35 @@ async function renderPrecificacao(area) {
   }
   if (!aguardando.length && !prontos.length) html += `<div class="sem-acesso" style="margin-top:16px;background:var(--verde-claro-bg);border-color:var(--verde-claro);color:var(--verde-escuro);"><i class="ti ti-info-circle"></i> Nenhuma solicitação de precificação ainda.</div>`;
   area.innerHTML = html;
+}
+
+// abre a precificação já preenchida a partir de um lead (usado quando arrasta para "Proposta Solicitada")
+function abrirFormPrecoLead(lead) {
+  const cont = document.getElementById('ficha-container');
+  cont.innerHTML = `
+    <div class="ficha-overlay" onclick="if(event.target===this)fecharFicha()">
+      <div class="ficha" style="width:480px;">
+        <div class="ficha-topo"><button class="fechar" onclick="fecharFicha()"><i class="ti ti-x"></i></button>
+          <div class="nome"><i class="ti ti-tag"></i> Solicitar precificação</div><div class="cnpj">${lead['CLIENTE']||''} · Roberto vai definir o preço</div></div>
+        <div class="ficha-corpo">
+          <input type="hidden" id="pr-cliente" value="${(lead['CLIENTE']||'').replace(/"/g,'&quot;')}">
+          <div style="background:var(--verde-claro-bg);border-radius:8px;padding:10px;margin-bottom:12px;font-size:12.5px;color:var(--verde-escuro);">
+            <i class="ti ti-arrow-right"></i> Lead movido para <b>Proposta Solicitada</b>. Preencha os dados para o Roberto precificar.
+          </div>
+          <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Descrição do serviço</label>
+            <input type="text" id="pr-desc" placeholder="ex: coleta semanal 240L" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+          <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Tipo de resíduo</label>
+            <input type="text" id="pr-residuo" value="${(lead['RESIDUO']||lead['CATEGORIA_RESIDUO']||'').replace(/"/g,'&quot;')}" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+          <div style="margin-bottom:14px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Observação</label>
+            <textarea id="pr-obs" rows="2" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;font-family:var(--fonte-corpo);">${lead['QUANTIDADE']?'Quantidade: '+lead['QUANTIDADE']+'. ':''}${lead['FREQUENCIA']?'Frequência: '+lead['FREQUENCIA']+'.':''}</textarea></div>
+          <div class="ficha-botoes">
+            <button class="ficha-btn-primario" onclick="enviarSolicitacaoPreco()"><i class="ti ti-send"></i> Enviar para o Roberto</button>
+            <button class="ficha-btn-secundario" onclick="fecharFicha()">Depois</button>
+          </div>
+          <div id="pr-msg"></div>
+        </div>
+      </div>
+    </div>`;
 }
 
 async function abrirFormPreco() {
@@ -3332,7 +3460,8 @@ async function salvarLead() {
     'RESPONSAVEL': document.getElementById('nl-resp').value, 'EMAIL': document.getElementById('nl-email').value,
     'TELEFONE': document.getElementById('nl-tel').value,
     'EMPRESA_COLETA_ATUAL': document.getElementById('nl-transp').value,
-    'OBSERVACOES': document.getElementById('nl-obs').value
+    'OBSERVACOES': document.getElementById('nl-obs').value,
+    'NOVO': 'Sim'
   };
   document.getElementById('nl-msg').innerHTML = '<div style="text-align:center;padding:10px;color:var(--cinza-500);">Criando...</div>';
   try {
@@ -3972,9 +4101,14 @@ function abrirLead(id) {
   if (!l) return;
   const cont = document.getElementById('ficha-container');
   const linha = (rotulo, valor) => valor ? `<tr><td style="padding:7px 0;color:var(--cinza-600);white-space:nowrap;padding-right:14px;">${rotulo}</td><td style="padding:7px 0;color:var(--cinza-900);">${valor}</td></tr>` : '';
+  // etapas possíveis para o seletor (inclui Prospecção)
+  const ETAPAS_SEL = ['Indicação/Prospecção','Em Contato','Proposta Solicitada','Proposta Enviada','Fechado','Declinado'];
+  const etapaAtual = l['ETAPA']||'';
+  const idLead = String(l['ID_LEAD']||'').replace(/'/g,'');
+  const cnpjOuVazio = String(l['CNPJ']||'').replace(/'/g,'');
   cont.innerHTML = `
     <div class="ficha-overlay" onclick="if(event.target===this)fecharFicha()">
-      <div class="ficha" style="width:520px;">
+      <div class="ficha" style="width:540px;">
         <div class="ficha-topo">
           <button class="fechar" onclick="fecharFicha()"><i class="ti ti-x"></i></button>
           <div class="nome">${l['CLIENTE']||'—'}</div>
@@ -3986,6 +4120,16 @@ function abrirLead(id) {
           </div>
         </div>
         <div class="ficha-corpo">
+          <div style="background:var(--cinza-100);border-radius:10px;padding:12px;margin-bottom:14px;">
+            <label style="font-size:12px;color:var(--cinza-600);display:block;margin-bottom:6px;font-weight:600;">Mudar etapa</label>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <select id="lead-etapa" style="flex:1;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;font-size:13px;">
+                ${ETAPAS_SEL.map(e=>`<option ${etapaAtual===e?'selected':''}>${e}</option>`).join('')}
+              </select>
+              <button onclick="mudarEtapaPeloSeletor('${idLead}')" style="padding:9px 14px;border:none;background:var(--verde-medio);color:white;border-radius:8px;cursor:pointer;font-size:13px;white-space:nowrap;"><i class="ti ti-check"></i> Aplicar</button>
+            </div>
+            <div style="font-size:11px;color:var(--cinza-500);margin-top:6px;">Ao escolher "Proposta Solicitada", abre a precificação automaticamente.</div>
+          </div>
           <table style="width:100%;font-size:13px;border-collapse:collapse;">
             ${linha('Responsável', l['RESPONSAVEL'])}
             ${linha('E-mail', l['EMAIL'])}
@@ -4001,10 +4145,51 @@ function abrirLead(id) {
             ${linha('Motivo da perda', l['MOTIVO_PERDA'])}
             ${linha('Observações', l['OBSERVACOES'])}
           </table>
-          ${l['CNPJ']?`<div class="ficha-botoes"><button class="ficha-btn-secundario" onclick="abrirFicha('${String(l['CNPJ']).replace(/'/g,'')}')"><i class="ti ti-user"></i> Ver ficha do cliente</button></div>`:''}
+          <div class="ficha-botoes" style="flex-wrap:wrap;">
+            <button class="ficha-btn-primario" onclick="abrirFormAtividade('${cnpjOuVazio||idLead}','${(l['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-plus"></i> Registrar atividade / anotação</button>
+            ${l['CNPJ']?`<button class="ficha-btn-secundario" onclick="abrirFicha('${cnpjOuVazio}')"><i class="ti ti-user"></i> Ver ficha do cliente</button>`:''}
+          </div>
+          <div id="lead-hist" style="margin-top:14px;"></div>
         </div>
       </div>
     </div>`;
+  // carregar histórico de atividades do lead (por cliente)
+  carregarHistoricoLead(l['CLIENTE'], cnpjOuVazio);
+}
+
+// aplica a etapa escolhida no seletor do card
+async function mudarEtapaPeloSeletor(idLead) {
+  const sel = document.getElementById('lead-etapa');
+  if (!sel) return;
+  await mudarEtapaLead(idLead, sel.value);
+  // se não for proposta solicitada (que abre outra tela), fecha a ficha
+  if (sel.value !== 'Proposta Solicitada') fecharFicha();
+}
+
+// carrega as atividades já registradas para este lead/cliente
+async function carregarHistoricoLead(cliente, cnpj) {
+  const area = document.getElementById('lead-hist');
+  if (!area) return;
+  try {
+    const r = await buscarDados('Atividades_Cliente');
+    const todas = r.ok ? r.linhas : [];
+    const alvo = String(cnpj||'').replace(/\D/g,'');
+    const minhas = todas.filter(a =>
+      (alvo && String(a['CNPJ']||'').replace(/\D/g,'')===alvo) ||
+      String(a['CLIENTE']||'').toLowerCase()===String(cliente||'').toLowerCase()
+    );
+    if (!minhas.length) { area.innerHTML = '<div style="font-size:12px;color:var(--cinza-500);padding:8px 0;border-top:1px solid var(--cinza-100);">Nenhuma atividade registrada ainda.</div>'; return; }
+    minhas.sort((a,b)=>{ const da=parseDataReaj(a['DATA_REGISTRO']), db=parseDataReaj(b['DATA_REGISTRO']); return (db||0)-(da||0); });
+    let html = '<div style="border-top:1px solid var(--cinza-100);padding-top:12px;"><div style="font-size:12px;font-weight:600;color:var(--cinza-600);margin-bottom:8px;">Histórico de atividades</div>';
+    minhas.slice(0,20).forEach(a => {
+      html += `<div style="padding:8px 10px;background:var(--cinza-100);border-radius:8px;margin-bottom:6px;">
+        <div style="font-size:12px;font-weight:600;color:var(--cinza-900);">${a['TIPO']||''} · ${a['TITULO']||''}</div>
+        ${a['DESCRICAO']?`<div style="font-size:12px;color:var(--cinza-600);margin-top:2px;">${a['DESCRICAO']}</div>`:''}
+        <div style="font-size:11px;color:var(--cinza-500);margin-top:3px;">${fmtDataBR(a['DATA_REGISTRO'])}${a['REGISTRADO_POR']?' · '+a['REGISTRADO_POR']:''}${a['DATA_AGENDADA']?' · agendado p/ '+fmtDataBR(a['DATA_AGENDADA']):''}</div>
+      </div>`;
+    });
+    area.innerHTML = html + '</div>';
+  } catch(e) { area.innerHTML = ''; }
 }
 
 // ---- Cancelar cliente (move para Cancelados) ----
