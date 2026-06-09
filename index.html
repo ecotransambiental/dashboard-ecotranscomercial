@@ -782,7 +782,7 @@ function fmtMoeda(v) {
   if (v == null || v === '') return '—';
   const n = Number(v);
   if (isNaN(n)) return '—';
-  return 'R$ ' + n.toLocaleString('pt-BR', {minimumFractionDigits:0, maximumFractionDigits:0});
+  return 'R$ ' + n.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
 }
 
 // Formata qualquer data (ISO, datetime, dd/mm) para DD/MM/AAAA
@@ -1629,7 +1629,16 @@ function parseMoedaReaj(v) {
   // pega o último número da string (casos "R$ 850,00/Ton R$221,40")
   const matches = String(v).match(/[\d.,]+/g);
   if (!matches) return null;
-  let s = matches[matches.length-1].replace(/\./g,'').replace(',','.');
+  let s = matches[matches.length-1];
+  // decidir separador decimal: o último separador (. ou ,) é o decimal
+  const ultPonto = s.lastIndexOf('.'), ultVirg = s.lastIndexOf(',');
+  if (ultVirg > ultPonto) {
+    // vírgula é decimal (formato BR: 1.234,56) -> remove pontos, vírgula vira ponto
+    s = s.replace(/\./g,'').replace(',','.');
+  } else if (ultPonto > ultVirg) {
+    // ponto é decimal (formato US: 1,234.56 ou 11.53) -> remove vírgulas
+    s = s.replace(/,/g,'');
+  }
   const n = parseFloat(s);
   return isNaN(n) ? null : n;
 }
@@ -1751,7 +1760,9 @@ function cardsReaj(lista) {
   lista.slice(0,150).forEach(r => {
     const ant = parseMoedaReaj(r['PREÇO ANTERIOR']);
     const novo = parseMoedaReaj(r['VALOR REAJUSTADO']);
-    const aliq = r['ALIQUOTA'];
+    let pctR = null;
+    if (r['ALIQUOTA']!=null && r['ALIQUOTA']!=='') pctR = parseFloat(r['ALIQUOTA'])*100;
+    else if (ant!=null && ant!==0 && novo!=null) pctR = (novo-ant)/ant*100;
     html += `<div class="reaj-card ${r._cls.cls}" onclick="detalheReaj(${r._idx})">
       <div class="reaj-topo">
         <div style="min-width:0;">
@@ -1763,7 +1774,7 @@ function cardsReaj(lista) {
       <div class="reaj-linhas">
         <div><span>Próx. reajuste</span><b>${fmtData(r._prox)}</b></div>
         <div><span>Índice</span><b>${r['ÍNDICE']||'—'}</b></div>
-        <div><span>Reajuste</span><b>${aliq!=null?(Math.round(aliq*100))+'%':'—'}</b></div>
+        <div><span>Reajuste</span><b>${pctR!=null?pctR.toFixed(1).replace('.',',')+'%':'—'}</b></div>
       </div>
     </div>`;
   });
@@ -1790,8 +1801,12 @@ function detalheReaj(idx) {
   const prox = proximoReajuste(r['DATA ÚLTIMO REAJUSTE '] || r['DATA ÚLTIMO REAJUSTE']);
   const ant = parseMoedaReaj(r['PREÇO ANTERIOR']);
   const novo = parseMoedaReaj(r['VALOR REAJUSTADO']);
-  const dif = parseMoedaReaj(r['DIFERENÇA R$']);
-  const aliq = r['ALIQUOTA'];
+  let dif = parseMoedaReaj(r['DIFERENÇA R$']);
+  if (dif==null && ant!=null && novo!=null) dif = novo - ant; // calcula se vazia
+  // % de reajuste: usa ALIQUOTA se houver; senão calcula de (novo-anterior)/anterior
+  let pctReaj = null;
+  if (r['ALIQUOTA']!=null && r['ALIQUOTA']!=='') pctReaj = parseFloat(r['ALIQUOTA'])*100;
+  else if (ant!=null && ant!==0 && novo!=null) pctReaj = (novo-ant)/ant*100;
   const cont = document.getElementById('ficha-container');
   cont.innerHTML = `
     <div class="ficha-overlay" onclick="if(event.target===this)fecharFicha()">
@@ -1811,7 +1826,7 @@ function detalheReaj(idx) {
             <div class="ficha-kpi"><div class="lbl">Valor reajustado</div><div class="val">${novo!=null?fmtMoeda(novo):'—'}</div></div>
           </div>
           <table class="ficha-tab">
-            <tr><td>% de reajuste aplicado</td><td>${aliq!=null?(Math.round(aliq*100))+'%':'—'}</td></tr>
+            <tr><td>% de reajuste aplicado</td><td>${pctReaj!=null?pctReaj.toFixed(1).replace('.',',')+'%':'—'}</td></tr>
             <tr><td>Diferença (R$)</td><td>${dif!=null?fmtMoeda(dif):'—'}</td></tr>
             <tr><td>Índice de referência</td><td>${r['ÍNDICE']||'—'}</td></tr>
             <tr><td>Mínima contratual</td><td>${r['MÍN. CONTRATUAL']||'—'}</td></tr>
@@ -4311,9 +4326,11 @@ function abrirLead(id) {
 async function mudarEtapaPeloSeletor(idLead) {
   const sel = document.getElementById('lead-etapa');
   if (!sel) return;
-  await mudarEtapaLead(idLead, sel.value);
-  // se não for proposta solicitada (que abre outra tela), fecha a ficha
-  if (sel.value !== 'Proposta Solicitada') fecharFicha();
+  const etapa = sel.value;
+  // etapas que abrem um modal próprio (precificação, proposta, motivo) — NÃO fechar a ficha aqui
+  const abreModal = (etapa==='Proposta Solicitada' || etapa==='Proposta Enviada' || etapa==='Declinado');
+  await mudarEtapaLead(idLead, etapa);
+  if (!abreModal) fecharFicha();
 }
 
 // carrega as atividades já registradas para este lead/cliente
