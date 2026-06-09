@@ -1521,7 +1521,7 @@ async function confirmarDeclinio(idLead) {
 
 // muda a etapa de um lead (usado pelo arrastar E pelo seletor no card). Grava no Sheets.
 // Se "Proposta Solicitada", abre precificação. Se "Declinado", exige o motivo da perda primeiro.
-async function mudarEtapaLead(idLead, novaEtapa, motivoPerda) {
+async function mudarEtapaLead(idLead, novaEtapa, motivoPerda, dadosProposta) {
   const lead = kanbanLeads.find(l => String(l['ID_LEAD'])===String(idLead));
   if (!lead) return;
   const etapaAntiga = lead['ETAPA'];
@@ -1535,17 +1535,29 @@ async function mudarEtapaLead(idLead, novaEtapa, motivoPerda) {
     abrirModalMotivoPerda(idLead);
     return;
   }
+  // Proposta Enviada pede nº, data e valor — se ainda não vieram, abre o modal e interrompe
+  if (novaEtapa === 'Proposta Enviada' && !dadosProposta) {
+    aplicarKanban();
+    abrirModalProposta(idLead);
+    return;
+  }
 
   // otimista: move já na tela
   lead['ETAPA'] = novaEtapa;
   lead['NOVO'] = ''; // deixou de ser intocado
   if (motivoPerda) lead['MOTIVO_PERDA'] = motivoPerda;
+  if (dadosProposta) {
+    lead['N_PROPOSTA'] = dadosProposta.numero;
+    lead['DATA_ENVIO_PROPOSTA'] = dadosProposta.data;
+    lead['VALOR_R$'] = dadosProposta.valor;
+  }
   aplicarKanban();
 
   try {
     const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
       acao:'moverLead', token: sessaoToken,
-      dados: { idLead: String(idLead), novaEtapa, nomeUsuario: usuarioAtual.nome, motivoPerda: motivoPerda||'' }
+      dados: { idLead: String(idLead), novaEtapa, nomeUsuario: usuarioAtual.nome, motivoPerda: motivoPerda||'',
+               dadosProposta: dadosProposta||null }
     })});
     const r = await resp.json();
     if (!r.ok) {
@@ -1563,6 +1575,46 @@ async function mudarEtapaLead(idLead, novaEtapa, motivoPerda) {
     lead['ETAPA'] = etapaAntiga; aplicarKanban();
     alert('Erro de conexão ao mover o lead.');
   }
+}
+
+// modal que pede nº da proposta, data de envio e valor ao mover para "Proposta Enviada"
+function abrirModalProposta(idLead) {
+  const lead = kanbanLeads.find(l => String(l['ID_LEAD'])===String(idLead));
+  const nome = lead ? (lead['CLIENTE']||'') : '';
+  const hoje = new Date().toISOString().split('T')[0];
+  const cont = document.getElementById('ficha-container');
+  cont.insertAdjacentHTML('beforeend', `
+    <div class="ficha-overlay" id="modal-prop-overlay" onclick="if(event.target===this)document.getElementById('modal-prop-overlay').remove()" style="z-index:700;">
+      <div class="ficha" style="width:440px;">
+        <div class="ficha-topo" style="background:linear-gradient(135deg,#BA7517,#925a10);">
+          <button class="fechar" onclick="document.getElementById('modal-prop-overlay').remove()"><i class="ti ti-x"></i></button>
+          <div class="nome"><i class="ti ti-file-text"></i> Proposta enviada</div><div class="cnpj">${nome}</div></div>
+        <div class="ficha-corpo">
+          <div style="font-size:13px;color:var(--cinza-600);margin-bottom:12px;">Registre os dados da proposta enviada:</div>
+          <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Nº da proposta *</label>
+            <input type="text" id="pp-numero" placeholder="ex: 6592/2026" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+          <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Data de envio *</label>
+            <input type="date" id="pp-data" value="${hoje}" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+          <div style="margin-bottom:14px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Valor da proposta (R$) *</label>
+            <input type="number" id="pp-valor" step="0.01" placeholder="ex: 1500.00" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+          <div class="ficha-botoes">
+            <button class="ficha-btn-primario" onclick="confirmarProposta('${String(idLead).replace(/'/g,'')}')"><i class="ti ti-check"></i> Confirmar</button>
+            <button class="ficha-btn-secundario" onclick="document.getElementById('modal-prop-overlay').remove()">Cancelar</button>
+          </div>
+          <div id="pp-msg"></div>
+        </div>
+      </div>
+    </div>`);
+}
+async function confirmarProposta(idLead) {
+  const numero = document.getElementById('pp-numero').value;
+  const data = document.getElementById('pp-data').value;
+  const valor = document.getElementById('pp-valor').value;
+  if (!numero || !data || !valor) { document.getElementById('pp-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Preencha número, data e valor.</div>'; return; }
+  const overlay = document.getElementById('modal-prop-overlay');
+  if (overlay) overlay.remove();
+  await mudarEtapaLead(idLead, 'Proposta Enviada', null, { numero, data, valor });
+  fecharFicha();
 }
 
 // ============================================================
