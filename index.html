@@ -968,6 +968,67 @@ async function abrirFicha(cnpj) {
 }
 function fecharFicha() { document.getElementById('ficha-container').innerHTML = ''; }
 
+// formulário para registrar um reajuste direto da ficha do cliente
+function abrirFormReajusteCliente() {
+  const cli = fichaClienteAtual;
+  const cont = document.getElementById('ficha-container');
+  cont.insertAdjacentHTML('beforeend', `
+    <div class="ficha-overlay" id="form-reaj-overlay" onclick="if(event.target===this)document.getElementById('form-reaj-overlay').remove()" style="z-index:600;">
+      <div class="ficha" style="width:460px;">
+        <div class="ficha-topo"><button class="fechar" onclick="document.getElementById('form-reaj-overlay').remove()"><i class="ti ti-x"></i></button>
+          <div class="nome"><i class="ti ti-trending-up"></i> Registrar reajuste</div><div class="cnpj">${cli['CLIENTE']||''}</div></div>
+        <div class="ficha-corpo">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div style="grid-column:1/3;"><label style="font-size:13px;color:var(--cinza-700);">Tipo de serviço</label>
+              <input type="text" id="rc-servico" placeholder="ex: Coleta resíduo saúde" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+            <div><label style="font-size:13px;color:var(--cinza-700);">Preço anterior (R$)</label>
+              <input type="number" id="rc-anterior" step="0.01" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;" oninput="calcReajCliente()"></div>
+            <div><label style="font-size:13px;color:var(--cinza-700);">% reajuste</label>
+              <input type="number" id="rc-pct" step="0.01" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;" oninput="calcReajCliente()"></div>
+            <div><label style="font-size:13px;color:var(--cinza-700);">Valor reajustado (R$)</label>
+              <input type="number" id="rc-novo" step="0.01" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+            <div><label style="font-size:13px;color:var(--cinza-700);">Índice</label>
+              <input type="text" id="rc-indice" placeholder="ex: IGP-M" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+            <div style="grid-column:1/3;"><label style="font-size:13px;color:var(--cinza-700);">Data do reajuste</label>
+              <input type="date" id="rc-data" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+          </div>
+          <div class="ficha-botoes" style="margin-top:14px;">
+            <button class="ficha-btn-primario" onclick="salvarReajusteCliente()"><i class="ti ti-check"></i> Salvar reajuste</button>
+            <button class="ficha-btn-secundario" onclick="document.getElementById('form-reaj-overlay').remove()">Cancelar</button>
+          </div>
+          <div id="rc-msg"></div>
+        </div>
+      </div>
+    </div>`);
+}
+function calcReajCliente() {
+  const ant = parseFloat(document.getElementById('rc-anterior').value);
+  const pct = parseFloat(document.getElementById('rc-pct').value);
+  if (!isNaN(ant) && !isNaN(pct)) document.getElementById('rc-novo').value = (Math.round(ant*(1+pct/100)*100)/100);
+}
+async function salvarReajusteCliente() {
+  const cli = fichaClienteAtual;
+  const campos = {
+    'CLIENTE': cli['CLIENTE']||'', 'CNPJ': cli['CNPJ']||'',
+    'TP DE SERVIÇO': document.getElementById('rc-servico').value,
+    'PREÇO ANTERIOR': document.getElementById('rc-anterior').value,
+    'VALOR REAJUSTADO': document.getElementById('rc-novo').value,
+    'ALIQUOTA': (parseFloat(document.getElementById('rc-pct').value)/100)||'',
+    'ÍNDICE': document.getElementById('rc-indice').value,
+    'DATA ÚLTIMO REAJUSTE ': document.getElementById('rc-data').value
+  };
+  if (!campos['TP DE SERVIÇO'] || !campos['VALOR REAJUSTADO']) { document.getElementById('rc-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Informe o serviço e o valor reajustado.</div>'; return; }
+  document.getElementById('rc-msg').innerHTML = '<div style="text-align:center;padding:10px;color:var(--cinza-500);">Salvando...</div>';
+  try {
+    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({ acao:'novoRegistro', token: sessaoToken, dados:{ aba:'Reajustes', campos } })});
+    const r = await resp.json();
+    if (!r.ok) { document.getElementById('rc-msg').innerHTML=`<div class="sem-acesso">${r.erro||'verifique se o Apps Script foi republicado.'}</div>`; return; }
+    document.getElementById('form-reaj-overlay').remove();
+    const corpo = document.getElementById('ficha-corpo');
+    if (corpo) renderAbaReajustes(corpo);
+  } catch(e) { document.getElementById('rc-msg').innerHTML='<div class="sem-acesso">Erro de conexão.</div>'; }
+}
+
 // salvar o consultor editado na ficha (atualiza Clientes e Contratos)
 async function salvarConsultorFicha(cnpj) {
   const sel = document.getElementById('ficha-consultor');
@@ -1009,8 +1070,9 @@ async function renderAbaContratos(corpo) {
   const r = await buscarDados('Contratos');
   const alvo = cnpjLimpo(fichaClienteAtual['CNPJ']);
   const lista = (r.ok?r.linhas:[]).filter(c => cnpjLimpo(c['CNPJ'])===alvo);
-  if (!lista.length) { corpo.innerHTML = `<div style="text-align:center;color:var(--cinza-500);padding:24px;font-size:13px;">Nenhum contrato para este cliente.</div>`; return; }
-  let html = '';
+  const btnAdd = `<button class="ficha-btn-primario" style="margin-bottom:14px;" onclick="abrirFormContrato('${(fichaClienteAtual['CLIENTE']||'').replace(/'/g,'')}','${cnpjLimpo(fichaClienteAtual['CNPJ'])}')"><i class="ti ti-plus"></i> Adicionar contrato</button>`;
+  if (!lista.length) { corpo.innerHTML = btnAdd + `<div style="text-align:center;color:var(--cinza-500);padding:24px;font-size:13px;">Nenhum contrato para este cliente.</div>`; return; }
+  let html = btnAdd;
   lista.forEach(c => {
     html += `<div style="border:1px solid var(--cinza-200);border-radius:10px;padding:14px;margin-bottom:10px;">
       <div style="font-weight:600;color:var(--cinza-900);margin-bottom:8px;">Contrato ${c['Nº CTO']||'—'} ${c['STATUS']?`<span class="tag tag-contrato" style="margin-left:6px;">${c['STATUS']}</span>`:''}</div>
@@ -1032,8 +1094,9 @@ async function renderAbaReajustes(corpo) {
   const r = await buscarDados('Reajustes');
   const alvo = cnpjLimpo(fichaClienteAtual['CNPJ']);
   const lista = (r.ok?r.linhas:[]).filter(c => cnpjLimpo(c['CNPJ'])===alvo);
-  if (!lista.length) { corpo.innerHTML = `<div style="text-align:center;color:var(--cinza-500);padding:24px;font-size:13px;">Nenhum reajuste registrado para este cliente.</div>`; return; }
-  let html = '<div class="lista-cli">';
+  const btnAdd = `<button class="ficha-btn-primario" style="margin-bottom:14px;" onclick="abrirFormReajusteCliente()"><i class="ti ti-plus"></i> Registrar reajuste</button>`;
+  if (!lista.length) { corpo.innerHTML = btnAdd + `<div style="text-align:center;color:var(--cinza-500);padding:24px;font-size:13px;">Nenhum reajuste registrado para este cliente.</div>`; return; }
+  let html = btnAdd + '<div class="lista-cli">';
   lista.forEach(c => {
     html += `<div class="lista-cli-item" style="grid-template-columns:1fr auto;cursor:default;">
       <div><b style="color:var(--cinza-900);">${c['TP DE SERVIÇO']||'Serviço'}</b><br><span style="color:var(--cinza-500);font-size:12px;">${c['ÍNDICE']||''} · último ${fmtDataBR(c['DATA ÚLTIMO REAJUSTE ']||c['DATA ÚLTIMO REAJUSTE'])}</span></div>
@@ -1138,16 +1201,24 @@ function abrirFormAtividade(cnpj, cliente) {
           <div class="nome"><i class="ti ti-plus"></i> Registrar atividade</div><div class="cnpj">${cliente}</div></div>
         <div class="ficha-corpo">
           <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Tipo</label>
-            <select id="at-tipo" onchange="document.getElementById('at-agenda-wrap').style.display=this.value==='Visita técnica'||this.value==='Reunião'?'block':'none'" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;">
+            <select id="at-tipo" onchange="const v=(this.value==='Visita técnica'||this.value==='Reunião');document.getElementById('at-agenda-wrap').style.display=v?'block':'none';document.getElementById('at-btn-email').style.display=v?'inline-flex':'none';" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;">
               <option>Ocorrência</option><option>Tratativa</option><option>Ligação</option><option>E-mail</option><option>Visita técnica</option><option>Reunião</option></select></div>
           <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Título</label>
             <input type="text" id="at-titulo" placeholder="ex: Cliente pediu revisão de coleta" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
           <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Descrição</label>
             <textarea id="at-desc" rows="3" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;font-family:var(--fonte-corpo);"></textarea></div>
-          <div id="at-agenda-wrap" style="margin-bottom:14px;display:none;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Data agendada (vai pra Agenda)</label>
-            <input type="date" id="at-data" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+          <div id="at-agenda-wrap" style="margin-bottom:14px;display:none;">
+            <label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Data agendada (vai pra Agenda)</label>
+            <input type="date" id="at-data" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;">
+            <label style="font-size:13px;color:var(--cinza-700);display:block;margin:10px 0 5px;">Horário (opcional)</label>
+            <input type="time" id="at-hora" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;">
+            <div style="background:var(--verde-claro-bg);border-radius:8px;padding:10px;margin-top:10px;font-size:12.5px;color:var(--verde-escuro);">
+              <i class="ti ti-mail"></i> Ao salvar, você pode avisar o cliente da data por e-mail (abre o Outlook pronto).
+            </div>
+          </div>
           <div class="ficha-botoes">
-            <button class="ficha-btn-primario" onclick="salvarAtividade('${cnpj.replace(/'/g,'')}','${cliente.replace(/'/g,'')}')"><i class="ti ti-check"></i> Salvar</button>
+            <button class="ficha-btn-primario" onclick="salvarAtividade('${cnpj.replace(/'/g,'')}','${cliente.replace(/'/g,'')}', false)"><i class="ti ti-check"></i> Salvar</button>
+            <button class="ficha-btn-secundario" id="at-btn-email" style="display:none;color:var(--verde-escuro);border-color:var(--verde-medio);" onclick="salvarAtividade('${cnpj.replace(/'/g,'')}','${cliente.replace(/'/g,'')}', true)"><i class="ti ti-mail"></i> Salvar e avisar cliente</button>
             <button class="ficha-btn-secundario" onclick="document.getElementById('form-ativ-overlay').remove()">Cancelar</button>
           </div>
           <div id="at-msg"></div>
@@ -1155,12 +1226,14 @@ function abrirFormAtividade(cnpj, cliente) {
       </div>
     </div>`);
 }
-async function salvarAtividade(cnpj, cliente) {
+async function salvarAtividade(cnpj, cliente, avisarCliente) {
   const tipo = document.getElementById('at-tipo').value;
   const titulo = document.getElementById('at-titulo').value;
   const descricao = document.getElementById('at-desc').value;
-  const dataAgendada = document.getElementById('at-data') ? document.getElementById('at-data').value : '';
+  let dataAgendada = document.getElementById('at-data') ? document.getElementById('at-data').value : '';
+  const hora = document.getElementById('at-hora') ? document.getElementById('at-hora').value : '';
   if (!titulo) { document.getElementById('at-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Informe um título.</div>'; return; }
+  if (avisarCliente && !dataAgendada) { document.getElementById('at-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Informe a data para avisar o cliente.</div>'; return; }
   document.getElementById('at-msg').innerHTML = '<div style="text-align:center;padding:10px;color:var(--cinza-500);">Salvando...</div>';
   try {
     const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
@@ -1168,12 +1241,37 @@ async function salvarAtividade(cnpj, cliente) {
     })});
     const r = await resp.json();
     if (!r.ok) { document.getElementById('at-msg').innerHTML=`<div class="sem-acesso">${r.erro}</div>`; return; }
+    // se pediu para avisar o cliente, abre o Outlook com o aviso da data
+    if (avisarCliente) avisarClienteVisita(cliente, cnpj, tipo, dataAgendada, hora, descricao);
     document.getElementById('form-ativ-overlay').remove();
     // recarregar histórico se estiver na ficha do cliente
     const corpo = document.getElementById('ficha-corpo');
     if (corpo && document.getElementById('lead-hist')) { carregarHistoricoLead(cliente, cnpj); }
     else if (corpo) renderHistoricoCliente(corpo);
   } catch(e) { document.getElementById('at-msg').innerHTML='<div class="sem-acesso">Erro de conexão.</div>'; }
+}
+
+// abre o Outlook com o aviso da visita/reunião para o cliente
+function avisarClienteVisita(cliente, cnpj, tipo, data, hora, descricao) {
+  // tentar achar o e-mail do cliente (na ficha aberta, ou na lista de clientes/leads)
+  let emailCli = '';
+  if (fichaClienteAtual && (fichaClienteAtual['EMAIL']||fichaClienteAtual['E-MAIL'])) emailCli = fichaClienteAtual['EMAIL']||fichaClienteAtual['E-MAIL'];
+  if (!emailCli && cacheClientes) { const c = cacheClientes.find(x=>cnpjLimpo(x['CNPJ'])===cnpjLimpo(cnpj)); if (c) emailCli = c['EMAIL']||c['E-MAIL']||''; }
+  if (!emailCli && kanbanLeads) { const l = kanbanLeads.find(x=>String(x['CLIENTE'])===cliente); if (l) emailCli = l['EMAIL']||''; }
+  const quando = `${fmtDataBR(data)}${hora?' às '+hora:''}`;
+  const assunto = encodeURIComponent(`${tipo} agendada — Ecotrans Ambiental`);
+  const corpo = encodeURIComponent(
+`Prezado(a) cliente,
+
+Confirmamos o agendamento de ${tipo.toLowerCase()} para ${quando}.
+
+${descricao?descricao+'\n\n':''}Por favor, confirme se a data está adequada. Em caso de dúvidas, estamos à disposição.
+
+Atenciosamente,
+${usuarioAtual.nome}
+Ecotrans Ambiental`);
+  const para = emailCli || '';
+  window.location.href = `mailto:${para}?subject=${assunto}&body=${corpo}`;
 }
 
 // ---- Busca global (lupa do topo) ----
