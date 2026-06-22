@@ -1177,7 +1177,7 @@ async function imprimirFichaCliente(cnpj) {
   try {
     fetch(API_URL, { method:'POST', body: JSON.stringify({
       acao:'registrarAtividade', token: sessaoToken,
-      dados:{ cnpj: cnpj, cliente: c['CLIENTE']||'', tipo:'Impressão de ficha', titulo:'Ficha impressa', descricao:'', dataAgendada:'' }
+      dados:{ cnpj: cnpj, cliente: c['CLIENTE']||'', tipo:'Impressão de ficha', titulo:'Ficha impressa', descricao:'', dataAgendada:'', registradoPor: usuarioAtual.nome }
     })});
   } catch(e) {}
   // buscar contratos, reajustes, faturamento, equipamentos
@@ -1393,7 +1393,7 @@ async function renderAbaFaturamento(corpo) {
     const totais = todasColetas.map(c=>num(c['TOTAL_COLETAS']));
     const media = totais.length ? Math.round(totais.reduce((a,b)=>a+b,0)/totais.length) : 0;
     const ultimo = todasColetas[todasColetas.length-1];
-    function rotMes(m){ const p=String(m).split('-'); if(p.length===2){const ab=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];return ab[parseInt(p[1],10)-1]+'/'+p[0].slice(-2);} return m; }
+    function rotMes(m){ const ab=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez']; const s=String(m); const mm=s.match(/^(\d{4})-(\d{2})/); if(mm){return ab[parseInt(mm[2],10)-1]+'/'+mm[1].slice(-2);} return m; }
     html += `<div style="font-size:12px;font-weight:600;color:var(--cinza-600);margin:16px 0 8px;">Equipamentos coletados</div>`;
     html += `<div style="display:flex;gap:10px;margin-bottom:10px;">
       <div style="flex:1;background:var(--verde-claro-bg);border-radius:8px;padding:10px;text-align:center;"><div style="font-size:22px;font-weight:700;color:var(--verde-escuro);font-family:var(--fonte-display);">${media}</div><div style="font-size:11px;color:var(--cinza-600);">média/mês</div></div>
@@ -1528,7 +1528,7 @@ async function salvarAtividade(cnpj, cliente, avisarCliente) {
   document.getElementById('at-msg').innerHTML = '<div style="text-align:center;padding:10px;color:var(--cinza-500);">Salvando...</div>';
   try {
     const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
-      acao:'registrarAtividade', token: sessaoToken, dados:{ cnpj, cliente, tipo, titulo, descricao, dataAgendada }
+      acao:'registrarAtividade', token: sessaoToken, dados:{ cnpj, cliente, tipo, titulo, descricao, dataAgendada, registradoPor: usuarioAtual.nome }
     })});
     const r = await resp.json();
     if (!r.ok) { document.getElementById('at-msg').innerHTML=`<div class="sem-acesso">${r.erro}</div>`; return; }
@@ -2808,14 +2808,15 @@ async function renderFaturamento(area) {
   }).map(c => String(c).trim());
   function rotuloMes(col) { return String(col); } // na variação os meses já vêm como texto (Março, Abril...)
   // mês escolhido: usa o que já estava selecionado, senão o último disponível
-  const selAnterior = (document.getElementById('fat-mes')||{}).value;
+  const selRaw = (document.getElementById('fat-mes')||{}).value;
+  const selAnterior = selRaw ? String(selRaw).trim() : '';
   const mesAtual = (selAnterior && meses.includes(selAnterior)) ? selAnterior : (meses[meses.length-1] || meses[0]);
   const idxMes = meses.indexOf(mesAtual);
   const mesAnterior = idxMes > 0 ? meses[idxMes-1] : null;
 
-  // mapa de tipo por CNPJ
+  // mapa de tipo por CNPJ (limpo, só dígitos — a Variação guarda CNPJ sem pontuação)
   const tipoPorCnpj = {};
-  cacheClientes.forEach(c => { tipoPorCnpj[String(c['CNPJ'])] = (c['TIPO']==='Eventual'?'Eventual':'Contrato'); });
+  cacheClientes.forEach(c => { tipoPorCnpj[cnpjLimpo(c['CNPJ'])] = (c['TIPO']==='Eventual'?'Eventual':'Contrato'); });
 
   // valor do mês de uma linha, tolerante a espaço/variação na chave e formato BR
   function valMes(linha, mes) {
@@ -2833,7 +2834,7 @@ async function renderFaturamento(area) {
   // somatórios
   function somaTipo(mes, tipo) {
     return cacheFat.reduce((s,l) => {
-      const t = tipoPorCnpj[String(l['CNPJ'])] || 'Contrato';
+      const t = tipoPorCnpj[cnpjLimpo(l['CNPJ'])] || 'Contrato';
       if (tipo && t !== tipo) return s;
       return s + valMes(l, mes);
     }, 0);
@@ -2884,10 +2885,15 @@ async function renderFaturamento(area) {
       <input type="text" id="fat-busca" placeholder="Buscar cliente..." oninput="filtraTabelaFat()">
       <span class="contagem">${cacheFat.length} clientes</span>
     </div>
-    <div class="filtros">
+    <div class="filtros" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
       <span class="filtro-chip ativo" id="ff-todos" onclick="setFiltroFat('todos',this)">Todos</span>
       <span class="filtro-chip" id="ff-contrato" onclick="setFiltroFat('Contrato',this)">Contrato</span>
       <span class="filtro-chip" id="ff-eventual" onclick="setFiltroFat('Eventual',this)">Eventual</span>
+      <select class="filtro-sel" id="fat-ordem" onchange="filtraTabelaFat()" style="margin-left:auto;min-width:170px;">
+        <option value="maior">Maior faturamento</option>
+        <option value="menor">Menor faturamento</option>
+        <option value="nome">Nome (A-Z)</option>
+      </select>
     </div>
     <div id="fat-tabela-area"></div>`;
 
@@ -2915,8 +2921,11 @@ function filtraTabelaFat() {
   const filtroTipo = window._filtroFatTipo || 'todos';
   let lista = cacheFat.slice();
   if (termo) lista = lista.filter(l => String(l['CLIENTE']||'').toLowerCase().includes(termo));
-  if (filtroTipo !== 'todos') lista = lista.filter(l => (tipos[String(l['CNPJ'])]||'Contrato') === filtroTipo);
-  lista = lista.sort((a,b)=>vm(b,mes)-vm(a,mes));
+  if (filtroTipo !== 'todos') lista = lista.filter(l => (tipos[cnpjLimpo(l['CNPJ'])]||'Contrato') === filtroTipo);
+  const ordem = (document.getElementById('fat-ordem')||{}).value || 'maior';
+  if (ordem === 'menor') lista = lista.sort((a,b)=>vm(a,mes)-vm(b,mes));
+  else if (ordem === 'nome') lista = lista.sort((a,b)=>String(a['CLIENTE']||'').localeCompare(String(b['CLIENTE']||'')));
+  else lista = lista.sort((a,b)=>vm(b,mes)-vm(a,mes));
 
   let html = `<table class="fat-tabela"><thead><tr>
     <th>Cliente</th><th>Tipo</th><th class="num">${rot(mes)}</th>${mesAnt?`<th class="num">${rot(mesAnt)}</th><th class="num">Variação</th>`:''}
@@ -2924,7 +2933,7 @@ function filtraTabelaFat() {
   lista.slice(0,200).forEach(l => {
     const atual = vm(l, mes);
     const ant = mesAnt ? vm(l, mesAnt) : null;
-    const tipo = tipos[String(l['CNPJ'])] || 'Contrato';
+    const tipo = tipos[cnpjLimpo(l['CNPJ'])] || 'Contrato';
     let varCol = '';
     if (mesAnt) {
       if (ant === 0) varCol = `<td class="num fat-var-zero">novo</td>`;
@@ -4466,7 +4475,7 @@ async function salvarCompromisso() {
   try {
     const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
       acao:'registrarAtividade', token: sessaoToken,
-      dados:{ cnpj: c?c['CNPJ']:'', cliente, tipo, titulo, descricao:'', dataAgendada: data }
+      dados:{ cnpj: c?c['CNPJ']:'', cliente, tipo, titulo, descricao:'', dataAgendada: data, registradoPor: usuarioAtual.nome }
     })});
     const r = await resp.json();
     if (!r.ok) { document.getElementById('cp-msg').innerHTML=`<div class="sem-acesso">${r.erro}</div>`; return; }
