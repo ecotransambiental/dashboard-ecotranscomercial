@@ -1378,7 +1378,7 @@ async function renderAbaFaturamento(corpo) {
   let html = '';
   // R$ faturado por mês (da Variação)
   if (fatVar) {
-    const meses = (rv.colunas||Object.keys(fatVar)).filter(c => { const s=String(c).trim().toUpperCase(); return s!=='CNPJ'&&s!=='CLIENTE'&&s!=='VARIACAO_%'; });
+    const meses = (rv.colunas||Object.keys(fatVar)).filter(c => { const s=String(c).trim().toUpperCase(); return s!=='CNPJ'&&s!=='CLIENTE'&&s!=='VARIACAO_%'&&s!=='VARIACAO_PCT'&&s!=='STATUS_CNPJ'&&s!=='DIA_FATURAMENTO'&&s!=='DIA FATURAMENTO'; });
     html += '<div style="font-size:12px;font-weight:600;color:var(--cinza-600);margin-bottom:8px;">Faturamento por mês (R$)</div><table class="ficha-tab">';
     meses.forEach(m => { const v=num(fatVar[m]); if(v>0||true) html += `<tr><td>${m}</td><td><b>${fmtMoeda(v)}</b></td></tr>`; });
     html += '</table>';
@@ -2804,7 +2804,7 @@ async function renderFaturamento(area) {
   // meses = colunas que não são CLIENTE/CNPJ/VARIACAO_%
   const meses = cacheFatCols.filter(c => {
     const s = String(c).trim().toUpperCase();
-    return s !== 'CNPJ' && s !== 'CLIENTE' && s !== 'VARIACAO_%' && s !== 'VARIACAO_PCT';
+    return s !== 'CNPJ' && s !== 'CLIENTE' && s !== 'VARIACAO_%' && s !== 'VARIACAO_PCT' && s !== 'STATUS_CNPJ' && s !== 'DIA_FATURAMENTO' && s !== 'DIA FATURAMENTO';
   }).map(c => String(c).trim());
   function rotuloMes(col) { return String(col); } // na variação os meses já vêm como texto (Março, Abril...)
   // mês escolhido: usa o que já estava selecionado, senão o último disponível
