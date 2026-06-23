@@ -474,6 +474,10 @@ const SUBMODULOS_BLOQUEADOS = {
 
 // Perfis que veem SOMENTE os próprios dados (clientes/contratos/leads filtrados pelo nome do consultor)
 const PERFIL_SO_PROPRIOS = ['vendedor'];
+// Blindagem por ID: estes usuários SEMPRE veem só os próprios registros, não importa o perfil.
+const IDS_SO_PROPRIOS = ['bruna', 'elaine'];
+// E estes SEMPRE veem tudo (gestão), independente de qualquer coisa.
+const IDS_VE_TUDO = ['mafe', 'andrea', 'roberto'];
 
 // Listas padronizadas (da planilha de Propostas e Chamados)
 const LISTA_EMPRESAS = ["2A","4R","Alternativa","Alvorada","Ambilixo","Ambipar","Ambitrans","Brados","CKR Ambiental","CR Emoções","Colepav","Corpus Saneamento","Dipbel","Ecourbis","Ecovallore","Estrela Ambiental","Formiga","Futura","Global Ambiental","Hynove","Lixotal","Lopes Lix","Luvitec Soluções Ambientais","Mafra","Mega Ambiental","Miglix","Miguelão","Montanha","Muda","Multilixo","Musa","Nova Ambiental","Nova Osasco","Nova São José","Novo Horizonte","Polilix","Prefeitura","Proactiva","RA Gestão Ambiental","RG Ambiental","RR Ambiental","Renova Suzano","Retec","SIM / Druck Chemie","Seven","Seven Resíduos","Simões Ambiental","Supply","Supply Service","TWM Ambiental","TransOlivía","Translix","Vanlix","Vicente Entulho","You Green","Stericycle","Outra"];
@@ -482,7 +486,11 @@ const LISTA_MOTIVOS_PERDA = ["Baixo Volume","CADRI Coletivo","Concorrência/Bid/
 const LISTA_CATEGORIA_RESIDUO = ["Classe I","Classe II","Classe I + Classe II","Assessoria"];
 
 function veSomenteProprios() {
-  return PERFIL_SO_PROPRIOS.includes(usuarioAtual && usuarioAtual.perfil);
+  if (!usuarioAtual) return false;
+  const id = String(usuarioAtual.id||'').toLowerCase();
+  if (IDS_VE_TUDO.includes(id)) return false;        // gestão sempre vê tudo
+  if (IDS_SO_PROPRIOS.includes(id)) return true;     // Bruna/Elaine sempre só os próprios
+  return PERFIL_SO_PROPRIOS.includes(usuarioAtual.perfil);
 }
 // confere se um registro (cliente/lead) pertence ao usuário logado
 function normalizaNome(s) {
@@ -631,6 +639,11 @@ async function buscarDados(aba) {
 
 // ---- Iniciar app após login ----
 function iniciarApp() {
+  // limpar TODOS os caches ao entrar — garante que os dados sejam carregados
+  // com o filtro correto para o usuário desta sessão (evita cache de outra sessão)
+  kanbanLeads = null; cacheClientes = null; cacheFaturamento = null; cacheLeads = null;
+  cacheReajustes = null; cacheInad = null; cacheFat = null; cacheFatCols = null;
+  cacheCanc = null; cacheAgenda = null; window._histEtapas = null;
   document.getElementById('tela-login').style.display = 'none';
   document.getElementById('app').style.display = 'block';
   document.getElementById('footer-nome').textContent = usuarioAtual.nome;
@@ -1622,15 +1635,19 @@ function renderTabela(colunas, linhas, area, titulo) {
 
 // ---- Kanban com filtros (datas, consultor, etapa, fonte) ----
 let kanbanLeads = null;
+// função central: carrega os leads SEMPRE aplicando o filtro de dono (vendedor só vê os seus).
+// usar esta função em TODOS os lugares evita o bug de cache contaminado sem filtro.
+async function carregarLeads(forcar) {
+  if (kanbanLeads && !forcar) return kanbanLeads;
+  const r = await buscarDados('CRM_Leads');
+  let linhas = r.ok ? r.linhas : [];
+  if (veSomenteProprios()) linhas = linhas.filter(l => ehMeuRegistro(l['CONSULTOR']));
+  kanbanLeads = linhas;
+  return kanbanLeads;
+}
 async function renderKanban(area) {
   area.innerHTML = `<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando funil...</h2></div>`;
-  if (!kanbanLeads) {
-    const r = await buscarDados('CRM_Leads');
-    let linhas = r.ok ? r.linhas : [];
-    // vendedores (Bruna/Elaine) só veem os próprios chamados
-    if (veSomenteProprios()) linhas = linhas.filter(l => ehMeuRegistro(l['CONSULTOR']));
-    kanbanLeads = linhas;
-  }
+  await carregarLeads();
   const consultores = [...new Set(kanbanLeads.map(l=>l['CONSULTOR']).filter(Boolean))].sort();
   const fontes = [...new Set(kanbanLeads.map(l=>l['FONTE']).filter(Boolean))].sort();
   area.innerHTML = `
@@ -3959,7 +3976,7 @@ function abrirFormPrecoLead(lead) {
 
 async function abrirFormPreco() {
   // carregar leads existentes para escolher
-  if (!kanbanLeads) { const r = await buscarDados('CRM_Leads'); let l=r.ok?r.linhas:[]; if(veSomenteProprios())l=l.filter(x=>ehMeuRegistro(x['CONSULTOR'])); kanbanLeads=l; }
+  await carregarLeads();
   const opcoes = [...new Set(kanbanLeads.map(l=>l['CLIENTE']).filter(Boolean))].sort();
   const cont = document.getElementById('ficha-container');
   cont.innerHTML = `
@@ -4490,7 +4507,7 @@ async function salvarCompromisso() {
 // ============================================================
 async function renderPropostas(area) {
   area.innerHTML = `<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando propostas...</h2></div>`;
-  if (!kanbanLeads) { const r = await buscarDados('CRM_Leads'); let l=r.ok?r.linhas:[]; if(veSomenteProprios())l=l.filter(x=>ehMeuRegistro(x['CONSULTOR'])); kanbanLeads=l; }
+  await carregarLeads();
   // propostas = leads com proposta enviada ou nº/valor de proposta
   const props = kanbanLeads.filter(l => l['ETAPA']==='Proposta Enviada' || l['N_PROPOSTA'] || l['VALOR_R$']);
   function valorNum(v){ if(v==null||v==='')return 0; if(typeof v==='number')return v; let s=String(v).replace(/[^\d,.-]/g,''); if(s.includes(',')&&s.lastIndexOf(',')>s.lastIndexOf('.'))s=s.replace(/\./g,'').replace(',','.'); const n=parseFloat(s); return isNaN(n)?0:n; }
@@ -4570,7 +4587,7 @@ function filtraAtividadesCRM() {
 // ============================================================
 async function renderRelatoriosCRM(area) {
   area.innerHTML = `<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando relatórios...</h2></div>`;
-  if (!kanbanLeads) { const r = await buscarDados('CRM_Leads'); kanbanLeads = r.ok?r.linhas:[]; }
+  await carregarLeads();
   const leads = kanbanLeads.filter(l=>l['ETAPA']!=='Cobertura');
   const total = leads.length;
   const fechados = leads.filter(l=>l['ETAPA']==='Fechado').length;
@@ -4714,7 +4731,7 @@ async function gerarRelatorioPDF() {
 // ============================================================
 async function renderResultadosCRM(area) {
   area.innerHTML = `<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando resultados...</h2></div>`;
-  if (!kanbanLeads) { const r = await buscarDados('CRM_Leads'); kanbanLeads = r.ok?r.linhas:[]; }
+  await carregarLeads();
   if (!window._histEtapas) { const r = await buscarDados('Historico_Etapas'); window._histEtapas = r.ok?r.linhas:[]; }
   const hoje = new Date();
   const ini30 = new Date(); ini30.setDate(ini30.getDate()-30);
