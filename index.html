@@ -473,9 +473,14 @@ const SUBMODULOS_BLOQUEADOS = {
                'crm-relatorios','crm-resultados'],
 };
 
-// Perfis que veem SOMENTE os próprios dados (clientes/contratos/leads filtrados pelo nome do consultor)
-const PERFIL_SO_PROPRIOS = ['vendedor','supervisor','assistente'];
-// Blindagem por ID: estes usuários SEMPRE veem só os próprios registros, não importa o perfil.
+// Perfis que veem SOMENTE os próprios dados
+const PERFIL_SO_PROPRIOS = ['vendedor'];
+// Blindagem por ID no CRM (leads, atividades, agenda): só as vendedoras veem apenas os próprios.
+// Danielly e Rogério veem o CRM INTEIRO.
+const IDS_SO_PROPRIOS_CRM = ['bruna', 'elaine'];
+// Blindagem por ID na CARTEIRA (clientes, contratos): vendedoras + Danielly + Rogério veem só os próprios.
+const IDS_SO_PROPRIOS_CARTEIRA = ['bruna', 'elaine', 'rogerio', 'danielly'];
+// compat: usado em alguns pontos genéricos (mantém só as vendedoras)
 const IDS_SO_PROPRIOS = ['bruna', 'elaine', 'rogerio', 'danielly'];
 // E estes SEMPRE veem tudo (gestão), independente de qualquer coisa.
 const IDS_VE_TUDO = ['mafe', 'andrea', 'roberto'];
@@ -488,11 +493,22 @@ const LISTA_FONTES = ["Cliente","Google","Indicação","Licitação","Prospecç�
 const LISTA_MOTIVOS_PERDA = ["Baixo Volume","CADRI Coletivo","Concorrência/Bid/Licitação","Demanda Encerrada","Escopo Inviável","Falta de Informação","Horário Incompatível","Menor Preço","Preço","Rota Inviável","Sem Retorno do Cliente","Terceirização Serviço","Outros"];
 const LISTA_CATEGORIA_RESIDUO = ["Classe I","Classe II","Classe I + Classe II","Assessoria"];
 
+// filtro do CRM (leads, atividades, agenda): só as vendedoras veem apenas os próprios
 function veSomenteProprios() {
   if (!usuarioAtual) return false;
   const id = String(usuarioAtual.id||'').toLowerCase();
-  if (IDS_VE_TUDO.includes(id)) return false;        // gestão sempre vê tudo
-  if (IDS_SO_PROPRIOS.includes(id)) return true;     // Bruna/Elaine sempre só os próprios
+  if (IDS_VE_TUDO.includes(id)) return false;
+  if (IDS_SO_PROPRIOS_CRM.includes(id)) return true;
+  // Danielly/Rogério NÃO entram aqui — veem o CRM inteiro
+  if (id === 'danielly' || id === 'rogerio') return false;
+  return PERFIL_SO_PROPRIOS.includes(usuarioAtual.perfil);
+}
+// filtro da CARTEIRA (clientes, contratos): vendedoras + Danielly + Rogério veem só os próprios
+function veSomenteProprios_Carteira() {
+  if (!usuarioAtual) return false;
+  const id = String(usuarioAtual.id||'').toLowerCase();
+  if (IDS_VE_TUDO.includes(id)) return false;
+  if (IDS_SO_PROPRIOS_CARTEIRA.includes(id)) return true;
   return PERFIL_SO_PROPRIOS.includes(usuarioAtual.perfil);
 }
 // confere se um registro (cliente/lead) pertence ao usuário logado
@@ -773,8 +789,8 @@ async function renderConteudo(subId, subNome) {
     const r = await buscarDados(aba);
     if (!r.ok) { area.innerHTML = `<div class="sem-acesso">Não consegui ler os dados: ${r.erro}</div>`; return; }
     let linhas = r.linhas;
-    // vendedores só veem os próprios registros (contratos, leads)
-    if (veSomenteProprios()) linhas = linhas.filter(l => ehMeuRegistro(l['CONSULTOR']));
+    // na Carteira (clientes/contratos): vendedoras + Danielly + Rogério só veem os próprios
+    if (veSomenteProprios_Carteira()) linhas = linhas.filter(l => ehMeuRegistro(l['CONSULTOR']));
     renderTabela(r.colunas, linhas, area, subNome);
   } catch (e) {
     area.innerHTML = `<div class="sem-acesso">Erro de conexão ao buscar dados. Verifique a URL da API e a internet.</div>`;
@@ -788,8 +804,8 @@ async function carregarClientes() {
   if (cacheClientes) return cacheClientes;
   const r = await buscarDados('Clientes');
   let linhas = r.ok ? r.linhas : [];
-  // vendedores (Bruna/Elaine) só veem os próprios clientes
-  if (veSomenteProprios()) linhas = linhas.filter(c => ehMeuRegistro(c['CONSULTOR']));
+  // na Carteira: vendedoras + Danielly + Rogério só veem os próprios clientes
+  if (veSomenteProprios_Carteira()) linhas = linhas.filter(c => ehMeuRegistro(c['CONSULTOR']));
   cacheClientes = linhas;
   // carregar faturamento pra cruzar — detecta a coluna do mês por exclusão (o nome pode chegar como data)
   const rf = await buscarDados('Faturamento');
