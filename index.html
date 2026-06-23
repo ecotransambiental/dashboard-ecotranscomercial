@@ -1755,7 +1755,15 @@ function aplicarKanban() {
   const COLS = ETAPAS_CFG.concat([{ nome:'Prospecção', cor:COR_PROSPECCAO.cor, bg:COR_PROSPECCAO.bg, aparte:true }]);
   let html = `<div style="margin:8px 0 14px;color:var(--cinza-600);font-size:13px;">${leads.length} leads · ${cobertura} coberturas não entram nos números · <i class="ti ti-hand-finger"></i> arraste os cards para mudar a etapa</div><div class="kanban">`;
   COLS.forEach(col => {
-    const doEtapa = leads.filter(l => etapaDe(l)===col.nome);
+    const doEtapa = leads.filter(l => etapaDe(l)===col.nome).sort((a,b) => {
+      // leads marcados como NOVO sobem ao topo
+      const na = String(a['NOVO']||'').toLowerCase()==='sim' ? 1 : 0;
+      const nb = String(b['NOVO']||'').toLowerCase()==='sim' ? 1 : 0;
+      if (na !== nb) return nb - na;
+      // entre os de mesmo status, os mais recentes primeiro (por data de contato)
+      const da = parseDataReaj(a['DATA_CONTATO'])||0, db = parseDataReaj(b['DATA_CONTATO'])||0;
+      return db - da;
+    });
     html += `<div class="kanban-col" style="background:${col.bg};" ondragover="event.preventDefault();this.style.outline='2px dashed ${col.cor}'" ondragleave="this.style.outline='none'" ondrop="soltarCard(event,'${col.nome}')">
       <div class="kanban-col-titulo" style="color:${col.cor};">${col.nome}${col.aparte?' <span style="font-size:10px;font-weight:400;">(fora dos nº)</span>':''}<span class="qtd">${doEtapa.length}</span></div>`;
     doEtapa.slice(0, 40).forEach(l => {
