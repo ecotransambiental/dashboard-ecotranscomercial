@@ -1775,7 +1775,10 @@ function aplicarKanban() {
   // mapear "Indicação/Prospecção" -> "Prospecção" (coluna à parte)
   function etapaDe(l) { return l['ETAPA']==='Indicação/Prospecção' ? 'Prospecção' : l['ETAPA']; }
 
-  let leads = kanbanLeads.filter(l => l['ETAPA'] !== 'Cobertura');
+  // por padrão a Cobertura fica fora das colunas; mas se houver BUSCA ativa, incluímos
+  // as coberturas para que apareçam nos resultados (numa coluna própria de Cobertura).
+  const mostrarCobertura = !!busca;
+  let leads = mostrarCobertura ? kanbanLeads.slice() : kanbanLeads.filter(l => l['ETAPA'] !== 'Cobertura');
   const cobertura = kanbanLeads.filter(l => l['ETAPA'] === 'Cobertura').length;
   if (cons) leads = leads.filter(l => l['CONSULTOR']===cons);
   if (fonte) leads = leads.filter(l => l['FONTE']===fonte);
@@ -1817,6 +1820,7 @@ function aplicarKanban() {
 
   // ---- Colunas do Kanban: principais coloridas + Prospecção à parte ----
   const COLS = ETAPAS_CFG.concat([{ nome:'Prospecção', cor:COR_PROSPECCAO.cor, bg:COR_PROSPECCAO.bg, aparte:true }]);
+  if (mostrarCobertura) COLS.push({ nome:'Cobertura', cor:'#6B5B95', bg:'#ede9f3', aparte:true });
   let html = `<div style="margin:8px 0 14px;color:var(--cinza-600);font-size:13px;">${leads.length} leads · ${cobertura} coberturas não entram nos números · <i class="ti ti-hand-finger"></i> arraste os cards para mudar a etapa</div><div class="kanban">`;
   COLS.forEach(col => {
     const doEtapa = leads.filter(l => etapaDe(l)===col.nome).sort((a,b) => {
