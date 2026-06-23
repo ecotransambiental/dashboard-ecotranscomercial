@@ -429,6 +429,7 @@ const MODULOS = [
       { id: 'cart-inadimplencia', nome: 'Inadimplência',   icone: 'ti-alert-triangle' },
       { id: 'cart-graficos',    nome: 'Gráficos',          icone: 'ti-chart-line' },
       { id: 'cart-buscar',      nome: 'Buscar Cliente',    icone: 'ti-search' },
+      { id: 'cart-quematende',  nome: 'Quem atende quem',  icone: 'ti-users' },
     ]
   },
   {
@@ -463,21 +464,23 @@ const ACESSO = {
 // Submódulos que cada perfil NÃO pode ver (controle fino dentro do módulo)
 // Valores do mês (faturamento, visão geral, gráficos) = só Roberto(diretor), Andrea/Mafe(admin), Joyce(financeiro)
 const SUBMODULOS_BLOQUEADOS = {
-  // Rogério: vê tudo, menos a parte financeira e valores gerais
-  supervisor: ['cart-faturamento','cart-visao','cart-graficos','cart-reajustes','cart-inadimplencia','cart-aprovacoes'],
-  // Danielly: operacional, sem reajustes, aprovações, faturamento, inadimplência e gráficos
-  assistente: ['cart-faturamento','cart-visao','cart-graficos','cart-reajustes','cart-inadimplencia','cart-aprovacoes'],
+  // Rogério: vê só os próprios (Clientes/Contratos/Buscar) + tabela "quem atende quem"; sem financeiro/visão/cancelados
+  supervisor: ['cart-faturamento','cart-visao','cart-graficos','cart-reajustes','cart-inadimplencia','cart-aprovacoes','cart-cancelados'],
+  // Danielly: idem Rogério
+  assistente: ['cart-faturamento','cart-visao','cart-graficos','cart-reajustes','cart-inadimplencia','cart-aprovacoes','cart-cancelados'],
   // Bruna e Elaine: na carteira só veem Clientes e Contratos (dos próprios) e Buscar; nada de financeiro/visão/cancelados
   vendedor:   ['cart-faturamento','cart-visao','cart-graficos','cart-reajustes','cart-inadimplencia','cart-cancelados','cart-aprovacoes',
                'crm-relatorios','crm-resultados'],
 };
 
 // Perfis que veem SOMENTE os próprios dados (clientes/contratos/leads filtrados pelo nome do consultor)
-const PERFIL_SO_PROPRIOS = ['vendedor'];
+const PERFIL_SO_PROPRIOS = ['vendedor','supervisor','assistente'];
 // Blindagem por ID: estes usuários SEMPRE veem só os próprios registros, não importa o perfil.
-const IDS_SO_PROPRIOS = ['bruna', 'elaine'];
+const IDS_SO_PROPRIOS = ['bruna', 'elaine', 'rogerio', 'danielly'];
 // E estes SEMPRE veem tudo (gestão), independente de qualquer coisa.
 const IDS_VE_TUDO = ['mafe', 'andrea', 'roberto'];
+// Quem vê a tabela de consulta "quem atende quem" (só cliente + consultor)
+const IDS_VE_TABELA_CONSULTA = ['rogerio', 'danielly'];
 
 // Listas padronizadas (da planilha de Propostas e Chamados)
 const LISTA_EMPRESAS = ["2A","4R","Alternativa","Alvorada","Ambilixo","Ambipar","Ambitrans","Brados","CKR Ambiental","CR Emoções","Colepav","Corpus Saneamento","Dipbel","Ecourbis","Ecovallore","Estrela Ambiental","Formiga","Futura","Global Ambiental","Hynove","Lixotal","Lopes Lix","Luvitec Soluções Ambientais","Mafra","Mega Ambiental","Miglix","Miguelão","Montanha","Muda","Multilixo","Musa","Nova Ambiental","Nova Osasco","Nova São José","Novo Horizonte","Polilix","Prefeitura","Proactiva","RA Gestão Ambiental","RG Ambiental","RR Ambiental","Renova Suzano","Retec","SIM / Druck Chemie","Seven","Seven Resíduos","Simões Ambiental","Supply","Supply Service","TWM Ambiental","TransOlivía","Translix","Vanlix","Vicente Entulho","You Green","Stericycle","Outra"];
@@ -656,10 +659,11 @@ function iniciarApp() {
 
 // ---- Renderizar módulos (nível 1) conforme acesso do perfil ----
 function renderModulos() {
-  // blindagem por ID: Bruna/Elaine sempre usam o acesso de vendedor, mesmo se o perfil vier errado
+  // blindagem por ID: só Bruna/Elaine são forçadas a 'vendedor' (CRM+Agenda).
+  // Rogério/Danielly mantêm seu acesso normal à Carteira (mas com filtro "só próprios").
   const id = String(usuarioAtual.id||'').toLowerCase();
   let perfilEfetivo = usuarioAtual.perfil;
-  if (IDS_SO_PROPRIOS.includes(id)) perfilEfetivo = 'vendedor';
+  if (['bruna','elaine'].includes(id)) perfilEfetivo = 'vendedor';
   const permitidos = ACESSO[perfilEfetivo] || [];
   const nav = document.getElementById('nav-modulos');
   nav.innerHTML = '';
@@ -686,7 +690,13 @@ function selecionarModulo(modId) {
   navSub.innerHTML = '';
   // filtrar submódulos bloqueados para o perfil
   const bloqueados = SUBMODULOS_BLOQUEADOS[usuarioAtual.perfil] || [];
-  const subsVisiveis = mod.subs.filter(s => !bloqueados.includes(s.id));
+  const idUser = String(usuarioAtual.id||'').toLowerCase();
+  const subsVisiveis = mod.subs.filter(s => {
+    if (bloqueados.includes(s.id)) return false;
+    // "Quem atende quem": só Rogério e Danielly veem
+    if (s.id === 'cart-quematende') return IDS_VE_TABELA_CONSULTA.includes(idUser);
+    return true;
+  });
   subsVisiveis.forEach((s, i) => {
     const btn = document.createElement('button');
     btn.className = 'nav-sub' + (i === 0 ? ' ativo' : '');
@@ -735,6 +745,7 @@ async function renderConteudo(subId, subNome) {
   if (subId === 'crm-resultados'){ renderResultadosCRM(area); return; }
   if (subId === 'cart-cancelados'){ renderCancelados(area); return; }
   if (subId === 'cart-contratos'){ renderContratos(area); return; }
+  if (subId === 'cart-quematende'){ renderQuemAtende(area); return; }
   if (subId === 'ag-dia' || subId === 'ag-mes' || subId === 'ag-semana'){ renderAgenda(area, subId.replace('ag-','')); return; }
   if (subId === 'cart-visao'){ renderVisaoCarteira(area); return; }
   if (subId === 'reg-rgg'){ renderRegula(area, 'rgg'); return; }
@@ -825,6 +836,55 @@ function fmtDataBR(v) {
 let modoVisao = 'cards';
 let filtroTipo = 'todos';
 let termoBusca = '';
+
+// Tabela de consulta "Quem atende quem" — só Rogério e Danielly.
+// Mostra apenas nome do cliente + consultor responsável (sem valores, contratos, etc.)
+async function renderQuemAtende(area) {
+  const idUser = String(usuarioAtual.id||'').toLowerCase();
+  if (!IDS_VE_TABELA_CONSULTA.includes(idUser)) {
+    area.innerHTML = `<div class="sem-acesso" style="margin:20px;">Você não tem acesso a esta tela.</div>`;
+    return;
+  }
+  area.innerHTML = `<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando...</h2></div>`;
+  const r = await buscarDados('Clientes');
+  const todos = (r.ok?r.linhas:[])
+    .map(c => ({ cliente: String(c['CLIENTE']||'').trim(), consultor: String(c['CONSULTOR']||'').trim() || '— a definir' }))
+    .filter(c => c.cliente)
+    .sort((a,b) => a.cliente.localeCompare(b.cliente));
+  area.innerHTML = `
+    <div class="topo-pagina"><div><h1>Quem atende quem</h1><div class="breadcrumb">Carteira › Quem atende quem</div></div></div>
+    <div style="background:var(--verde-claro-bg);border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:13px;color:var(--verde-escuro);">
+      <i class="ti ti-info-circle"></i> Lista de consulta: mostra apenas o cliente e o consultor responsável, para você saber quem atende cada caso.
+    </div>
+    <div class="busca-wrap" style="position:relative;margin-bottom:14px;">
+      <i class="ti ti-search" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--cinza-500);"></i>
+      <input type="text" id="qa-busca" placeholder="Buscar cliente ou consultor..." oninput="filtraQuemAtende()" style="width:100%;padding:11px 11px 11px 38px;border:1.5px solid var(--cinza-300);border-radius:10px;font-size:14px;">
+    </div>
+    <div id="qa-tabela"></div>`;
+  window._quemAtende = todos;
+  filtraQuemAtende();
+}
+function filtraQuemAtende() {
+  const todos = window._quemAtende || [];
+  const busca = (document.getElementById('qa-busca')||{}).value || '';
+  const b = busca.toLowerCase();
+  const lista = b ? todos.filter(c => c.cliente.toLowerCase().includes(b) || c.consultor.toLowerCase().includes(b)) : todos;
+  let html = `<div style="font-size:12px;color:var(--cinza-500);margin-bottom:8px;">${lista.length} clientes</div>
+    <table style="width:100%;border-collapse:collapse;background:white;border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+    <thead><tr style="background:var(--verde-escuro);color:white;">
+      <th style="text-align:left;padding:10px 14px;font-size:13px;">Cliente</th>
+      <th style="text-align:left;padding:10px 14px;font-size:13px;">Consultor responsável</th>
+    </tr></thead><tbody>`;
+  if (!lista.length) html += `<tr><td colspan="2" style="padding:20px;text-align:center;color:var(--cinza-500);">Nenhum cliente encontrado.</td></tr>`;
+  else lista.forEach(c => {
+    html += `<tr style="border-bottom:1px solid var(--cinza-100);">
+      <td style="padding:9px 14px;font-size:13px;color:var(--cinza-900);">${c.cliente}</td>
+      <td style="padding:9px 14px;font-size:13px;color:var(--cinza-600);">${c.consultor}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  document.getElementById('qa-tabela').innerHTML = html;
+}
 
 async function renderClientes(area) {
   area.innerHTML = `<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando clientes...</h2></div>`;
@@ -1824,8 +1884,18 @@ function abrirModalMotivoPerda(idLead) {
             <select id="mp-motivo" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"><option value="">— selecione —</option>${LISTA_MOTIVOS_PERDA.map(m=>`<option>${m}</option>`).join('')}</select></div>
           <div style="margin-bottom:14px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Detalhe (opcional)</label>
             <textarea id="mp-obs" rows="2" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;font-family:var(--fonte-corpo);"></textarea></div>
+          <div style="border-top:1px solid var(--cinza-200);padding-top:12px;margin-bottom:12px;">
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--cinza-700);cursor:pointer;">
+              <input type="checkbox" id="mp-cobertura" onchange="document.getElementById('mp-quematende-wrap').style.display=this.checked?'block':'none'" style="width:16px;height:16px;">
+              Mandar para <b>Cobertura</b> (cliente já é atendido por outra empresa)
+            </label>
+            <div id="mp-quematende-wrap" style="display:none;margin-top:10px;">
+              <label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Quem atende hoje?</label>
+              <select id="mp-quematende" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"><option value="">— selecione a empresa —</option>${LISTA_EMPRESAS.map(e=>`<option>${e}</option>`).join('')}</select>
+            </div>
+          </div>
           <div class="ficha-botoes">
-            <button class="ficha-btn-primario" style="background:var(--vermelho);" onclick="confirmarDeclinio('${String(idLead).replace(/'/g,'')}')"><i class="ti ti-check"></i> Confirmar declínio</button>
+            <button class="ficha-btn-primario" style="background:var(--vermelho);" onclick="confirmarDeclinio('${String(idLead).replace(/'/g,'')}')"><i class="ti ti-check"></i> Confirmar</button>
             <button class="ficha-btn-secundario" onclick="document.getElementById('modal-motivo-overlay').remove()">Cancelar</button>
           </div>
           <div id="mp-msg"></div>
@@ -1837,10 +1907,18 @@ async function confirmarDeclinio(idLead) {
   const motivoSel = document.getElementById('mp-motivo').value;
   const obs = document.getElementById('mp-obs').value;
   if (!motivoSel) { document.getElementById('mp-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Escolha o motivo.</div>'; return; }
+  const ehCobertura = document.getElementById('mp-cobertura').checked;
+  const quemAtende = (document.getElementById('mp-quematende')||{}).value || '';
+  if (ehCobertura && !quemAtende) { document.getElementById('mp-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Informe quem atende o cliente hoje.</div>'; return; }
   const motivo = obs ? `${motivoSel} — ${obs}` : motivoSel;
   const overlay = document.getElementById('modal-motivo-overlay');
   if (overlay) overlay.remove();
-  await mudarEtapaLead(idLead, 'Declinado', motivo);
+  if (ehCobertura) {
+    // vai para Cobertura, registrando o motivo e quem atende
+    await mudarEtapaLead(idLead, 'Cobertura', motivo, { _cobertura:true, quemAtende });
+  } else {
+    await mudarEtapaLead(idLead, 'Declinado', motivo);
+  }
   fecharFicha();
 }
 
@@ -1872,19 +1950,27 @@ async function mudarEtapaLead(idLead, novaEtapa, motivoPerda, dadosProposta) {
     abrirModalFechamento(idLead);
     return;
   }
+  // Cobertura pede quem atende — se não veio, abre o modal
+  if (novaEtapa === 'Cobertura' && !(dadosProposta && dadosProposta._cobertura)) {
+    aplicarKanban();
+    abrirModalCobertura(idLead);
+    return;
+  }
 
   // otimista: move já na tela
   lead['ETAPA'] = novaEtapa;
   lead['NOVO'] = ''; // deixou de ser intocado
   if (motivoPerda) lead['MOTIVO_PERDA'] = motivoPerda;
-  if (dadosProposta && !dadosProposta._fechamento) {
+  if (dadosProposta && dadosProposta._cobertura) {
+    lead['EMPRESA_COLETA_ATUAL'] = dadosProposta.quemAtende;
+    lead['CONTA_INDICADORES'] = 'Não'; // cobertura não entra nos números
+  } else if (dadosProposta && dadosProposta._fechamento) {
+    lead['DATA_INICIO_COLETAS'] = dadosProposta.inicioColetas;
+    lead['DATA_ASSINATURA_CONTRATO'] = dadosProposta.assinaturaContrato;
+  } else if (dadosProposta) {
     lead['N_PROPOSTA'] = dadosProposta.numero;
     lead['DATA_ENVIO_PROPOSTA'] = dadosProposta.data;
     lead['VALOR_R$'] = dadosProposta.valor;
-  }
-  if (dadosProposta && dadosProposta._fechamento) {
-    lead['DATA_INICIO_COLETAS'] = dadosProposta.inicioColetas;
-    lead['DATA_ASSINATURA_CONTRATO'] = dadosProposta.assinaturaContrato;
   }
   aplicarKanban();
 
@@ -1915,6 +2001,39 @@ async function mudarEtapaLead(idLead, novaEtapa, motivoPerda, dadosProposta) {
     lead['ETAPA'] = etapaAntiga; aplicarKanban();
     alert('Erro de conexão ao mover o lead.');
   }
+}
+
+// modal de cobertura: pede quem atende o cliente hoje (quando arrasta direto pra Cobertura)
+function abrirModalCobertura(idLead) {
+  const lead = kanbanLeads.find(l => String(l['ID_LEAD'])===String(idLead));
+  const nome = lead ? (lead['CLIENTE']||'') : '';
+  const cont = document.getElementById('ficha-container');
+  cont.insertAdjacentHTML('beforeend', `
+    <div class="ficha-overlay" id="modal-cob-overlay" onclick="if(event.target===this)document.getElementById('modal-cob-overlay').remove()" style="z-index:700;">
+      <div class="ficha" style="width:440px;">
+        <div class="ficha-topo" style="background:linear-gradient(135deg,#6B5B95,#534877);">
+          <button class="fechar" onclick="document.getElementById('modal-cob-overlay').remove()"><i class="ti ti-x"></i></button>
+          <div class="nome"><i class="ti ti-shield-half"></i> Cobertura</div><div class="cnpj">${nome}</div></div>
+        <div class="ficha-corpo">
+          <div style="font-size:13px;color:var(--cinza-600);margin-bottom:12px;">Este cliente já é atendido por outra empresa. Quem atende hoje?</div>
+          <div style="margin-bottom:14px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Quem atende *</label>
+            <select id="cob-quematende" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"><option value="">— selecione a empresa —</option>${LISTA_EMPRESAS.map(e=>`<option>${e}</option>`).join('')}</select></div>
+          <div class="ficha-botoes">
+            <button class="ficha-btn-primario" onclick="confirmarCobertura('${String(idLead).replace(/'/g,'')}')"><i class="ti ti-check"></i> Confirmar</button>
+            <button class="ficha-btn-secundario" onclick="document.getElementById('modal-cob-overlay').remove()">Cancelar</button>
+          </div>
+          <div id="cob-msg"></div>
+        </div>
+      </div>
+    </div>`);
+}
+async function confirmarCobertura(idLead) {
+  const quemAtende = document.getElementById('cob-quematende').value;
+  if (!quemAtende) { document.getElementById('cob-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Informe quem atende o cliente.</div>'; return; }
+  const overlay = document.getElementById('modal-cob-overlay');
+  if (overlay) overlay.remove();
+  await mudarEtapaLead(idLead, 'Cobertura', null, { _cobertura:true, quemAtende });
+  fecharFicha();
 }
 
 // modal de fechamento: data de início das coletas + data de assinatura de contrato
@@ -4677,9 +4796,9 @@ async function gerarRelatorioPDF() {
   const dIni = new Date(ini+'T00:00:00'), dFim = new Date(fim+'T23:59:59');
 
   // buscar mudanças de etapa e atividades
-  const [re, ra, rcli, rctr, rcol] = await Promise.all([
+  const [re, ra, rcli, rctr] = await Promise.all([
     buscarDados('Historico_Etapas'), buscarDados('Atividades_Cliente'),
-    buscarDados('Clientes'), buscarDados('Contratos'), buscarDados('Coletas_Mes')
+    buscarDados('Clientes'), buscarDados('Contratos')
   ]);
   let etapas = (re.ok?re.linhas:[]).map(e=>({...e,_d:parseDataReaj(e['DATA'])})).filter(e=>e._d&&e._d>=dIni&&e._d<=dFim);
   let ativs = (ra.ok?ra.linhas:[]).map(a=>({...a,_d:parseDataReaj(a['DATA_REGISTRO'])})).filter(a=>a._d&&a._d>=dIni&&a._d<=dFim);
@@ -4701,19 +4820,6 @@ async function gerarRelatorioPDF() {
 
   const periodo = ini===fim ? fmtDataBR(ini) : `${fmtDataBR(ini)} a ${fmtDataBR(fim)}`;
 
-  // mínima de cada cliente (dos contratos) + coletas no mês (de Coletas_Mes), por CNPJ
-  const coletasArr = rcol.ok ? rcol.linhas : [];
-  const cnpjL = v => String(v||'').replace(/\D/g,'');
-  const coletaPorCnpj = {}; coletasArr.forEach(c => { coletaPorCnpj[cnpjL(c['CNPJ'])] = c; });
-  let contratosBase = (rctr.ok?rctr.linhas:[]);
-  if (cons) contratosBase = contratosBase.filter(c=>c['CONSULTOR']===cons);
-  const linhasMinColeta = contratosBase.map(c => {
-    const col = coletaPorCnpj[cnpjL(c['CNPJ'])];
-    const minima = (c['MINIMA_EQUIP_QTD']||c['MINIMA_EQUIP_TIPO']) ? `${c['MINIMA_EQUIP_QTD']||''} ${c['MINIMA_EQUIP_TIPO']||''}`.trim() : '—';
-    const coletado = col ? (col['TOTAL_COLETAS']||0) : '—';
-    return { cliente:c['CLIENTE']||'—', cnpj:c['CNPJ']||'—', minima, coletado, cons:c['CONSULTOR']||'—' };
-  }).filter(x => x.minima!=='—' || x.coletado!=='—');
-
   let linhas = eventos.map(ev=>`<tr><td style="padding:7px 10px;border-bottom:1px solid #eee;white-space:nowrap;color:#555;font-size:12px;">${ev.d.toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</td><td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:12px;"><span style="display:inline-block;background:#f0f7ec;color:#2d5a3d;border-radius:4px;padding:1px 6px;font-size:10px;margin-right:6px;">${ev.tipo}</span>${ev.txt}</td>${cons?'':`<td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:12px;color:#666;">${ev.cons||'—'}</td>`}</tr>`).join('');
   if (!eventos.length) linhas = `<tr><td colspan="3" style="padding:20px;text-align:center;color:#999;">Nenhuma atividade no período.</td></tr>`;
 
@@ -4730,8 +4836,6 @@ async function gerarRelatorioPDF() {
     ${clientes.length ? `<table><thead><tr><th>Cliente</th><th>CNPJ</th><th>Tipo</th>${cons?'':'<th>Consultor</th>'}</tr></thead><tbody>${clientes.map(c=>`<tr><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${c['CLIENTE']||'—'}</td><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${c['CNPJ']||'—'}</td><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${c['TIPO']||'—'}</td>${cons?'':`<td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${c['CONSULTOR']||'—'}</td>`}</tr>`).join('')}</tbody></table>` : '<p style="color:#999;font-size:12px;">Nenhum cliente aberto no período.</p>'}
     <h2 style="color:#2d5a3d;font-size:15px;border-bottom:2px solid #8bc34a;padding-bottom:4px;margin:22px 0 8px;">Contratos abertos no período (${contratos.length})</h2>
     ${contratos.length ? `<table><thead><tr><th>Cliente</th><th>Nº Contrato</th><th>Vencimento</th>${cons?'':'<th>Consultor</th>'}</tr></thead><tbody>${contratos.map(c=>`<tr><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${c['CLIENTE']||'—'}</td><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${c['Nº CTO']||'—'}</td><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${fmtDataBR(c['VENC.'])}</td>${cons?'':`<td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${c['CONSULTOR']||'—'}</td>`}</tr>`).join('')}</tbody></table>` : '<p style="color:#999;font-size:12px;">Nenhum contrato aberto no período.</p>'}
-    <h2 style="color:#2d5a3d;font-size:15px;border-bottom:2px solid #8bc34a;padding-bottom:4px;margin:22px 0 8px;">Mínima e coletas por cliente (${linhasMinColeta.length})</h2>
-    ${linhasMinColeta.length ? `<table><thead><tr><th>Cliente</th><th>CNPJ</th><th>Mínima contratual</th><th>Coletas no mês</th>${cons?'':'<th>Consultor</th>'}</tr></thead><tbody>${linhasMinColeta.map(x=>`<tr><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${x.cliente}</td><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${x.cnpj}</td><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${x.minima}</td><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;font-weight:600;">${x.coletado}</td>${cons?'':`<td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${x.cons}</td>`}</tr>`).join('')}</tbody></table>` : '<p style="color:#999;font-size:12px;">Sem dados de mínima/coletas.</p>'}
     <div style="margin-top:20px;font-size:11px;color:#999;">Gerado em ${new Date().toLocaleString('pt-BR')} · ${eventos.length} registros</div>
     <script>setTimeout(function(){window.print();},400);<\/script>
     </body></html>`);
@@ -4835,7 +4939,7 @@ function abrirLead(id) {
   const cont = document.getElementById('ficha-container');
   const linha = (rotulo, valor) => valor ? `<tr><td style="padding:7px 0;color:var(--cinza-600);white-space:nowrap;padding-right:14px;">${rotulo}</td><td style="padding:7px 0;color:var(--cinza-900);">${valor}</td></tr>` : '';
   // etapas possíveis para o seletor (inclui Prospecção)
-  const ETAPAS_SEL = ['Indicação/Prospecção','Em Contato','Proposta Solicitada','Proposta Enviada','Fechado','Declinado'];
+  const ETAPAS_SEL = ['Indicação/Prospecção','Em Contato','Proposta Solicitada','Proposta Enviada','Fechado','Declinado','Cobertura'];
   const etapaAtual = l['ETAPA']||'';
   const idLead = String(l['ID_LEAD']||'').replace(/'/g,'');
   const cnpjOuVazio = String(l['CNPJ']||'').replace(/'/g,'');
@@ -4906,7 +5010,7 @@ async function mudarEtapaPeloSeletor(idLead) {
   if (!sel) return;
   const etapa = sel.value;
   // etapas que abrem um modal próprio (precificação, proposta, motivo) — NÃO fechar a ficha aqui
-  const abreModal = (etapa==='Proposta Solicitada' || etapa==='Proposta Enviada' || etapa==='Declinado' || etapa==='Fechado');
+  const abreModal = (etapa==='Proposta Solicitada' || etapa==='Proposta Enviada' || etapa==='Declinado' || etapa==='Fechado' || etapa==='Cobertura');
   await mudarEtapaLead(idLead, etapa);
   if (!abreModal) fecharFicha();
 }
