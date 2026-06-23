@@ -349,8 +349,10 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.06.23</div>
       </div>
     </aside>
+    <!-- VERSÃO DO DASHBOARD: v2026.06.23 — separação CRM/Carteira (Danielly vê CRM inteiro) + cobertura na busca -->
 
     <!-- Coluna nível 2: submódulos -->
     <div class="subcoluna" id="subcoluna">
@@ -4323,8 +4325,8 @@ async function renderContratos(area) {
   const mapaCons = {};
   [...cacheRGG, ...cacheSIGOR].forEach(d => { const c = String(d['CNPJ']||'').replace(/\D/g,''); if (c && d['CONSULTOR']) mapaCons[c] = d['CONSULTOR']; });
   lista.forEach(ct => { if (!ct['CONSULTOR'] || !String(ct['CONSULTOR']).trim()) { const c = String(ct['CNPJ']||'').replace(/\D/g,''); if (mapaCons[c]) ct['CONSULTOR'] = mapaCons[c]; } });
-  // só então filtra por dono (pra vendedora já considerar o consultor herdado do RGG/SIGOR)
-  if (veSomenteProprios()) lista = lista.filter(l => ehMeuRegistro(l['CONSULTOR']));
+  // filtro da CARTEIRA: vendedoras + Danielly + Rogério veem só os próprios contratos
+  if (veSomenteProprios_Carteira()) lista = lista.filter(l => ehMeuRegistro(l['CONSULTOR']));
   cacheContratos = lista;
   area.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
