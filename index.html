@@ -456,7 +456,7 @@ const ACESSO = {
   diretor:     ['crm','carteira','agenda','regula'],          // Roberto — tudo
   supervisor:  ['crm','carteira','agenda'],                  // Rogério — sem SP Regula; financeiro bloqueado (ver SUBMODULOS_BLOQUEADOS)
   assistente:  ['crm','carteira','agenda','regula'],          // Danielly — operacional
-  vendedor:    ['crm','carteira','agenda'],                  // Bruna, Elaine — sem SP Regula; carteira limitada (ver SUBMODULOS_BLOQUEADOS)
+  vendedor:    ['crm','agenda'],                            // Bruna, Elaine — só CRM e Agenda (carteira removida por ora; reativar adicionando 'carteira')
   financeiro:  ['carteira'],                                  // Joyce — só carteira, sem CRM
 };
 
@@ -656,7 +656,11 @@ function iniciarApp() {
 
 // ---- Renderizar módulos (nível 1) conforme acesso do perfil ----
 function renderModulos() {
-  const permitidos = ACESSO[usuarioAtual.perfil] || [];
+  // blindagem por ID: Bruna/Elaine sempre usam o acesso de vendedor, mesmo se o perfil vier errado
+  const id = String(usuarioAtual.id||'').toLowerCase();
+  let perfilEfetivo = usuarioAtual.perfil;
+  if (IDS_SO_PROPRIOS.includes(id)) perfilEfetivo = 'vendedor';
+  const permitidos = ACESSO[perfilEfetivo] || [];
   const nav = document.getElementById('nav-modulos');
   nav.innerHTML = '';
   const modsVisiveis = MODULOS.filter(m => permitidos.includes(m.id));
