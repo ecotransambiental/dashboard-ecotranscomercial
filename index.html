@@ -482,8 +482,9 @@ const PERFIL_SO_PROPRIOS = ['vendedor'];
 // Blindagem por ID no CRM (leads, atividades, agenda): só as vendedoras veem apenas os próprios.
 // Danielly e Rogério veem o CRM INTEIRO.
 const IDS_SO_PROPRIOS_CRM = ['bruna', 'elaine'];
-// Blindagem por ID na CARTEIRA (clientes, contratos): vendedoras + Danielly + Rogério veem só os próprios.
-const IDS_SO_PROPRIOS_CARTEIRA = ['bruna', 'elaine', 'rogerio', 'danielly'];
+// Blindagem por ID na CARTEIRA (clientes, contratos): só as vendedoras + Rogério veem só os próprios.
+// Danielly vê toda a carteira (decisão da diretoria).
+const IDS_SO_PROPRIOS_CARTEIRA = ['bruna', 'elaine', 'rogerio'];
 // compat: usado em alguns pontos genéricos (mantém só as vendedoras)
 const IDS_SO_PROPRIOS = ['bruna', 'elaine', 'rogerio', 'danielly'];
 // E estes SEMPRE veem tudo (gestão), independente de qualquer coisa.
@@ -1054,6 +1055,7 @@ async function abrirFicha(cnpj) {
               ${podeEditarConsultorLead() ? `<input type="text" id="ficha-endereco" value="${(c['ENDERECO']||'').replace(/"/g,'&quot;')}" placeholder="—" style="padding:5px 8px;border:1.5px solid var(--cinza-300);border-radius:6px;font-size:13px;font-family:var(--fonte-corpo);width:60%;">
               <button onclick="salvarEnderecoFicha('${cnpj.replace(/'/g,'')}')" style="margin-left:6px;padding:5px 10px;border:none;background:var(--verde-medio);color:white;border-radius:6px;cursor:pointer;font-size:12px;"><i class="ti ti-check"></i></button>` : (c['ENDERECO']||'—')}
             </td></tr>
+            <tr><td><i class="ti ti-calendar-repeat" style="vertical-align:-2px;margin-right:6px;"></i>Frequência de coleta</td><td>${c['FREQUENCIA_COLETA']||'—'}</td></tr>
             <tr><td><i class="ti ti-briefcase" style="vertical-align:-2px;margin-right:6px;"></i>Consultor</td><td>
               <select id="ficha-consultor" style="padding:5px 8px;border:1.5px solid var(--cinza-300);border-radius:6px;font-size:13px;font-family:var(--fonte-corpo);">
                 ${['— a definir','Bruna Campos','Elaine Souza','Rogério Sabino','Danielly Santos','Maria Fernanda','Andrea Fernandes','Roberto Fernandes'].map(n=>`<option ${(c['CONSULTOR']||'— a definir')===n||(c['CONSULTOR']&&n!=='— a definir'&&c['CONSULTOR'].includes(n.split(' ')[0]))?'selected':''}>${n}</option>`).join('')}
@@ -3319,6 +3321,8 @@ async function processarCSVRelatorio() {
   const iCli = cab.findIndex(c=>c.includes('CLIENTE'));
   const iTe = cab.findIndex(c=>c.includes('TIPO DE EQUIP'));
   const iEnd = cab.findIndex(c=>c.includes('END') && c.includes('COLETA'));
+  const iFreq = cab.findIndex(c=>c.includes('FREQU'));
+  function fmtFreq(f){ const dias=(String(f).toUpperCase().match(/\[([A-ZÇÁ]+)\]/g)||[]).map(x=>x.replace(/[\[\]]/g,'')); const mapa={'SEG':'Seg','TER':'Ter','QUA':'Qua','QUI':'Qui','SEX':'Sex','SAB':'Sáb','SÁB':'Sáb','DOM':'Dom'}; const ns=dias.map(d=>mapa[d]||d); if(!ns.length)return String(f||'').trim(); if(ns.length>=6)return 'Diária ('+ns.length+'x/sem)'; return ns.join(', ')+' ('+ns.length+'x/sem)'; }
   function categoria(te){ const t=String(te).toUpperCase(); if(t.includes('SACO'))return 'SACO'; if(t.includes('CONT'))return 'CONTEINER'; if(t.includes('CAIXA')||t.includes('ROLL ON')||t.includes('BROOKS')||t.includes('COMPACTADORA'))return 'CACAMBA'; if(t.includes('BIG BAG'))return 'BIGBAG'; return 'OUTRO'; }
   function ehEquip(te){ const t=String(te).toUpperCase().trim(); if(!t)return false; if(t.startsWith('R$')||t.startsWith('-R$'))return false; if(['PARCELAS','TOTAL TAXA','QTDE. DE EQUIP.','TOTAL QTDE SERVIÇO','À GRANEL'].includes(t))return false; return true; }
   const porCnpj = {};
@@ -3328,8 +3332,9 @@ async function processarCSVRelatorio() {
     if (!ehEquip(te)) continue;
     const cnpj = (r[iCnpj]||'').replace(/\D/g,'');
     if (cnpj.length!==14) continue;
-    if (!porCnpj[cnpj]) porCnpj[cnpj] = { cnpj, nome:(r[iCli]||'').replace(/"/g,'').trim(), endereco:(iEnd>=0?(r[iEnd]||'').replace(/"/g,'').trim():''), total:0, SACO:0, CONTEINER:0, CACAMBA:0, BIGBAG:0, OUTRO:0 };
+    if (!porCnpj[cnpj]) porCnpj[cnpj] = { cnpj, nome:(r[iCli]||'').replace(/"/g,'').trim(), endereco:(iEnd>=0?(r[iEnd]||'').replace(/"/g,'').trim():''), frequencia:(iFreq>=0?fmtFreq(r[iFreq]):''), total:0, SACO:0, CONTEINER:0, CACAMBA:0, BIGBAG:0, OUTRO:0 };
     if (iEnd>=0 && !porCnpj[cnpj].endereco) porCnpj[cnpj].endereco = (r[iEnd]||'').replace(/"/g,'').trim();
+    if (iFreq>=0 && !porCnpj[cnpj].frequencia) porCnpj[cnpj].frequencia = fmtFreq(r[iFreq]);
     porCnpj[cnpj].total++; porCnpj[cnpj][categoria(te)]++;
   }
   const arr = Object.values(porCnpj);
