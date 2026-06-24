@@ -519,19 +519,19 @@ function normalizaNome(s) {
     .normalize('NFD').replace(/[\u0300-\u036f]/g,'') // remove acentos
     .toLowerCase().trim().replace(/\s+/g,' ');
 }
+// confere se um registro pertence ao usuário logado (só COMPARA o nome;
+// quem decide SE deve filtrar é cada tela, via veSomenteProprios / veSomenteProprios_Carteira)
 function ehMeuRegistro(consultor) {
-  if (!veSomenteProprios()) return true; // outros perfis veem tudo
   if (!consultor) return false;
-  const meu = normalizaNome(usuarioAtual.nome);
+  const meu = normalizaNome(usuarioAtual && usuarioAtual.nome);
   const c = normalizaNome(consultor);
   if (!meu || !c) return false;
   // casa por nome completo contido, ou primeiro+segundo nome iguais
   if (c.includes(meu) || meu.includes(c)) return true;
   const pMeu = meu.split(' '), pC = c.split(' ');
-  // exige pelo menos primeiro nome igual E (sobrenome igual OU um só nome)
   if (pMeu[0] === pC[0]) {
     if (pMeu.length===1 || pC.length===1) return true;
-    return pMeu[1] === pC[1]; // mesmo primeiro e segundo nome
+    return pMeu[1] === pC[1];
   }
   return false;
 }
