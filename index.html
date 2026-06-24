@@ -1890,6 +1890,11 @@ function etapaDeGlobal(l) { return l['ETAPA']==='Indicação/Prospecção' ? 'Pr
 function podeEditarConsultorLead() {
   return ['admin','diretor','assistente'].includes(usuarioAtual && usuarioAtual.perfil);
 }
+// quem pode arquivar (mandar pra lixeira) um lead cadastrado errado
+const IDS_PODE_ARQUIVAR_LEAD = ['mafe','andrea','roberto','danielly','rogerio'];
+function podeArquivarLead() {
+  return IDS_PODE_ARQUIVAR_LEAD.includes(String(usuarioAtual && usuarioAtual.id||'').toLowerCase());
+}
 
 // modal que exige o motivo da perda ao declinar um lead (motivos da planilha de Propostas e Chamados)
 function abrirModalMotivoPerda(idLead) {
@@ -5019,6 +5024,7 @@ function abrirLead(id) {
           <div class="ficha-botoes" style="flex-wrap:wrap;">
             <button class="ficha-btn-primario" onclick="abrirFormAtividade('${cnpjOuVazio||idLead}','${(l['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-plus"></i> Registrar atividade / anotação</button>
             ${l['CNPJ']?`<button class="ficha-btn-secundario" onclick="abrirFicha('${cnpjOuVazio}')"><i class="ti ti-user"></i> Ver ficha do cliente</button>`:''}
+            ${podeArquivarLead()?`<button class="ficha-btn-secundario" style="color:var(--vermelho);border-color:var(--vermelho);" onclick="arquivarLead('${idLead}','${(l['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-trash"></i> Arquivar lead (cadastro errado)</button>`:''}
           </div>
           <div id="lead-hist" style="margin-top:14px;"></div>
         </div>
@@ -5037,6 +5043,26 @@ async function mudarEtapaPeloSeletor(idLead) {
   const abreModal = (etapa==='Proposta Solicitada' || etapa==='Proposta Enviada' || etapa==='Declinado' || etapa==='Fechado' || etapa==='Cobertura');
   await mudarEtapaLead(idLead, etapa);
   if (!abreModal) fecharFicha();
+}
+
+// arquiva (manda pra lixeira) um lead cadastrado errado — só quem tem permissão
+async function arquivarLead(idLead, cliente) {
+  if (!podeArquivarLead()) return;
+  if (!confirm(`Arquivar o lead "${cliente}"?\n\nEle sai do funil e vai para a Lixeira de Leads, de onde pode ser recuperado.`)) return;
+  try {
+    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
+      acao:'arquivarLead', token: sessaoToken, dados:{ idLead: String(idLead), nomeUsuario: usuarioAtual.nome }
+    })});
+    const r = await resp.json();
+    if (!r.ok) { alert('Erro: '+(r.erro||'verifique se o Apps Script foi republicado.')); return; }
+    kanbanLeads = (kanbanLeads||[]).filter(l => String(l['ID_LEAD'])!==String(idLead));
+    fecharFicha();
+    aplicarKanban();
+    const av = document.createElement('div');
+    av.textContent = 'Lead arquivado (está na Lixeira).';
+    av.style.cssText = 'position:fixed;bottom:20px;right:20px;background:var(--verde-escuro);color:white;padding:10px 18px;border-radius:8px;font-size:13px;z-index:9999;';
+    document.body.appendChild(av); setTimeout(()=>av.remove(), 2500);
+  } catch(e) { alert('Erro de conexão.'); }
 }
 
 // salva o consultor reatribuído de um lead (só gestão — ver podeEditarConsultorLead)
