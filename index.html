@@ -4250,6 +4250,9 @@ function abrirFormLead() {
               <input type="text" id="nl-resp" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
             <div><label style="font-size:13px;color:var(--cinza-700);">Telefone</label>
               <input type="text" id="nl-tel" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+            <div><label style="font-size:13px;color:var(--cinza-700);">Data de chegada do lead</label>
+              <input type="date" id="nl-data" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;">
+              <div style="font-size:11px;color:var(--cinza-500);margin-top:3px;">Deixe em branco para usar a data de hoje.</div></div>
             <div style="grid-column:1/3;"><label style="font-size:13px;color:var(--cinza-700);">E-mail</label>
               <input type="text" id="nl-email" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
             <div><label style="font-size:13px;color:var(--cinza-700);">Transportadora atual</label>
@@ -4300,7 +4303,7 @@ async function salvarLead() {
   const campos = {
     'CLIENTE': cliente, 'CNPJ': cnpj, 'ETAPA': ehCobertura ? 'Cobertura' : document.getElementById('nl-etapa').value,
     'CONSULTOR': (document.getElementById('nl-consultor')||{}).value || usuarioAtual.nome, 'FONTE': document.getElementById('nl-fonte').value,
-    'CONTA_INDICADORES': ehCobertura ? 'Não' : 'Sim', 'DATA_CONTATO': fmtDataBR(new Date().toISOString()),
+    'CONTA_INDICADORES': ehCobertura ? 'Não' : 'Sim', 'DATA_CONTATO': (document.getElementById('nl-data') && document.getElementById('nl-data').value) ? fmtDataBR(document.getElementById('nl-data').value) : fmtDataBR(new Date().toISOString()),
     'RESPONSAVEL': document.getElementById('nl-resp').value, 'EMAIL': document.getElementById('nl-email').value,
     'TELEFONE': document.getElementById('nl-tel').value,
     'EMPRESA_COLETA_ATUAL': document.getElementById('nl-transp').value,
