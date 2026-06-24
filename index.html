@@ -1592,8 +1592,13 @@ function abrirFormAtividade(cnpj, cliente) {
           <div class="nome"><i class="ti ti-plus"></i> Registrar atividade</div><div class="cnpj">${cliente}</div></div>
         <div class="ficha-corpo">
           <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Tipo</label>
-            <select id="at-tipo" onchange="const v=(this.value==='Visita técnica'||this.value==='Reunião');document.getElementById('at-agenda-wrap').style.display=v?'block':'none';document.getElementById('at-btn-email').style.display=v?'inline-flex':'none';" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;">
+            <select id="at-tipo" onchange="const v=(this.value==='Visita técnica'||this.value==='Reunião');document.getElementById('at-agenda-wrap').style.display=v?'block':'none';document.getElementById('at-btn-email').style.display=v?'inline-flex':'none';document.getElementById('at-revisao-wrap').style.display=(this.value==='Proposta Revisada')?'block':'none';" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;">
               <option>Ocorrência</option><option>Tratativa</option><option>Ligação</option><option>E-mail</option><option>Proposta Revisada</option><option>Visita técnica</option><option>Reunião</option></select></div>
+          <div id="at-revisao-wrap" style="margin-bottom:12px;display:none;">
+            <label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Novo valor da proposta (R$)</label>
+            <input type="number" id="at-novovalor" step="0.01" placeholder="ex: 1850.00" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;">
+            <div style="font-size:11px;color:var(--cinza-500);margin-top:3px;">Atualiza o valor da proposta deste lead.</div>
+          </div>
           <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Título</label>
             <input type="text" id="at-titulo" placeholder="ex: Cliente pediu revisão de coleta" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
           <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Descrição</label>
@@ -1634,6 +1639,17 @@ async function salvarAtividade(cnpj, cliente, avisarCliente) {
     if (!r.ok) { document.getElementById('at-msg').innerHTML=`<div class="sem-acesso">${r.erro}</div>`; return; }
     // se pediu para avisar o cliente, abre o Outlook com o aviso da data
     if (avisarCliente) avisarClienteVisita(cliente, cnpj, tipo, dataAgendada, hora, descricao);
+    // se foi "Proposta Revisada" com novo valor, atualiza o valor do lead
+    const novoValor = (document.getElementById('at-novovalor')||{}).value || '';
+    if (tipo === 'Proposta Revisada' && novoValor) {
+      try {
+        await fetch(API_URL, { method:'POST', body: JSON.stringify({
+          acao:'atualizarValorLead', token: sessaoToken, dados:{ cliente, cnpj, valor: novoValor, nomeUsuario: usuarioAtual.nome }
+        })});
+        const lead = (kanbanLeads||[]).find(l => String(l['CLIENTE'])===cliente);
+        if (lead) lead['VALOR_R$'] = novoValor;
+      } catch(e) {}
+    }
     document.getElementById('form-ativ-overlay').remove();
     // recarregar histórico se estiver na ficha do cliente
     const corpo = document.getElementById('ficha-corpo');
@@ -2391,6 +2407,19 @@ function listaReaj(lista) {
   return html;
 }
 
+// imprime a ficha do cliente a partir do modal de reajuste (acha o cliente pelo CNPJ)
+async function imprimirFichaDeReaj(cnpj) {
+  const alvo = cnpjLimpo(cnpj);
+  await carregarClientes();
+  let cli = (cacheClientes||[]).find(c => cnpjLimpo(c['CNPJ'])===alvo);
+  if (!cli) {
+    // se não está na carteira carregada, monta um objeto mínimo com o CNPJ
+    cli = { 'CNPJ': cnpj, 'CLIENTE': '', 'TIPO': '' };
+  }
+  fichaClienteAtual = cli;
+  imprimirFichaCliente(cnpj);
+}
+
 function detalheReaj(idx) {
   const r = cacheReajustes[idx];
   const prox = proximoReajuste(r['DATA ÚLTIMO REAJUSTE '] || r['DATA ÚLTIMO REAJUSTE']);
@@ -2430,9 +2459,10 @@ function detalheReaj(idx) {
             <tr><td>Próximo reajuste</td><td><b>${fmtDataLonga(prox)}</b></td></tr>
           </table>
           <div id="reaj-acao" style="margin-top:18px;">
-            <div class="ficha-botoes">
+            <div class="ficha-botoes" style="flex-wrap:wrap;">
               <button class="ficha-btn-primario" onclick="abrirFormReajuste(${idx})"><i class="ti ti-trending-up"></i> Reajustar</button>
               <button class="ficha-btn-secundario" onclick="verHistoricoReaj('${(r['CNPJ']||'').replace(/'/g,'')}','${(r['TP DE SERVIÇO']||'').replace(/'/g,'')}')"><i class="ti ti-history"></i> Histórico</button>
+              <button class="ficha-btn-secundario" onclick="imprimirFichaDeReaj('${(r['CNPJ']||'').replace(/'/g,'')}')"><i class="ti ti-printer"></i> Imprimir ficha</button>
             </div>
           </div>
         </div>
@@ -5138,8 +5168,15 @@ function abrirFormCancelar(cnpj, cliente) {
             <input type="date" id="cc-data" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
           <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Motivo *</label>
             <select id="cc-motivo" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"><option value="">— selecione —</option>${MOTIVOS_CANCELAMENTO.map(m=>`<option>${m}</option>`).join('')}</select></div>
-          <div style="margin-bottom:14px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Observação (opcional)</label>
+          <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Observação (opcional)</label>
             <textarea id="cc-obs" rows="2" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;font-family:var(--fonte-corpo);"></textarea></div>
+          <div style="border-top:1px solid var(--cinza-200);padding-top:12px;margin-bottom:12px;font-size:12px;font-weight:600;color:var(--cinza-600);">Dados da rescisão (opcional)</div>
+          <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Quem enviou a rescisão</label>
+            <input type="text" id="cc-quem" placeholder="nome da pessoa do cliente" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+          <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Assunto / nome do e-mail recebido</label>
+            <input type="text" id="cc-assunto" placeholder="ex: Rescisão contrato - Cliente X" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+          <div style="margin-bottom:14px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Texto do e-mail</label>
+            <textarea id="cc-emailtexto" rows="4" placeholder="cole aqui o conteúdo do e-mail de rescisão" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;font-family:var(--fonte-corpo);"></textarea></div>
           <div class="ficha-botoes">
             <button class="ficha-btn-primario" style="background:var(--vermelho);" onclick="salvarCancelamento('${cnpj.replace(/'/g,'')}','${cliente.replace(/'/g,'')}')"><i class="ti ti-check"></i> Confirmar cancelamento</button>
             <button class="ficha-btn-secundario" onclick="fecharFicha()">Voltar</button>
@@ -5156,11 +5193,14 @@ async function salvarCancelamento(cnpj, cliente) {
   if (!dataCancelamento) { document.getElementById('cc-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Informe a data do cancelamento.</div>'; return; }
   if (!motivoSel) { document.getElementById('cc-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Escolha o motivo.</div>'; return; }
   const motivo = obs ? `${motivoSel} — ${obs}` : motivoSel;
+  const rescisaoQuem = (document.getElementById('cc-quem')||{}).value || '';
+  const rescisaoAssunto = (document.getElementById('cc-assunto')||{}).value || '';
+  const rescisaoTexto = (document.getElementById('cc-emailtexto')||{}).value || '';
   document.getElementById('cc-msg').innerHTML = '<div style="text-align:center;padding:10px;color:var(--cinza-500);">Registrando...</div>';
   try {
     const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
       acao:'cancelarCliente', token: sessaoToken,
-      dados:{ cnpj, cliente, dataCancelamento, motivo, consultor: (fichaClienteAtual&&fichaClienteAtual['CONSULTOR'])||'' }
+      dados:{ cnpj, cliente, dataCancelamento, motivo, rescisaoQuem, rescisaoAssunto, rescisaoTexto, consultor: (fichaClienteAtual&&fichaClienteAtual['CONSULTOR'])||'' }
     })});
     const r = await resp.json();
     if (!r.ok) { document.getElementById('cc-msg').innerHTML=`<div class="sem-acesso">${r.erro}</div>`; return; }
