@@ -1444,7 +1444,10 @@ async function renderAbaReajustes(corpo) {
   const r = await buscarDados('Reajustes');
   const alvo = cnpjLimpo(fichaClienteAtual['CNPJ']);
   const lista = (r.ok?r.linhas:[]).filter(c => cnpjLimpo(c['CNPJ'])===alvo);
-  const btnAdd = `<button class="ficha-btn-primario" style="margin-bottom:14px;" onclick="abrirFormReajusteCliente()"><i class="ti ti-plus"></i> Registrar reajuste</button>`;
+  const btnAdd = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+    <button class="ficha-btn-primario" onclick="abrirFormReajusteCliente()"><i class="ti ti-plus"></i> Registrar reajuste</button>
+    <button class="ficha-btn-secundario" onclick="imprimirFichaCliente('${alvo}')"><i class="ti ti-printer"></i> Imprimir ficha</button>
+  </div>`;
   if (!lista.length) { corpo.innerHTML = btnAdd + `<div style="text-align:center;color:var(--cinza-500);padding:24px;font-size:13px;">Nenhum reajuste registrado para este cliente.</div>`; return; }
   let html = btnAdd + '<div class="lista-cli">';
   lista.forEach(c => {
@@ -1558,7 +1561,7 @@ async function renderHistoricoCliente(corpo) {
   const r = await buscarDados('Atividades_Cliente');
   const cnpj = String(fichaClienteAtual['CNPJ']);
   const ativs = (r.ok?r.linhas:[]).filter(a=>String(a['CNPJ'])===cnpj).sort((a,b)=>{ const da=parseDataReaj(a['DATA_REGISTRO'])||0, db=parseDataReaj(b['DATA_REGISTRO'])||0; return db-da; });
-  const iconePorTipo = {'Visita técnica':'ti-map-pin','Ligação':'ti-phone','Tratativa':'ti-message','Ocorrência':'ti-alert-circle','E-mail':'ti-mail','Reunião':'ti-users'};
+  const iconePorTipo = {'Visita técnica':'ti-map-pin','Ligação':'ti-phone','Tratativa':'ti-message','Ocorrência':'ti-alert-circle','E-mail':'ti-mail','Reunião':'ti-users','Proposta Revisada':'ti-file-pencil'};
   let html = `<div style="margin-bottom:12px;"><button class="ficha-btn-primario" style="padding:8px 14px;border:none;border-radius:8px;cursor:pointer;font-size:13px;" onclick="abrirFormAtividade('${cnpj.replace(/'/g,'')}','${(fichaClienteAtual['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-plus"></i> Registrar atividade</button></div>`;
   if (!ativs.length) { corpo.innerHTML = html + `<div style="text-align:center;color:var(--cinza-500);padding:24px;font-size:13px;">Nenhuma atividade registrada ainda.</div>`; return; }
   html += `<div style="position:relative;padding-left:8px;">`;
@@ -1590,7 +1593,7 @@ function abrirFormAtividade(cnpj, cliente) {
         <div class="ficha-corpo">
           <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Tipo</label>
             <select id="at-tipo" onchange="const v=(this.value==='Visita técnica'||this.value==='Reunião');document.getElementById('at-agenda-wrap').style.display=v?'block':'none';document.getElementById('at-btn-email').style.display=v?'inline-flex':'none';" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;">
-              <option>Ocorrência</option><option>Tratativa</option><option>Ligação</option><option>E-mail</option><option>Visita técnica</option><option>Reunião</option></select></div>
+              <option>Ocorrência</option><option>Tratativa</option><option>Ligação</option><option>E-mail</option><option>Proposta Revisada</option><option>Visita técnica</option><option>Reunião</option></select></div>
           <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Título</label>
             <input type="text" id="at-titulo" placeholder="ex: Cliente pediu revisão de coleta" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
           <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Descrição</label>
