@@ -1380,6 +1380,75 @@ async function salvarReajusteCliente() {
 }
 
 // salvar o consultor editado na ficha (atualiza Clientes e Contratos)
+// ===== FOLLOW-UP: agenda data e marca o lead =====
+function abrirFollowUp(idLead, cliente, cnpj) {
+  const cont = document.getElementById('ficha-container');
+  cont.insertAdjacentHTML('beforeend', `
+    <div class="ficha-overlay" id="modal-fu-overlay" onclick="if(event.target===this)document.getElementById('modal-fu-overlay').remove()" style="z-index:700;">
+      <div class="ficha" style="width:420px;">
+        <div class="ficha-topo" style="background:linear-gradient(135deg,#6B5B95,#534877);">
+          <button class="fechar" onclick="document.getElementById('modal-fu-overlay').remove()"><i class="ti ti-x"></i></button>
+          <div class="nome"><i class="ti ti-calendar-clock"></i> Agendar follow-up</div><div class="cnpj">${cliente}</div></div>
+        <div class="ficha-corpo">
+          <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Data do follow-up *</label>
+            <input type="date" id="fu-data" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+          <div style="margin-bottom:14px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Anotação (opcional)</label>
+            <textarea id="fu-obs" rows="2" placeholder="o que lembrar nesse follow-up" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;font-family:var(--fonte-corpo);"></textarea></div>
+          <div class="ficha-botoes">
+            <button class="ficha-btn-primario" onclick="confirmarFollowUp('${idLead}','${cliente.replace(/'/g,'')}','${cnpj}')"><i class="ti ti-check"></i> Agendar</button>
+            <button class="ficha-btn-secundario" onclick="document.getElementById('modal-fu-overlay').remove()">Cancelar</button>
+          </div>
+          <div id="fu-msg"></div>
+        </div>
+      </div>
+    </div>`);
+}
+async function confirmarFollowUp(idLead, cliente, cnpj) {
+  const data = document.getElementById('fu-data').value;
+  const obs = document.getElementById('fu-obs').value;
+  if (!data) { document.getElementById('fu-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Escolha a data.</div>'; return; }
+  try {
+    // grava a data de follow-up no lead
+    await fetch(API_URL, { method:'POST', body: JSON.stringify({
+      acao:'atualizarLeadCampos', token: sessaoToken, dados:{ idLead:String(idLead), campos:{ FOLLOWUP: fmtDataBR(data) } }
+    })});
+    // cria uma atividade agendada (aparece na Agenda)
+    await fetch(API_URL, { method:'POST', body: JSON.stringify({
+      acao:'registrarAtividade', token: sessaoToken,
+      dados:{ cnpj: cnpj||'', cliente, tipo:'Follow-up', titulo:'Follow-up agendado', descricao: obs, dataAgendada: data, registradoPor: usuarioAtual.nome }
+    })});
+    const lead = (kanbanLeads||[]).find(l=>String(l['ID_LEAD'])===String(idLead));
+    if (lead) lead['FOLLOWUP'] = fmtDataBR(data);
+    const ov = document.getElementById('modal-fu-overlay'); if (ov) ov.remove();
+    fecharFicha();
+    aplicarKanban();
+    atualizarSino();
+    const av = document.createElement('div');
+    av.textContent = 'Follow-up agendado!';
+    av.style.cssText = 'position:fixed;bottom:20px;right:20px;background:#6B5B95;color:white;padding:10px 18px;border-radius:8px;font-size:13px;z-index:9999;';
+    document.body.appendChild(av); setTimeout(()=>av.remove(), 2500);
+  } catch(e) { document.getElementById('fu-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Erro de conexão.</div>'; }
+}
+
+async function salvarEndCepLead(idLead) {
+  const end = (document.getElementById('lead-end')||{}).value || '';
+  const cep = (document.getElementById('lead-cep')||{}).value || '';
+  try {
+    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
+      acao:'atualizarLeadCampos', token: sessaoToken, dados:{ idLead: String(idLead), campos:{ ENDERECO: end, CEP: cep } }
+    })});
+    const r = await resp.json();
+    if (!r.ok) { alert('Erro: '+(r.erro||'verifique se o Apps Script foi republicado.')); return; }
+    const lead = (kanbanLeads||[]).find(l=>String(l['ID_LEAD'])===String(idLead));
+    if (lead) { lead['ENDERECO']=end; lead['CEP']=cep; }
+    if (typeof mostrarClientesProximos === 'function') mostrarClientesProximos(cep, idLead);
+    const av = document.createElement('div');
+    av.textContent = 'Endereço/CEP salvos!';
+    av.style.cssText = 'position:fixed;bottom:20px;right:20px;background:var(--verde-escuro);color:white;padding:10px 18px;border-radius:8px;font-size:13px;z-index:9999;';
+    document.body.appendChild(av); setTimeout(()=>av.remove(), 2000);
+  } catch(e) { alert('Erro de conexão.'); }
+}
+
 async function salvarEnderecoFicha(cnpj) {
   const inp = document.getElementById('ficha-endereco');
   if (!inp) return;
@@ -1588,7 +1657,7 @@ async function renderHistoricoCliente(corpo) {
   const r = await buscarDados('Atividades_Cliente');
   const cnpj = String(fichaClienteAtual['CNPJ']);
   const ativs = (r.ok?r.linhas:[]).filter(a=>String(a['CNPJ'])===cnpj).sort((a,b)=>{ const da=parseDataReaj(a['DATA_REGISTRO'])||0, db=parseDataReaj(b['DATA_REGISTRO'])||0; return db-da; });
-  const iconePorTipo = {'Visita técnica':'ti-map-pin','Ligação':'ti-phone','Tratativa':'ti-message','Ocorrência':'ti-alert-circle','E-mail':'ti-mail','Reunião':'ti-users','Proposta Revisada':'ti-file-pencil'};
+  const iconePorTipo = {'Visita técnica':'ti-map-pin','Ligação':'ti-phone','Tratativa':'ti-message','Ocorrência':'ti-alert-circle','E-mail':'ti-mail','Reunião':'ti-users','Proposta Revisada':'ti-file-pencil','Follow-up':'ti-calendar-clock'};
   let html = `<div style="margin-bottom:12px;"><button class="ficha-btn-primario" style="padding:8px 14px;border:none;border-radius:8px;cursor:pointer;font-size:13px;" onclick="abrirFormAtividade('${cnpj.replace(/'/g,'')}','${(fichaClienteAtual['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-plus"></i> Registrar atividade</button></div>`;
   if (!ativs.length) { corpo.innerHTML = html + `<div style="text-align:center;color:var(--cinza-500);padding:24px;font-size:13px;">Nenhuma atividade registrada ainda.</div>`; return; }
   html += `<div style="position:relative;padding-left:8px;">`;
@@ -1794,7 +1863,7 @@ async function renderKanban(area) {
       <select class="filtro-sel" id="k-consultor" onchange="aplicarKanban()"><option value="">Todos consultores</option>${consultores.map(c=>`<option>${c}</option>`).join('')}</select>
       <select class="filtro-sel" id="k-fonte" onchange="aplicarKanban()"><option value="">Todas fontes</option>${fontes.map(f=>`<option>${f}</option>`).join('')}</select>
       <select class="filtro-sel" id="k-transp" onchange="aplicarKanban()"><option value="">Todas transportadoras</option>${[...new Set(kanbanLeads.map(l=>l['EMPRESA_COLETA_ATUAL']).filter(Boolean).map(t=>String(t).trim()))].sort().map(t=>`<option>${t}</option>`).join('')}</select>
-      <select class="filtro-sel" id="k-etapa" onchange="aplicarKanban()"><option value="">Todas etapas</option><option value="Prospecção">Indicações</option><option>Em Contato</option><option>Proposta Solicitada</option><option>Proposta Enviada</option><option>Fechado</option><option>Declinado</option></select>
+      <select class="filtro-sel" id="k-etapa" onchange="aplicarKanban()"><option value="">Todas etapas</option><option value="Prospecção">Pendente</option><option>Em Contato</option><option>Proposta Solicitada</option><option>Proposta Enviada</option><option>Fechado</option><option>Declinado</option></select>
       <span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--cinza-600);">
         <i class="ti ti-calendar" style="font-size:15px;"></i> De
         <input type="date" class="filtro-sel" id="k-data-ini" onchange="aplicarKanban()" style="padding:6px 8px;">
@@ -1881,12 +1950,12 @@ function aplicarKanban() {
   });
   numHtml += `<div class="kpi-card" style="border-top:3px solid ${COR_PROSPECCAO.cor};">
     <div class="kpi-num" style="color:${COR_PROSPECCAO.cor};">${prospec}</div>
-    <div class="kpi-lbl">Indicações</div></div>`;
+    <div class="kpi-lbl">Pendente</div></div>`;
   numHtml += '</div>';
   document.getElementById('kanban-numeros').innerHTML = numHtml;
 
   // ---- Colunas do Kanban: principais coloridas + Prospecção à parte ----
-  const COLS = ETAPAS_CFG.concat([{ nome:'Prospecção', rotulo:'Indicações', cor:COR_PROSPECCAO.cor, bg:COR_PROSPECCAO.bg, aparte:true }]);
+  const COLS = ETAPAS_CFG.concat([{ nome:'Prospecção', rotulo:'Pendente', cor:COR_PROSPECCAO.cor, bg:COR_PROSPECCAO.bg, aparte:true }]);
   if (mostrarCobertura) COLS.push({ nome:'Cobertura', cor:'#6B5B95', bg:'#ede9f3', aparte:true });
   let html = `<div style="margin:8px 0 14px;color:var(--cinza-600);font-size:13px;">${leads.length} leads · ${cobertura} coberturas não entram nos números · <i class="ti ti-hand-finger"></i> arraste os cards para mudar a etapa</div><div class="kanban">`;
   COLS.forEach(col => {
@@ -1895,7 +1964,12 @@ function aplicarKanban() {
       const na = String(a['NOVO']||'').toLowerCase()==='sim' ? 1 : 0;
       const nb = String(b['NOVO']||'').toLowerCase()==='sim' ? 1 : 0;
       if (na !== nb) return nb - na;
-      // entre os de mesmo status, os mais recentes primeiro (por data de contato)
+      // leads que JÁ tiveram atualização (atividade registrada) vão para o FIM
+      const ua = parseDataReaj(a['ULTIMA_ATIVIDADE']), ub = parseDataReaj(b['ULTIMA_ATIVIDADE']);
+      const ta = ua ? 1 : 0, tb = ub ? 1 : 0;
+      if (ta !== tb) return ta - tb; // quem NÃO tem atividade vem antes; quem tem vai pro fim
+      if (ua && ub) return ua - ub;  // entre os atualizados, o mais antigo por último (atualizado há mais tempo no fim)
+      // sem atividade: mais recentes por data de contato primeiro
       const da = parseDataReaj(a['DATA_CONTATO'])||0, db = parseDataReaj(b['DATA_CONTATO'])||0;
       return db - da;
     });
@@ -1903,9 +1977,12 @@ function aplicarKanban() {
       <div class="kanban-col-titulo" style="color:${col.cor};">${col.rotulo||col.nome}${col.aparte?' <span style="font-size:10px;font-weight:400;">(fora dos nº)</span>':''}<span class="qtd">${doEtapa.length}</span></div>`;
     doEtapa.slice(0, 40).forEach(l => {
       const ehNovo = String(l['NOVO']||'').toLowerCase()==='sim';
-      html += `<div class="kanban-card${ehNovo?' card-novo':''}" draggable="true" ondragstart="pegarCard(event,'${String(l['ID_LEAD']||'').replace(/'/g,'')}')" onclick="abrirLead('${String(l['ID_LEAD']||'').replace(/'/g,'')}')" style="border-left-color:${col.cor};${ehNovo?'background:#FFFBEA;box-shadow:0 0 0 1.5px #F0C808;':''}">
-        <div class="cli">${ehNovo?'<span style="display:inline-block;background:#F0C808;color:#5a4a00;font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:5px;vertical-align:1px;">NOVO</span>':''}${l['CLIENTE']||'—'}</div>
+      const fu = parseDataReaj(l['FOLLOWUP']);
+      const temFU = fu && fu >= new Date(new Date().toDateString());
+      html += `<div class="kanban-card${ehNovo?' card-novo':''}" draggable="true" ondragstart="pegarCard(event,'${String(l['ID_LEAD']||'').replace(/'/g,'')}')" onclick="abrirLead('${String(l['ID_LEAD']||'').replace(/'/g,'')}')" style="border-left-color:${col.cor};${ehNovo?'background:#FFFBEA;box-shadow:0 0 0 1.5px #F0C808;':temFU?'background:#F3F0FA;box-shadow:0 0 0 1.5px #6B5B95;':''}">
+        <div class="cli">${ehNovo?'<span style="display:inline-block;background:#F0C808;color:#5a4a00;font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:5px;vertical-align:1px;">NOVO</span>':''}${temFU?'<span style="display:inline-block;background:#6B5B95;color:white;font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:5px;vertical-align:1px;">FOLLOW-UP</span>':''}${l['CLIENTE']||'—'}</div>
         <div class="meta">${l['CONSULTOR']||'—'}${l['FONTE']?' · '+l['FONTE']:''}</div>
+        ${temFU?`<div class="meta" style="margin-top:3px;color:#6B5B95;"><i class="ti ti-calendar-clock" style="font-size:12px;vertical-align:-1px;"></i> Follow-up: ${fmtDataBR(l['FOLLOWUP'])}</div>`:''}
         ${l['EMPRESA_COLETA_ATUAL']?`<div class="meta" style="margin-top:3px;"><i class="ti ti-truck" style="font-size:12px;vertical-align:-1px;"></i> ${l['EMPRESA_COLETA_ATUAL']}</div>`:''}
       </div>`;
     });
@@ -2754,13 +2831,16 @@ async function atualizarSino() {
   // preço: Roberto (e diretoria) vê pedidos aguardando; Danielly vê os já precificados
   const vePedidosPreco = ['roberto','mafe','andrea'].includes(id);
   const vePrecificados = (id === 'danielly');
+  // follow-ups da semana: todos veem (cada um filtra os seus pelo CRM)
+  const veFollowUps = true;
   const btn = document.getElementById('btn-sino');
-  if (!veInad && !veSolicitacoes && !vePedidosPreco && !vePrecificados) { btn.style.display='none'; return; }
+  if (!veInad && !veSolicitacoes && !vePedidosPreco && !vePrecificados && !veFollowUps) { btn.style.display='none'; return; }
   btn.style.display='inline-block';
   try {
     let total = 0;
     window._avisosSolic = [];
     window._avisosPreco = [];
+    window._avisosFU = [];
     if (veInad) { const lista = await carregarInad(); total += lista.length; }
     if (veSolicitacoes) {
       const [ra, rc] = await Promise.all([buscarDados('Aditivos'), buscarDados('Solicitacoes_Contrato')]);
@@ -2786,6 +2866,17 @@ async function atualizarSino() {
       }
     }
     const badge = document.getElementById('sino-badge');
+    if (veFollowUps) {
+      // follow-ups com data nos próximos 7 dias (usa o filtro de CRM: cada um vê os seus)
+      await carregarLeads();
+      const hoje = new Date(new Date().toDateString());
+      const fim = new Date(hoje); fim.setDate(fim.getDate()+7);
+      const fus = (kanbanLeads||[]).filter(l=>{ const d=parseDataReaj(l['FOLLOWUP']); return d && d>=hoje && d<=fim; })
+        .map(l=>({cliente:l['CLIENTE'], data:l['FOLLOWUP'], consultor:l['CONSULTOR']}))
+        .sort((a,b)=>(parseDataReaj(a.data)||0)-(parseDataReaj(b.data)||0));
+      window._avisosFU = fus;
+      total += fus.length;
+    }
     if (total) { badge.textContent = total; badge.style.display='flex'; }
     else badge.style.display='none';
   } catch(e) {}
@@ -2805,20 +2896,26 @@ function abrirAvisos() {
   let itensPreco = preco.length
     ? preco.map(p=>`<div style="padding:10px 12px;border-bottom:1px solid var(--cinza-100);font-size:13px;"><span style="display:inline-block;background:#FBF0E6;color:#BA7517;border-radius:4px;padding:1px 6px;font-size:10px;margin-right:6px;">${p.tipo}</span><b>${p.cliente||'—'}</b> — ${p.tipo==='Precificado'?('precificado'+(p.preco?' em '+fmtMoeda(p.preco):'')):('pedido por '+(p.por||'—'))}${p.data?' · '+fmtDataBR(p.data):''}</div>`).join('')
     : '';
-  const corpo = (itensSolic+itensInad+itensPreco) || '<div style="padding:16px;color:var(--cinza-500);font-size:13px;">Sem avisos no momento.</div>';
+  const fu = window._avisosFU || [];
+  let itensFU = fu.length
+    ? fu.map(f=>`<div style="padding:10px 12px;border-bottom:1px solid var(--cinza-100);font-size:13px;"><span style="display:inline-block;background:#F3F0FA;color:#6B5B95;border-radius:4px;padding:1px 6px;font-size:10px;margin-right:6px;">Follow-up</span><b>${f.cliente||'—'}</b> — ${fmtDataBR(f.data)}${f.consultor?' · '+f.consultor:''}</div>`).join('')
+    : '';
+  const corpo = (itensSolic+itensInad+itensPreco+itensFU) || '<div style="padding:16px;color:var(--cinza-500);font-size:13px;">Sem avisos no momento.</div>';
   cont.innerHTML = `
     <div class="ficha-overlay" onclick="if(event.target===this)fecharFicha()">
       <div class="ficha" style="width:480px;">
         <div class="ficha-topo"><button class="fechar" onclick="fecharFicha()"><i class="ti ti-x"></i></button>
           <div class="nome"><i class="ti ti-bell"></i> Avisos</div><div class="cnpj">Solicitações e pendências</div></div>
         <div class="ficha-corpo" style="padding:8px 0;">
-          ${preco.length?`<div style="font-size:11px;font-weight:600;color:var(--cinza-500);padding:6px 12px;">PREÇOS</div>`:''}
+          ${fu.length?`<div style="font-size:11px;font-weight:600;color:var(--cinza-500);padding:6px 12px;">FOLLOW-UPS DA SEMANA</div>`:''}
+          ${itensFU}
+          ${preco.length?`<div style="font-size:11px;font-weight:600;color:var(--cinza-500);padding:10px 12px 6px;">PREÇOS</div>`:''}
           ${itensPreco}
           ${solic.length?`<div style="font-size:11px;font-weight:600;color:var(--cinza-500);padding:10px 12px 6px;">SOLICITAÇÕES PENDENTES</div>`:''}
           ${itensSolic}
           ${inad.length?`<div style="font-size:11px;font-weight:600;color:var(--cinza-500);padding:10px 12px 6px;">INADIMPLÊNCIA</div>`:''}
           ${itensInad}
-          ${(itensSolic+itensInad+itensPreco)?'':corpo}
+          ${(itensSolic+itensInad+itensPreco+itensFU)?'':corpo}
         </div>
       </div>
     </div>`;
@@ -4335,7 +4432,7 @@ async function abrirRelatorioFunil() {
             <div><label style="font-size:13px;color:var(--cinza-700);">Consultor</label>
               <select id="rf-consultor" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"><option value="">Todos</option>${consultores.map(c=>`<option>${c}</option>`).join('')}</select></div>
             <div><label style="font-size:13px;color:var(--cinza-700);">Situação</label>
-              <select id="rf-situacao" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"><option value="">Todas</option>${situacoes.map(s=>`<option value="${s}">${s==='Indicação/Prospecção'?'Indicações':s}</option>`).join('')}</select></div>
+              <select id="rf-situacao" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"><option value="">Todas</option>${situacoes.map(s=>`<option value="${s}">${s==='Indicação/Prospecção'?'Pendente':s}</option>`).join('')}</select></div>
             <div><label style="font-size:13px;color:var(--cinza-700);">De</label>
               <input type="date" id="rf-de" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
             <div><label style="font-size:13px;color:var(--cinza-700);">Até</label>
@@ -4367,7 +4464,7 @@ function filtrarLeadsRelatorio() {
   return lista;
 }
 
-function rotEtapa(e){ return e==='Indicação/Prospecção' ? 'Indicações' : (e||'—'); }
+function rotEtapa(e){ return e==='Indicação/Prospecção' ? 'Pendente' : (e||'—'); }
 
 function gerarRelatorioFunil(paraPdf) {
   const lista = filtrarLeadsRelatorio();
@@ -4376,9 +4473,9 @@ function gerarRelatorioFunil(paraPdf) {
   const de = document.getElementById('rf-de').value, ate = document.getElementById('rf-ate').value;
   const periodo = (de||ate) ? `${de?fmtDataBR(de):'início'} a ${ate?fmtDataBR(ate):'hoje'}` : 'todo o período';
   const linhasHtml = lista.length
-    ? lista.map(l=>`<tr><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${l['CLIENTE']||'—'}</td><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${rotEtapa(l['ETAPA'])}</td><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${l['CONSULTOR']||'—'}</td><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${l['FONTE']||'—'}</td><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${fmtDataBR(l['DATA_CONTATO'])}</td><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${l['VALOR_R$']?fmtMoeda(l['VALOR_R$']):'—'}</td></tr>`).join('')
-    : '<tr><td colspan="6" style="padding:18px;text-align:center;color:#999;">Nenhum lead encontrado com esses filtros.</td></tr>';
-  const cabecalho = `<tr style="background:#f0f7ec;"><th style="padding:7px 10px;text-align:left;font-size:11px;color:#2d5a3d;">Cliente</th><th style="padding:7px 10px;text-align:left;font-size:11px;color:#2d5a3d;">Situação</th><th style="padding:7px 10px;text-align:left;font-size:11px;color:#2d5a3d;">Consultor</th><th style="padding:7px 10px;text-align:left;font-size:11px;color:#2d5a3d;">Fonte</th><th style="padding:7px 10px;text-align:left;font-size:11px;color:#2d5a3d;">Data contato</th><th style="padding:7px 10px;text-align:left;font-size:11px;color:#2d5a3d;">Valor</th></tr>`;
+    ? lista.map(l=>`<tr><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${l['CLIENTE']||'—'}</td><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${rotEtapa(l['ETAPA'])}</td><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${l['CONSULTOR']||'—'}</td><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${l['FONTE']||'—'}</td><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${l['N_PROPOSTA']||'—'}</td><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${fmtDataBR(l['DATA_CONTATO'])}</td><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${l['VALOR_R$']?fmtMoeda(l['VALOR_R$']):'—'}</td></tr>`).join('')
+    : '<tr><td colspan="7" style="padding:18px;text-align:center;color:#999;">Nenhum lead encontrado com esses filtros.</td></tr>';
+  const cabecalho = `<tr style="background:#f0f7ec;"><th style="padding:7px 10px;text-align:left;font-size:11px;color:#2d5a3d;">Cliente</th><th style="padding:7px 10px;text-align:left;font-size:11px;color:#2d5a3d;">Situação</th><th style="padding:7px 10px;text-align:left;font-size:11px;color:#2d5a3d;">Consultor</th><th style="padding:7px 10px;text-align:left;font-size:11px;color:#2d5a3d;">Fonte</th><th style="padding:7px 10px;text-align:left;font-size:11px;color:#2d5a3d;">Nº proposta</th><th style="padding:7px 10px;text-align:left;font-size:11px;color:#2d5a3d;">Data contato</th><th style="padding:7px 10px;text-align:left;font-size:11px;color:#2d5a3d;">Valor</th></tr>`;
   const conteudo = `
     <div style="margin-bottom:10px;font-size:13px;color:var(--cinza-600);"><b>${lista.length}</b> leads · Consultor: ${cons} · Situação: ${sit?rotEtapa(sit):'Todas'} · Período: ${periodo}</div>
     <table style="width:100%;border-collapse:collapse;border:1px solid #eee;">${cabecalho}${linhasHtml}</table>`;
@@ -4415,7 +4512,7 @@ function abrirFormLead() {
             <div><label style="font-size:13px;color:var(--cinza-700);">Consultor responsável</label>
               <select id="nl-consultor" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;">${['Bruna Campos','Elaine Souza','Rogério Sabino','Danielly Santos','Maria Fernanda','Andrea Fernandes','Roberto Fernandes'].map(n=>`<option ${usuarioAtual.nome&&usuarioAtual.nome.includes(n.split(' ')[0])?'selected':''}>${n}</option>`).join('')}</select></div>
             <div><label style="font-size:13px;color:var(--cinza-700);">Etapa</label>
-              <select id="nl-etapa" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"><option>Em Contato</option><option>Proposta Enviada</option><option value="Indicação/Prospecção">Indicações</option><option>Fechado</option><option>Declinado</option></select></div>
+              <select id="nl-etapa" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"><option>Em Contato</option><option>Proposta Enviada</option><option value="Indicação/Prospecção">Pendente</option><option>Fechado</option><option>Declinado</option></select></div>
             <div><label style="font-size:13px;color:var(--cinza-700);">Fonte</label>
               <select id="nl-fonte" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;">${LISTA_FONTES.map(f=>`<option>${f}</option>`).join('')}</select></div>
             <div><label style="font-size:13px;color:var(--cinza-700);">Responsável</label>
@@ -4437,6 +4534,10 @@ function abrirFormLead() {
               <input type="text" id="nl-residuo" placeholder="ex: resíduo de saúde / químico" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
             <div><label style="font-size:13px;color:var(--cinza-700);">Acondicionamento</label>
               <input type="text" id="nl-acond" placeholder="ex: bombona, saco, caçamba" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+            <div><label style="font-size:13px;color:var(--cinza-700);">CEP</label>
+              <input type="text" id="nl-cep" placeholder="00000-000" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+            <div style="grid-column:1/3;"><label style="font-size:13px;color:var(--cinza-700);">Endereço</label>
+              <input type="text" id="nl-endereco" placeholder="rua, número, bairro" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
             <div style="grid-column:1/3;"><label style="font-size:13px;color:var(--cinza-700);">Informação adicional</label>
               <textarea id="nl-infoadd" rows="2" placeholder="qualquer detalhe extra sobre o serviço" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;font-family:var(--fonte-corpo);"></textarea></div>
             <div style="grid-column:1/3;"><label style="font-size:13px;color:var(--cinza-700);">Observações / OBS de cobertura</label>
@@ -4487,6 +4588,8 @@ async function salvarLead() {
     'RESPONSAVEL': document.getElementById('nl-resp').value, 'EMAIL': document.getElementById('nl-email').value,
     'TELEFONE': document.getElementById('nl-tel').value,
     'EMPRESA_COLETA_ATUAL': document.getElementById('nl-transp').value,
+    'ENDERECO': (document.getElementById('nl-endereco')||{}).value || '',
+    'CEP': (document.getElementById('nl-cep')||{}).value || '',
     'FREQUENCIA': (document.getElementById('nl-freq')||{}).value || '',
     'RESIDUO': (document.getElementById('nl-residuo')||{}).value || '',
     'CATEGORIA_RESIDUO': (document.getElementById('nl-acond')||{}).value || '',
@@ -4499,8 +4602,18 @@ async function salvarLead() {
     const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({ acao:'novoLead', token: sessaoToken, dados:{ campos } })});
     const r = await resp.json();
     if (!r.ok) { document.getElementById('nl-msg').innerHTML=`<div class="sem-acesso">${r.erro}</div>`; return; }
+    const etapaEscolhida = campos['ETAPA'];
     kanbanLeads = null; // forçar recarga
     document.getElementById('nl-msg').innerHTML = '<div style="background:var(--verde-ok-bg);border-radius:8px;padding:10px;margin-top:10px;color:var(--verde-ok);font-size:13px;"><i class="ti ti-circle-check"></i> Lead criado!</div>';
+    // se foi criado já como Declinado, abre o modal de motivo de perda
+    if (etapaEscolhida === 'Declinado') {
+      await carregarLeads(true);
+      const novo = (kanbanLeads||[]).find(l => String(l['CLIENTE'])===String(cliente));
+      fecharFicha();
+      renderKanban(document.getElementById('area-conteudo'));
+      if (novo) setTimeout(()=>abrirModalMotivoPerda(novo['ID_LEAD']), 400);
+      return;
+    }
     setTimeout(()=>{ fecharFicha(); renderKanban(document.getElementById('area-conteudo')); }, 1500);
   } catch(e) { document.getElementById('nl-msg').innerHTML='<div class="sem-acesso">Erro de conexão.</div>'; }
 }
@@ -5135,7 +5248,7 @@ function calcResultados() {
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;">
       ${cardTaxa('Leads \u2192 Proposta enviada', propostas, totalLeads, taxaLeadProposta, 'var(--verde-escuro)', `${propostas} propostas de ${totalLeads} leads novos no período`)}
       ${cardTaxa('Propostas \u2192 Fechamento', fechados, propostas, taxaPropFechado, 'var(--verde-ok)', `${fechados} fechados de ${propostas} propostas no período`)}
-      ${cardTaxa('Indicações \u2192 Proposta', prospParaProp, totalProspec, taxaProspProposta, '#BA7517', `${prospParaProp} indicações viraram proposta de ${totalProspec}`)}
+      ${cardTaxa('Pendente \u2192 Proposta', prospParaProp, totalProspec, taxaProspProposta, '#BA7517', `${prospParaProp} pendentes viraram proposta de ${totalProspec}`)}
     </div>
     <div style="background:white;border:1px solid var(--cinza-200);border-radius:12px;padding:20px;margin-top:18px;">
       <h3 style="font-family:var(--fonte-display);font-size:15px;margin:0 0 14px;">Resumo do período (${fmtDataBR(ini)} a ${fmtDataBR(fim)})</h3>
@@ -5177,7 +5290,7 @@ function abrirLead(id) {
             <label style="font-size:12px;color:var(--cinza-600);display:block;margin-bottom:6px;font-weight:600;">Mudar etapa</label>
             <div style="display:flex;gap:8px;align-items:center;">
               <select id="lead-etapa" style="flex:1;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;font-size:13px;">
-                ${ETAPAS_SEL.map(e=>`<option value="${e}" ${etapaAtual===e?'selected':''}>${e==='Indicação/Prospecção'?'Indicações':e}</option>`).join('')}
+                ${ETAPAS_SEL.map(e=>`<option value="${e}" ${etapaAtual===e?'selected':''}>${e==='Indicação/Prospecção'?'Pendente':e}</option>`).join('')}
               </select>
               <button onclick="mudarEtapaPeloSeletor('${idLead}')" style="padding:9px 14px;border:none;background:var(--verde-medio);color:white;border-radius:8px;cursor:pointer;font-size:13px;white-space:nowrap;"><i class="ti ti-check"></i> Aplicar</button>
             </div>
@@ -5197,7 +5310,11 @@ function abrirLead(id) {
             ${linha('Responsável', l['RESPONSAVEL'])}
             ${linha('E-mail', l['EMAIL'])}
             ${linha('Telefone', l['TELEFONE'])}
-            ${linha('Endereço', l['ENDERECO'])}
+            <tr><td style="padding:6px 8px;color:var(--cinza-600);"><i class="ti ti-map-pin" style="vertical-align:-2px;margin-right:4px;"></i>Endereço</td><td style="padding:6px 8px;">
+              <input type="text" id="lead-end" value="${(l['ENDERECO']||'').replace(/"/g,'&quot;')}" placeholder="—" style="padding:5px 8px;border:1.5px solid var(--cinza-300);border-radius:6px;font-size:13px;width:90%;font-family:var(--fonte-corpo);"></td></tr>
+            <tr><td style="padding:6px 8px;color:var(--cinza-600);"><i class="ti ti-mailbox" style="vertical-align:-2px;margin-right:4px;"></i>CEP</td><td style="padding:6px 8px;">
+              <input type="text" id="lead-cep" value="${(l['CEP']||'').replace(/"/g,'&quot;')}" placeholder="00000-000" style="padding:5px 8px;border:1.5px solid var(--cinza-300);border-radius:6px;font-size:13px;width:140px;font-family:var(--fonte-corpo);">
+              <button onclick="salvarEndCepLead('${idLead}')" style="margin-left:6px;padding:5px 10px;border:none;background:var(--verde-medio);color:white;border-radius:6px;cursor:pointer;font-size:12px;"><i class="ti ti-check"></i> Salvar</button></td></tr>
             ${linha('Acondicionamento', l['CATEGORIA_RESIDUO'])}
             ${linha('Resíduo', l['RESIDUO'])}
             ${linha('Quantidade', l['QUANTIDADE'])}
@@ -5211,15 +5328,57 @@ function abrirLead(id) {
           </table>
           <div class="ficha-botoes" style="flex-wrap:wrap;">
             <button class="ficha-btn-primario" onclick="abrirFormAtividade('${cnpjOuVazio||idLead}','${(l['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-plus"></i> Registrar atividade / anotação</button>
+            <button class="ficha-btn-secundario" style="color:#6B5B95;border-color:#6B5B95;" onclick="abrirFollowUp('${idLead}','${(l['CLIENTE']||'').replace(/'/g,'')}','${cnpjOuVazio}')"><i class="ti ti-calendar-clock"></i> Agendar follow-up</button>
             ${l['CNPJ']?`<button class="ficha-btn-secundario" onclick="abrirFicha('${cnpjOuVazio}')"><i class="ti ti-user"></i> Ver ficha do cliente</button>`:''}
             ${podeArquivarLead()?`<button class="ficha-btn-secundario" style="color:var(--vermelho);border-color:var(--vermelho);" onclick="arquivarLead('${idLead}','${(l['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-trash"></i> Arquivar lead (cadastro errado)</button>`:''}
           </div>
+          <div id="lead-proximos" style="margin-top:14px;"></div>
           <div id="lead-hist" style="margin-top:14px;"></div>
         </div>
       </div>
     </div>`;
   // carregar histórico de atividades do lead (por cliente)
   carregarHistoricoLead(l['CLIENTE'], cnpjOuVazio);
+  // mostrar clientes próximos (mesma região de CEP)
+  mostrarClientesProximos(l['CEP'], idLead);
+}
+
+// mostra clientes ativos na mesma região do CEP do lead
+async function mostrarClientesProximos(cepLead, idLead) {
+  const alvo = document.getElementById('lead-proximos');
+  if (!alvo) return;
+  const cep = String(cepLead||'').replace(/\D/g,'');
+  if (cep.length < 5) {
+    alvo.innerHTML = `<div style="background:var(--cinza-100);border-radius:10px;padding:12px;font-size:12px;color:var(--cinza-500);"><i class="ti ti-map-pin"></i> Preencha o CEP do lead (acima) para ver clientes próximos.</div>`;
+    return;
+  }
+  await carregarClientes();
+  const lista = (cacheClientes||[]).map(c => {
+    const cc = String(c['CEP']||'').replace(/\D/g,'');
+    if (cc.length < 5) return null;
+    let nivel = 0;
+    if (cc.slice(0,5) === cep.slice(0,5)) nivel = 3;       // mesma rua/quadra
+    else if (cc.slice(0,4) === cep.slice(0,4)) nivel = 2;  // bem perto
+    else if (cc.slice(0,3) === cep.slice(0,3)) nivel = 1;  // mesma região
+    if (!nivel) return null;
+    return { nome:c['CLIENTE'], cep:c['CEP'], endereco:c['ENDERECO'], cons:c['CONSULTOR'], nivel };
+  }).filter(Boolean).sort((a,b)=>b.nivel-a.nivel).slice(0, 15);
+
+  if (!lista.length) {
+    alvo.innerHTML = `<div style="background:var(--cinza-100);border-radius:10px;padding:12px;font-size:12px;color:var(--cinza-500);"><i class="ti ti-map-pin"></i> Nenhum cliente ativo na mesma região de CEP (${cep.slice(0,5)}...).</div>`;
+    return;
+  }
+  const selo = n => n===3 ? '<span style="background:#1f7a3d;color:white;font-size:9px;padding:1px 5px;border-radius:4px;">muito perto</span>'
+    : n===2 ? '<span style="background:#4a8c5c;color:white;font-size:9px;padding:1px 5px;border-radius:4px;">perto</span>'
+    : '<span style="background:#8bc34a;color:#2d5a3d;font-size:9px;padding:1px 5px;border-radius:4px;">mesma região</span>';
+  alvo.innerHTML = `
+    <div style="background:#F3F0FA;border-radius:10px;padding:12px;">
+      <div style="font-size:12px;font-weight:600;color:#534877;margin-bottom:8px;"><i class="ti ti-map-pin"></i> Clientes próximos (CEP ${cep.slice(0,5)}...)</div>
+      ${lista.map(c=>`<div style="padding:7px 0;border-bottom:1px solid rgba(0,0,0,0.06);font-size:12px;display:flex;justify-content:space-between;gap:8px;align-items:center;">
+        <div><b style="color:var(--cinza-800);">${c.nome}</b><br><span style="color:var(--cinza-500);">${c.endereco||'—'} · CEP ${c.cep||'—'}${c.cons?' · '+c.cons:''}</span></div>
+        <div style="white-space:nowrap;">${selo(c.nivel)}</div>
+      </div>`).join('')}
+    </div>`;
 }
 
 // aplica a etapa escolhida no seletor do card
