@@ -1655,8 +1655,8 @@ function blocoRegulatorio(c) {
 async function renderHistoricoCliente(corpo) {
   corpo.innerHTML = `<div style="text-align:center;color:var(--cinza-500);padding:20px;">Carregando histórico...</div>`;
   const r = await buscarDados('Atividades_Cliente');
-  const cnpj = String(fichaClienteAtual['CNPJ']);
-  const ativs = (r.ok?r.linhas:[]).filter(a=>String(a['CNPJ'])===cnpj).sort((a,b)=>{ const da=parseDataReaj(a['DATA_REGISTRO'])||0, db=parseDataReaj(b['DATA_REGISTRO'])||0; return db-da; });
+  const cnpj = cnpjLimpo(fichaClienteAtual['CNPJ']);
+  const ativs = (r.ok?r.linhas:[]).filter(a=>cnpjLimpo(a['CNPJ'])===cnpj).sort((a,b)=>{ const da=parseDataReaj(a['DATA_REGISTRO'])||0, db=parseDataReaj(b['DATA_REGISTRO'])||0; return db-da; });
   const iconePorTipo = {'Visita técnica':'ti-map-pin','Ligação':'ti-phone','Tratativa':'ti-message','Ocorrência':'ti-alert-circle','E-mail':'ti-mail','Reunião':'ti-users','Proposta Revisada':'ti-file-pencil','Follow-up':'ti-calendar-clock'};
   let html = `<div style="margin-bottom:12px;"><button class="ficha-btn-primario" style="padding:8px 14px;border:none;border-radius:8px;cursor:pointer;font-size:13px;" onclick="abrirFormAtividade('${cnpj.replace(/'/g,'')}','${(fichaClienteAtual['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-plus"></i> Registrar atividade</button></div>`;
   if (!ativs.length) { corpo.innerHTML = html + `<div style="text-align:center;color:var(--cinza-500);padding:24px;font-size:13px;">Nenhuma atividade registrada ainda.</div>`; return; }
@@ -4514,7 +4514,12 @@ function abrirFormLead() {
             <div><label style="font-size:13px;color:var(--cinza-700);">Etapa</label>
               <select id="nl-etapa" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"><option>Em Contato</option><option>Proposta Enviada</option><option value="Indicação/Prospecção">Pendente</option><option>Fechado</option><option>Declinado</option></select></div>
             <div><label style="font-size:13px;color:var(--cinza-700);">Fonte</label>
-              <select id="nl-fonte" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;">${LISTA_FONTES.map(f=>`<option>${f}</option>`).join('')}</select></div>
+              <select id="nl-fonte" onchange="onMudarFonteLead()" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;">${LISTA_FONTES.map(f=>`<option>${f}</option>`).join('')}</select></div>
+            <div id="nl-buscacli-wrap" style="grid-column:1/3;display:none;">
+              <label style="font-size:13px;color:var(--cinza-700);">Buscar cliente no sistema (recompra)</label>
+              <input type="text" id="nl-buscacli" oninput="filtrarClientesLead(this.value)" placeholder="digite o nome do cliente..." style="width:100%;padding:9px;border:1.5px solid var(--verde-medio);border-radius:8px;">
+              <div id="nl-buscacli-result" style="max-height:160px;overflow:auto;border:1px solid var(--cinza-200);border-radius:8px;margin-top:4px;display:none;"></div>
+            </div>
             <div><label style="font-size:13px;color:var(--cinza-700);">Responsável</label>
               <input type="text" id="nl-resp" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
             <div><label style="font-size:13px;color:var(--cinza-700);">Telefone</label>
@@ -4552,6 +4557,40 @@ function abrirFormLead() {
       </div>
     </div>`;
 }
+// quando a fonte é "Cliente" (recompra): mostra busca de cliente e já marca transportadora Ecotrans
+async function onMudarFonteLead() {
+  const fonte = document.getElementById('nl-fonte').value;
+  const ehCliente = fonte === 'Cliente';
+  const wrap = document.getElementById('nl-buscacli-wrap');
+  if (wrap) wrap.style.display = ehCliente ? 'block' : 'none';
+  if (ehCliente) {
+    // pré-seleciona Ecotrans na transportadora
+    const tr = document.getElementById('nl-transp');
+    if (tr) {
+      let achou = false;
+      Array.from(tr.options).forEach(o=>{ if(o.value.toLowerCase().includes('ecotrans')){ tr.value=o.value; achou=true; } });
+      if (!achou) { const op=document.createElement('option'); op.text='Ecotrans'; op.value='Ecotrans'; tr.add(op); tr.value='Ecotrans'; }
+    }
+    await carregarClientes();
+  }
+}
+function filtrarClientesLead(termo) {
+  const box = document.getElementById('nl-buscacli-result');
+  if (!box) return;
+  const t = String(termo||'').toLowerCase().trim();
+  if (t.length < 2) { box.style.display='none'; return; }
+  const achados = (cacheClientes||[]).filter(c => String(c['CLIENTE']||'').toLowerCase().includes(t)).slice(0, 20);
+  if (!achados.length) { box.innerHTML='<div style="padding:8px;font-size:12px;color:var(--cinza-500);">Nenhum cliente encontrado.</div>'; box.style.display='block'; return; }
+  box.innerHTML = achados.map(c=>`<div onclick="selecionarClienteLead('${(c['CNPJ']||'').replace(/'/g,'')}','${(c['CLIENTE']||'').replace(/'/g,"\\'")}')" style="padding:8px 10px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--cinza-100);" onmouseover="this.style.background='var(--cinza-100)'" onmouseout="this.style.background='white'"><b>${c['CLIENTE']}</b><br><span style="font-size:11px;color:var(--cinza-500);">${c['CNPJ']||''}${c['CONSULTOR']?' · '+c['CONSULTOR']:''}</span></div>`).join('');
+  box.style.display='block';
+}
+function selecionarClienteLead(cnpj, nome) {
+  document.getElementById('nl-cliente').value = nome;
+  document.getElementById('nl-cnpj').value = cnpj;
+  document.getElementById('nl-buscacli').value = nome;
+  document.getElementById('nl-buscacli-result').style.display='none';
+}
+
 async function salvarLead() {
   const cliente = document.getElementById('nl-cliente').value;
   if (!cliente) { document.getElementById('nl-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Informe o cliente.</div>'; return; }
