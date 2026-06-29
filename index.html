@@ -1070,6 +1070,7 @@ async function abrirFicha(cnpj) {
             ${c['TIPO']==='Eventual'?`<button class="ficha-btn-secundario" style="color:var(--verde-escuro);border-color:var(--verde-medio);" onclick="virarContrato('${cnpj.replace(/'/g,'')}','${(c['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-file-text"></i> Mudar para Contrato</button>`:''}
             <button class="ficha-btn-secundario" onclick="abrirFormInadimplencia('${cnpj.replace(/'/g,'')}')"><i class="ti ti-alert-triangle"></i> Marcar inadimplente</button>
             <button class="ficha-btn-secundario" style="color:var(--vermelho);border-color:var(--vermelho);" onclick="abrirFormCancelar('${cnpj.replace(/'/g,'')}','${(c['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-circle-x"></i> Cancelar cliente</button>
+            ${podeExcluirCliente()?`<button class="ficha-btn-secundario" style="color:#8a1c1c;border-color:#8a1c1c;" onclick="excluirCliente('${cnpj.replace(/'/g,'')}','${(c['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-trash"></i> Excluir (duplicado)</button>`:''}
           </div>
         </div>
       </div>
@@ -2025,6 +2026,10 @@ function podeEditarConsultorLead() {
 }
 // quem pode arquivar (mandar pra lixeira) um lead cadastrado errado
 const IDS_PODE_ARQUIVAR_LEAD = ['mafe','andrea','roberto','danielly','rogerio'];
+const IDS_PODE_EXCLUIR_CLIENTE = ['mafe','andrea','roberto'];
+function podeExcluirCliente() {
+  return IDS_PODE_EXCLUIR_CLIENTE.includes(String(usuarioAtual && usuarioAtual.id||'').toLowerCase());
+}
 function podeArquivarLead() {
   return IDS_PODE_ARQUIVAR_LEAD.includes(String(usuarioAtual && usuarioAtual.id||'').toLowerCase());
 }
@@ -5548,6 +5553,39 @@ async function carregarHistoricoLead(cliente, cnpj) {
 
 // ---- Cancelar cliente (move para Cancelados) ----
 const MOTIVOS_CANCELAMENTO = ["Preço","Concorrência","Encerramento de atividades","Mudança de endereço","Insatisfação com serviço","Redução de custos","Terceirização","Inadimplência","Fim de contrato","Outros"];
+// excluir cliente duplicado (só Mafe/Andrea/Roberto) — vai para a lixeira, avisa se tem contratos
+async function excluirCliente(cnpj, cliente) {
+  if (!podeExcluirCliente()) return;
+  const alvo = cnpjLimpo(cnpj);
+  // checar contratos vinculados
+  let nContratos = 0;
+  try {
+    const rc = await buscarDados('Contratos');
+    nContratos = (rc.ok?rc.linhas:[]).filter(x=>cnpjLimpo(x['CNPJ'])===alvo).length;
+  } catch(e) {}
+  let aviso = `Excluir o cliente "${cliente}"?\n\nEle vai para a Lixeira de Clientes (recuperável).`;
+  if (nContratos > 0) {
+    aviso += `\n\n⚠️ ATENÇÃO: este cliente tem ${nContratos} contrato(s) vinculado(s). Os contratos NÃO serão excluídos — eles continuarão na aba Contratos. Confira se não está excluindo o cliente errado.`;
+  }
+  if (!confirm(aviso)) return;
+  // segunda confirmação se tiver contratos
+  if (nContratos > 0 && !confirm(`Confirma mesmo a exclusão de "${cliente}" (com ${nContratos} contrato[s])?`)) return;
+  try {
+    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
+      acao:'excluirCliente', token: sessaoToken, dados:{ cnpj, nomeUsuario: usuarioAtual.nome }
+    })});
+    const r = await resp.json();
+    if (!r.ok) { alert('Erro: '+(r.erro||'verifique se o Apps Script foi republicado.')); return; }
+    cacheClientes = null;
+    fecharFicha();
+    if (subAtual) renderConteudo(subAtual, subNomeAtual);
+    const av = document.createElement('div');
+    av.textContent = 'Cliente excluído (está na Lixeira).';
+    av.style.cssText = 'position:fixed;bottom:20px;right:20px;background:var(--verde-escuro);color:white;padding:10px 18px;border-radius:8px;font-size:13px;z-index:9999;';
+    document.body.appendChild(av); setTimeout(()=>av.remove(), 2500);
+  } catch(e) { alert('Erro de conexão.'); }
+}
+
 function abrirFormCancelar(cnpj, cliente) {
   const cont = document.getElementById('ficha-container');
   cont.innerHTML = `
