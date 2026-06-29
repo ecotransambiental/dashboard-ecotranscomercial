@@ -2863,16 +2863,16 @@ async function atualizarSino() {
       const linhas = rp.ok ? rp.linhas : [];
       if (vePedidosPreco) {
         const pend = linhas.filter(x=>String(x['STATUS']||'').toLowerCase()==='aguardando preço' || String(x['STATUS']||'').toLowerCase()==='aguardando preco')
-          .map(x=>({tipo:'Preço pedido', cliente:x['CLIENTE'], por:x['SOLICITANTE']||x['CONSULTOR']||'', data:x['DATA']}));
+          .map(x=>({id:'preco-pend-'+(x['ID']||x['CLIENTE']||''), tipo:'Preço pedido', cliente:x['CLIENTE'], por:x['SOLICITANTE']||x['CONSULTOR']||'', data:x['DATA']}));
         window._avisosPreco = window._avisosPreco.concat(pend);
-        total += pend.length;
       }
       if (vePrecificados) {
         const prec = linhas.filter(x=>String(x['STATUS']||'').toLowerCase()==='precificado')
-          .map(x=>({tipo:'Precificado', cliente:x['CLIENTE'], por:'Roberto', data:x['DATA_RESPOSTA']||x['DATA'], preco:x['PRECO']}));
+          .map(x=>({id:'preco-prec-'+(x['ID']||x['CLIENTE']||''), tipo:'Precificado', cliente:x['CLIENTE'], por:'Roberto', data:x['DATA_RESPOSTA']||x['DATA'], preco:x['PRECO']}));
         window._avisosPreco = window._avisosPreco.concat(prec);
-        total += prec.length;
       }
+      window._avisosPreco = window._avisosPreco.filter(a=>!avisoEstaLido(a.id));
+      total += window._avisosPreco.length;
     }
     const badge = document.getElementById('sino-badge');
     if (veFollowUps) {
@@ -2881,7 +2881,8 @@ async function atualizarSino() {
       const hoje = new Date(new Date().toDateString());
       const fim = new Date(hoje); fim.setDate(fim.getDate()+7);
       const fus = (kanbanLeads||[]).filter(l=>{ const d=parseDataReaj(l['FOLLOWUP']); return d && d>=hoje && d<=fim; })
-        .map(l=>({cliente:l['CLIENTE'], data:l['FOLLOWUP'], consultor:l['CONSULTOR']}))
+        .map(l=>({id:'fu-'+(l['ID_LEAD']||'')+'-'+(l['FOLLOWUP']||''), idLead:l['ID_LEAD'], cliente:l['CLIENTE'], data:l['FOLLOWUP'], consultor:l['CONSULTOR']}))
+        .filter(a=>!avisoEstaLido(a.id))
         .sort((a,b)=>(parseDataReaj(a.data)||0)-(parseDataReaj(b.data)||0));
       window._avisosFU = fus;
       total += fus.length;
@@ -2889,6 +2890,42 @@ async function atualizarSino() {
     if (total) { badge.textContent = total; badge.style.display='flex'; }
     else badge.style.display='none';
   } catch(e) {}
+}
+
+// ===== AVISOS: marcar como lido (guarda no navegador) e abrir o item =====
+function lidosKey(){ return 'avisos_lidos_' + (usuarioAtual && usuarioAtual.id || ''); }
+function getAvisosLidos(){ try { return JSON.parse(localStorage.getItem(lidosKey())||'[]'); } catch(e){ return []; } }
+function avisoEstaLido(id){ if(!id) return false; return getAvisosLidos().includes(id); }
+function marcarAvisoLido(id, ev){
+  if (ev) ev.stopPropagation();
+  if (!id) return;
+  const lidos = getAvisosLidos();
+  if (!lidos.includes(id)) { lidos.push(id); try { localStorage.setItem(lidosKey(), JSON.stringify(lidos)); } catch(e){} }
+  // remove da memória e re-renderiza
+  window._avisosPreco = (window._avisosPreco||[]).filter(a=>a.id!==id);
+  window._avisosFU = (window._avisosFU||[]).filter(a=>a.id!==id);
+  abrirAvisos();
+  atualizarSino();
+}
+// abre o destino certo do aviso (precificação pro Roberto; lead pro consultor)
+async function abrirAvisoDestino(tipo, cliente, idLead) {
+  fecharFicha();
+  await carregarLeads();
+  let lead = null;
+  if (idLead) lead = (kanbanLeads||[]).find(l=>String(l['ID_LEAD'])===String(idLead));
+  if (!lead && cliente) lead = (kanbanLeads||[]).find(l=>String(l['CLIENTE'])===String(cliente));
+  if (tipo==='Preço pedido') {
+    // Roberto: abrir a tela de precificação e o lead
+    selecionarModulo('crm');
+    setTimeout(()=>{
+      selecionarSub('crm-precificacao','Precificação');
+      if (lead) setTimeout(()=>{ if (typeof abrirFormPrecoLead==='function') abrirFormPrecoLead(lead); }, 400);
+    }, 200);
+    return;
+  }
+  // demais (Precificado, Follow-up): abrir o lead
+  if (lead) abrirLead(lead['ID_LEAD']);
+  else selecionarModulo('crm');
 }
 
 function abrirAvisos() {
@@ -2903,11 +2940,11 @@ function abrirAvisos() {
     : '';
   const preco = window._avisosPreco || [];
   let itensPreco = preco.length
-    ? preco.map(p=>`<div style="padding:10px 12px;border-bottom:1px solid var(--cinza-100);font-size:13px;"><span style="display:inline-block;background:#FBF0E6;color:#BA7517;border-radius:4px;padding:1px 6px;font-size:10px;margin-right:6px;">${p.tipo}</span><b>${p.cliente||'—'}</b> — ${p.tipo==='Precificado'?('precificado'+(p.preco?' em '+fmtMoeda(p.preco):'')):('pedido por '+(p.por||'—'))}${p.data?' · '+fmtDataBR(p.data):''}</div>`).join('')
+    ? preco.map(p=>`<div onclick="abrirAvisoDestino('${p.tipo}','${(p.cliente||'').replace(/'/g,"\\'")}','')" style="padding:10px 12px;border-bottom:1px solid var(--cinza-100);font-size:13px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;" onmouseover="this.style.background='var(--cinza-100)'" onmouseout="this.style.background='white'"><div><span style="display:inline-block;background:#FBF0E6;color:#BA7517;border-radius:4px;padding:1px 6px;font-size:10px;margin-right:6px;">${p.tipo}</span><b>${p.cliente||'—'}</b> — ${p.tipo==='Precificado'?('precificado'+(p.preco?' em '+fmtMoeda(p.preco):'')):('pedido por '+(p.por||'—'))}${p.data?' · '+fmtDataBR(p.data):''}</div><button onclick="marcarAvisoLido('${p.id}',event)" title="Marcar como lido" style="flex-shrink:0;border:none;background:none;color:var(--cinza-400);cursor:pointer;font-size:16px;"><i class="ti ti-check"></i></button></div>`).join('')
     : '';
   const fu = window._avisosFU || [];
   let itensFU = fu.length
-    ? fu.map(f=>`<div style="padding:10px 12px;border-bottom:1px solid var(--cinza-100);font-size:13px;"><span style="display:inline-block;background:#F3F0FA;color:#6B5B95;border-radius:4px;padding:1px 6px;font-size:10px;margin-right:6px;">Follow-up</span><b>${f.cliente||'—'}</b> — ${fmtDataBR(f.data)}${f.consultor?' · '+f.consultor:''}</div>`).join('')
+    ? fu.map(f=>`<div onclick="abrirAvisoDestino('Follow-up','${(f.cliente||'').replace(/'/g,"\\'")}','${f.idLead||''}')" style="padding:10px 12px;border-bottom:1px solid var(--cinza-100);font-size:13px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;" onmouseover="this.style.background='var(--cinza-100)'" onmouseout="this.style.background='white'"><div><span style="display:inline-block;background:#F3F0FA;color:#6B5B95;border-radius:4px;padding:1px 6px;font-size:10px;margin-right:6px;">Follow-up</span><b>${f.cliente||'—'}</b> — ${fmtDataBR(f.data)}${f.consultor?' · '+f.consultor:''}</div><button onclick="marcarAvisoLido('${f.id}',event)" title="Marcar como lido" style="flex-shrink:0;border:none;background:none;color:var(--cinza-400);cursor:pointer;font-size:16px;"><i class="ti ti-check"></i></button></div>`).join('')
     : '';
   const corpo = (itensSolic+itensInad+itensPreco+itensFU) || '<div style="padding:16px;color:var(--cinza-500);font-size:13px;">Sem avisos no momento.</div>';
   cont.innerHTML = `
