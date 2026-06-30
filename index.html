@@ -1474,6 +1474,26 @@ async function confirmarFollowUp(idLead, cliente, cnpj) {
   } catch(e) { document.getElementById('fu-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Erro de conexão.</div>'; }
 }
 
+async function salvarStatusEntrada(idLead) {
+  const v = (document.getElementById('lead-status-entrada')||{}).value || '';
+  try {
+    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
+      acao:'atualizarLeadCampos', token: sessaoToken, dados:{ idLead:String(idLead), campos:{ STATUS_ENTRADA: v } }
+    })});
+    const r = await resp.json();
+    if (!r.ok) { alert('Erro: '+(r.erro||'verifique se o Apps Script foi republicado.')); return; }
+    const lead = (kanbanLeads||[]).find(l=>String(l['ID_LEAD'])===String(idLead));
+    if (lead) lead['STATUS_ENTRADA'] = v;
+    if (typeof limparCacheBusca==='function') limparCacheBusca();
+    fecharFicha();
+    aplicarKanban();
+    const av = document.createElement('div');
+    av.textContent = 'Status atualizado!';
+    av.style.cssText = 'position:fixed;bottom:20px;right:20px;background:var(--verde-escuro);color:white;padding:10px 18px;border-radius:8px;font-size:13px;z-index:9999;';
+    document.body.appendChild(av); setTimeout(()=>av.remove(), 2000);
+  } catch(e) { alert('Erro de conexão.'); }
+}
+
 async function salvarEndCepLead(idLead) {
   const end = (document.getElementById('lead-end')||{}).value || '';
   const cep = (document.getElementById('lead-cep')||{}).value || '';
@@ -1941,6 +1961,7 @@ async function renderKanban(area) {
       <select class="filtro-sel" id="k-fonte" onchange="aplicarKanban()"><option value="">Todas fontes</option>${fontes.map(f=>`<option>${f}</option>`).join('')}</select>
       <select class="filtro-sel" id="k-transp" onchange="aplicarKanban()"><option value="">Todas transportadoras</option>${[...new Set(kanbanLeads.map(l=>l['EMPRESA_COLETA_ATUAL']).filter(Boolean).map(t=>String(t).trim()))].sort().map(t=>`<option>${t}</option>`).join('')}</select>
       <select class="filtro-sel" id="k-etapa" onchange="aplicarKanban()"><option value="">Todas etapas</option><option value="Prospecção">Pendente</option><option>Em Contato</option><option>Proposta Solicitada</option><option>Proposta Enviada</option><option>Fechado</option><option>Declinado</option></select>
+      <select class="filtro-sel" id="k-status" onchange="aplicarKanban()"><option value="">Status (entrada)</option><option value="pendente">Pendente</option><option value="em contato">Em contato</option></select>
       <span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--cinza-600);">
         <i class="ti ti-calendar" style="font-size:15px;"></i> De
         <input type="date" class="filtro-sel" id="k-data-ini" onchange="aplicarKanban()" style="padding:6px 8px;">
@@ -1997,6 +2018,8 @@ function aplicarKanban() {
   if (fonte) leads = leads.filter(l => l['FONTE']===fonte);
   if (transp) leads = leads.filter(l => String(l['EMPRESA_COLETA_ATUAL']||'').trim()===transp);
   if (etapa) leads = leads.filter(l => etapaDe(l)===etapa);
+  const statusF = (document.getElementById('k-status')||{}).value||'';
+  if (statusF) leads = leads.filter(l => etapaDe(l)==='Prospecção' && statusEntrada(l)===statusF);
   if (busca) leads = leads.filter(l => String(l['CLIENTE']||'').toLowerCase().includes(busca));
   if (dIni || dFim) {
     const ini = dIni ? new Date(dIni+'T00:00:00') : null;
@@ -2056,8 +2079,16 @@ function aplicarKanban() {
       const ehNovo = String(l['NOVO']||'').toLowerCase()==='sim';
       const fu = parseDataReaj(l['FOLLOWUP']);
       const temFU = fu && fu >= new Date(new Date().toDateString());
+      // status de entrada (pendente / em contato) só faz sentido na coluna Pendente (Prospecção)
+      const ehEntrada = col.nome === 'Prospecção';
+      const st = ehEntrada ? statusEntrada(l) : null;
+      const tagSt = st === 'em contato'
+        ? '<span style="display:inline-block;background:#1f7a3d;color:white;font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:5px;vertical-align:1px;">EM CONTATO</span>'
+        : st === 'pendente'
+        ? '<span style="display:inline-block;background:#d99a00;color:#3a2a00;font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:5px;vertical-align:1px;">PENDENTE</span>'
+        : '';
       html += `<div class="kanban-card${ehNovo?' card-novo':''}" draggable="true" ondragstart="pegarCard(event,'${String(l['ID_LEAD']||'').replace(/'/g,'')}')" onclick="abrirLead('${String(l['ID_LEAD']||'').replace(/'/g,'')}')" style="border-left-color:${col.cor};${ehNovo?'background:#FFFBEA;box-shadow:0 0 0 1.5px #F0C808;':temFU?'background:#F3F0FA;box-shadow:0 0 0 1.5px #6B5B95;':''}">
-        <div class="cli">${ehNovo?'<span style="display:inline-block;background:#F0C808;color:#5a4a00;font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:5px;vertical-align:1px;">NOVO</span>':''}${temFU?'<span style="display:inline-block;background:#6B5B95;color:white;font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:5px;vertical-align:1px;">FOLLOW-UP</span>':''}${l['CLIENTE']||'—'}</div>
+        <div class="cli">${ehNovo?'<span style="display:inline-block;background:#F0C808;color:#5a4a00;font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:5px;vertical-align:1px;">NOVO</span>':''}${tagSt}${temFU?'<span style="display:inline-block;background:#6B5B95;color:white;font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:5px;vertical-align:1px;">FOLLOW-UP</span>':''}${l['CLIENTE']||'—'}</div>
         <div class="meta">${l['CONSULTOR']||'—'}${l['FONTE']?' · '+l['FONTE']:''}</div>
         ${temFU?`<div class="meta" style="margin-top:3px;color:#6B5B95;"><i class="ti ti-calendar-clock" style="font-size:12px;vertical-align:-1px;"></i> Follow-up: ${fmtDataBR(l['FOLLOWUP'])}</div>`:''}
         ${l['EMPRESA_COLETA_ATUAL']?`<div class="meta" style="margin-top:3px;"><i class="ti ti-truck" style="font-size:12px;vertical-align:-1px;"></i> ${l['EMPRESA_COLETA_ATUAL']}</div>`:''}
@@ -2086,6 +2117,12 @@ async function soltarCard(ev, novaEtapaCol) {
   await mudarEtapaLead(idLead, novaEtapa);
 }
 function etapaDeGlobal(l) { return l['ETAPA']==='Indicação/Prospecção' ? 'Prospecção' : l['ETAPA']; }
+// status de entrada do lead: override manual (STATUS_ENTRADA) ou automático (tem atividade = em contato)
+function statusEntrada(l) {
+  const manual = String(l['STATUS_ENTRADA']||'').trim().toLowerCase();
+  if (manual === 'pendente' || manual === 'em contato') return manual;
+  return l['ULTIMA_ATIVIDADE'] ? 'em contato' : 'pendente';
+}
 
 // quem pode reatribuir o consultor de um lead: Maria Fernanda, Andrea (admin), Roberto (diretor), Danielly (assistente)
 function podeEditarConsultorLead() {
@@ -4362,6 +4399,24 @@ Ecotrans Ambiental`);
 // ============================================================
 // PRECIFICAÇÃO (vendedor pede, Roberto responde, Danielly vê)
 // ============================================================
+function podeExcluirPreco() {
+  return ['mafe','andrea','roberto'].includes(String(usuarioAtual && usuarioAtual.id||'').toLowerCase());
+}
+async function excluirPedidoPreco(id, cliente) {
+  if (!podeExcluirPreco()) return;
+  if (!confirm(`Excluir o pedido de precificação de "${cliente}"?\n\nUse isso para remover pedidos duplicados. Esta ação não pode ser desfeita.`)) return;
+  try {
+    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
+      acao:'excluirPrecificacao', token: sessaoToken, dados:{ id }
+    })});
+    const r = await resp.json();
+    if (!r.ok) { alert('Erro: '+(r.erro||'verifique se o Apps Script foi republicado.')); return; }
+    if (typeof limparCacheBusca==='function') limparCacheBusca();
+    renderPrecificacao(document.getElementById('area-conteudo'));
+    atualizarSino();
+  } catch(e) { alert('Erro de conexão.'); }
+}
+
 async function renderPrecificacao(area) {
   area.innerHTML = `<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando precificação...</h2></div>`;
   const r = await buscarDados('Precificacao');
@@ -4392,6 +4447,7 @@ async function renderPrecificacao(area) {
         ${l['TP_RESIDUO']?`<div style="font-size:12px;color:var(--cinza-600);">Resíduo: ${l['TP_RESIDUO']}</div>`:''}
         ${l['OBS_VENDEDOR']?`<div style="font-size:12px;color:var(--cinza-500);font-style:italic;margin-top:4px;">"${l['OBS_VENDEDOR']}"</div>`:''}
         ${podeResponder?`<button class="ficha-btn-primario" style="width:100%;margin-top:10px;padding:8px;border:none;border-radius:7px;cursor:pointer;font-size:12px;" onclick="abrirFormResponderPreco('${l['ID']}','${(l['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-tag"></i> Definir preço</button>`:`<div style="font-size:12px;color:var(--cinza-500);margin-top:8px;text-align:center;">Aguardando Roberto precificar</div>`}
+        ${podeExcluirPreco()?`<button onclick="excluirPedidoPreco('${l['ID']}','${(l['CLIENTE']||'').replace(/'/g,'')}')" style="width:100%;margin-top:6px;padding:6px;border:1px solid var(--vermelho);background:white;color:var(--vermelho);border-radius:7px;cursor:pointer;font-size:11px;"><i class="ti ti-trash"></i> Excluir (duplicado)</button>`:''}
       </div>`;
     });
     html += `</div>`;
@@ -4417,20 +4473,19 @@ function abrirFormPrecoLead(lead) {
   const cont = document.getElementById('ficha-container');
   cont.innerHTML = `
     <div class="ficha-overlay" onclick="if(event.target===this)fecharFicha()">
-      <div class="ficha" style="width:480px;">
+      <div class="ficha" style="width:600px;max-width:95vw;">
         <div class="ficha-topo"><button class="fechar" onclick="fecharFicha()"><i class="ti ti-x"></i></button>
-          <div class="nome"><i class="ti ti-tag"></i> Solicitar precificação</div><div class="cnpj">${lead['CLIENTE']||''} · Roberto vai definir o preço</div></div>
+          <div class="nome"><i class="ti ti-tag"></i> Solicitar precificação</div><div class="cnpj">${lead['CLIENTE']||''} · Roberto vai precificar</div></div>
         <div class="ficha-corpo">
           <input type="hidden" id="pr-cliente" value="${(lead['CLIENTE']||'').replace(/"/g,'&quot;')}">
           <div style="background:var(--verde-claro-bg);border-radius:8px;padding:10px;margin-bottom:12px;font-size:12.5px;color:var(--verde-escuro);">
-            <i class="ti ti-arrow-right"></i> Lead movido para <b>Proposta Solicitada</b>. Preencha os dados para o Roberto precificar.
+            <i class="ti ti-arrow-right"></i> Adicione os itens/serviços. O Roberto vai colocar o preço de cada um.
           </div>
-          <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Descrição do serviço</label>
-            <input type="text" id="pr-desc" placeholder="ex: coleta semanal 240L" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
-          <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Tipo de resíduo</label>
-            <input type="text" id="pr-residuo" value="${(lead['RESIDUO']||lead['CATEGORIA_RESIDUO']||'').replace(/"/g,'&quot;')}" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
-          <div style="margin-bottom:14px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Observação</label>
-            <textarea id="pr-obs" rows="2" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;font-family:var(--fonte-corpo);">${lead['QUANTIDADE']?'Quantidade: '+lead['QUANTIDADE']+'. ':''}${lead['FREQUENCIA']?'Frequência: '+lead['FREQUENCIA']+'.':''}</textarea></div>
+          <div style="font-size:12px;font-weight:600;color:var(--cinza-700);margin-bottom:8px;"><i class="ti ti-list-numbers"></i> ITENS PARA PRECIFICAR</div>
+          <div id="pr-itens-solic"></div>
+          <button onclick="addItemSolic()" style="margin-bottom:14px;padding:6px 12px;border:1.5px dashed var(--verde-medio);background:white;color:var(--verde-escuro);border-radius:8px;cursor:pointer;font-size:12px;"><i class="ti ti-plus"></i> Adicionar item</button>
+          <div style="margin-bottom:14px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Observação geral</label>
+            <textarea id="pr-obs" rows="2" placeholder="alguma observação pro Roberto" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;font-family:var(--fonte-corpo);"></textarea></div>
           <div class="ficha-botoes">
             <button class="ficha-btn-primario" onclick="enviarSolicitacaoPreco()"><i class="ti ti-send"></i> Enviar para o Roberto</button>
             <button class="ficha-btn-secundario" onclick="fecharFicha()">Depois</button>
@@ -4439,6 +4494,51 @@ function abrirFormPrecoLead(lead) {
         </div>
       </div>
     </div>`;
+  // primeiro item já vem com os dados do lead
+  window._itensSolic = [];
+  addItemSolic({
+    residuo: lead['RESIDUO']||'',
+    acond: lead['CATEGORIA_RESIDUO']||'',
+    freq: lead['FREQUENCIA']||'',
+    qtd: lead['QUANTIDADE']||''
+  });
+}
+// itens que o consultor monta para o Roberto precificar
+function addItemSolic(pre) {
+  pre = pre || {};
+  const cont = document.getElementById('pr-itens-solic');
+  if (!cont) return;
+  const idx = (window._itensSolic = window._itensSolic || []).length;
+  window._itensSolic.push(idx);
+  const div = document.createElement('div');
+  div.id = 'pr-si-'+idx;
+  div.style.cssText = 'border:1px solid var(--cinza-200);border-radius:10px;padding:10px;margin-bottom:8px;background:var(--cinza-50);';
+  div.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <span style="font-size:12px;font-weight:600;color:var(--verde-escuro);">Item ${idx+1}</span>
+      <button onclick="document.getElementById('pr-si-${idx}').remove()" style="border:none;background:none;color:var(--vermelho);cursor:pointer;font-size:15px;" title="Remover item"><i class="ti ti-trash"></i></button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+      <input type="text" id="si-residuo-${idx}" value="${String(pre.residuo||'').replace(/"/g,'&quot;')}" placeholder="Tipo de resíduo" style="padding:7px;border:1.5px solid var(--cinza-300);border-radius:6px;font-size:12.5px;">
+      <input type="text" id="si-acond-${idx}" value="${String(pre.acond||'').replace(/"/g,'&quot;')}" placeholder="Acondicionamento" style="padding:7px;border:1.5px solid var(--cinza-300);border-radius:6px;font-size:12.5px;">
+      <input type="text" id="si-freq-${idx}" value="${String(pre.freq||'').replace(/"/g,'&quot;')}" placeholder="Frequência" style="padding:7px;border:1.5px solid var(--cinza-300);border-radius:6px;font-size:12.5px;">
+      <input type="text" id="si-qtd-${idx}" value="${String(pre.qtd||'').replace(/"/g,'&quot;')}" placeholder="Quantidade" style="padding:7px;border:1.5px solid var(--cinza-300);border-radius:6px;font-size:12.5px;">
+    </div>`;
+  cont.appendChild(div);
+}
+function coletarItensSolic() {
+  const itens = [];
+  document.querySelectorAll('[id^="pr-si-"]').forEach(div => {
+    const i = div.id.replace('pr-si-','');
+    const it = {
+      residuo: (document.getElementById('si-residuo-'+i)||{}).value || '',
+      acond: (document.getElementById('si-acond-'+i)||{}).value || '',
+      freq: (document.getElementById('si-freq-'+i)||{}).value || '',
+      qtd: (document.getElementById('si-qtd-'+i)||{}).value || ''
+    };
+    if (it.residuo || it.acond || it.freq || it.qtd) itens.push(it);
+  });
+  return itens;
 }
 
 async function abrirFormPreco() {
@@ -4473,11 +4573,19 @@ async function abrirFormPreco() {
 }
 async function enviarSolicitacaoPreco() {
   const cliente = document.getElementById('pr-cliente').value;
-  const descricao = document.getElementById('pr-desc').value;
-  const residuo = document.getElementById('pr-residuo').value;
-  const obs = document.getElementById('pr-obs').value;
-  if (!cliente || !descricao) { document.getElementById('pr-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Preencha o lead e a descrição.</div>'; return; }
-  // validar que é um lead existente
+  const obs = (document.getElementById('pr-obs')||{}).value || '';
+  // se a tela usa itens (nova), coleta os itens; senão usa os campos antigos
+  const itens = (typeof coletarItensSolic === 'function' && document.getElementById('pr-itens-solic')) ? coletarItensSolic() : [];
+  let descricao, residuo;
+  if (itens.length) {
+    // monta descrição legível a partir dos itens
+    descricao = itens.map((it,i)=>`Item ${i+1}: ${[it.residuo,it.acond,it.freq,it.qtd?('qtd '+it.qtd):''].filter(Boolean).join(' / ')}`).join(' | ');
+    residuo = itens.map(it=>it.residuo).filter(Boolean).join(', ');
+  } else {
+    descricao = (document.getElementById('pr-desc')||{}).value || '';
+    residuo = (document.getElementById('pr-residuo')||{}).value || '';
+  }
+  if (!cliente || (!descricao && !itens.length)) { document.getElementById('pr-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Adicione ao menos um item.</div>'; return; }
   const leadExiste = (kanbanLeads||[]).some(l=>String(l['CLIENTE'])===cliente);
   if (!leadExiste) { document.getElementById('pr-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Escolha um lead da lista. Se não existir, crie no Funil primeiro.</div>'; return; }
   const leadObj = (kanbanLeads||[]).find(l=>String(l['CLIENTE'])===cliente);
@@ -4485,10 +4593,11 @@ async function enviarSolicitacaoPreco() {
   document.getElementById('pr-msg').innerHTML = '<div style="text-align:center;padding:10px;color:var(--cinza-500);">Enviando...</div>';
   try {
     const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
-      acao:'solicitarPreco', token: sessaoToken, dados:{ cliente, cnpj, descricao, residuo, obs }
+      acao:'solicitarPreco', token: sessaoToken, dados:{ cliente, cnpj, descricao, residuo, obs, itens: JSON.stringify(itens) }
     })});
     const r = await resp.json();
     if (!r.ok) { document.getElementById('pr-msg').innerHTML=`<div class="sem-acesso">${r.erro}</div>`; return; }
+    if (typeof limparCacheBusca==='function') limparCacheBusca();
     document.getElementById('pr-msg').innerHTML = '<div style="background:var(--verde-ok-bg);border-radius:8px;padding:10px;margin-top:10px;color:var(--verde-ok);font-size:13px;"><i class="ti ti-circle-check"></i> Enviado! O Roberto verá na aba Precificação.</div>';
     setTimeout(()=>{ fecharFicha(); renderPrecificacao(document.getElementById('area-conteudo')); }, 1800);
   } catch(e) { document.getElementById('pr-msg').innerHTML='<div class="sem-acesso">Erro de conexão.</div>'; }
@@ -4546,9 +4655,18 @@ async function abrirFormResponderPreco(id, cliente) {
         </div>
       </div>
     </div>`;
-  // começa com 1 item já preenchido com o resíduo do lead
+  // começa com os itens que o consultor montou (se houver); senão 1 item com o resíduo do lead
   window._itensPreco = [];
-  addItemPreco(lead['RESIDUO']||lead['CATEGORIA_RESIDUO']||'');
+  let itensSolic = [];
+  try { itensSolic = JSON.parse(solic['ITENS']||'[]'); } catch(e) { itensSolic = []; }
+  if (itensSolic.length) {
+    itensSolic.forEach(it => {
+      const desc = [it.residuo, it.acond, it.freq, it.qtd?('qtd '+it.qtd):''].filter(Boolean).join(' / ');
+      addItemPreco(desc);
+    });
+  } else {
+    addItemPreco(lead['RESIDUO']||lead['CATEGORIA_RESIDUO']||'');
+  }
 }
 
 // itens de precificação (Roberto pode precificar serviço por serviço)
@@ -5520,6 +5638,19 @@ function abrirLead(id) {
             </div>
             <div style="font-size:11px;color:var(--cinza-500);margin-top:6px;">Ao escolher "Proposta Solicitada", abre a precificação automaticamente.</div>
           </div>
+          ${etapaAtual==='Indicação/Prospecção' ? `
+          <div style="background:var(--cinza-100);border-radius:10px;padding:12px;margin-bottom:14px;">
+            <label style="font-size:12px;color:var(--cinza-600);display:block;margin-bottom:6px;font-weight:600;">Status (entrada)</label>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <select id="lead-status-entrada" style="flex:1;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;font-size:13px;">
+                <option value="">Automático (${statusEntrada(l)})</option>
+                <option value="pendente" ${String(l['STATUS_ENTRADA']||'').toLowerCase()==='pendente'?'selected':''}>Pendente</option>
+                <option value="em contato" ${String(l['STATUS_ENTRADA']||'').toLowerCase()==='em contato'?'selected':''}>Em contato</option>
+              </select>
+              <button onclick="salvarStatusEntrada('${idLead}')" style="padding:9px 14px;border:none;background:var(--verde-medio);color:white;border-radius:8px;cursor:pointer;font-size:13px;white-space:nowrap;"><i class="ti ti-check"></i> Salvar</button>
+            </div>
+            <div style="font-size:11px;color:var(--cinza-500);margin-top:6px;">No automático: sem atividade = pendente; com atividade registrada = em contato.</div>
+          </div>` : ''}
           ${podeEditarConsultorLead() ? `
           <div style="background:var(--cinza-100);border-radius:10px;padding:12px;margin-bottom:14px;">
             <label style="font-size:12px;color:var(--cinza-600);display:block;margin-bottom:6px;font-weight:600;">Consultor responsável</label>
