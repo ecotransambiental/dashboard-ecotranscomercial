@@ -1038,6 +1038,7 @@ async function abrirFicha(cnpj) {
           <span class="ficha-aba" onclick="trocarAbaFicha(this,'aditivos')">Aditivos</span>
           <span class="ficha-aba" onclick="trocarAbaFicha(this,'reajustes')">Reajustes</span>
           <span class="ficha-aba" onclick="trocarAbaFicha(this,'faturamento')">Faturamento</span>
+          <span class="ficha-aba" onclick="trocarAbaFicha(this,'contatos')">Contatos</span>
           <span class="ficha-aba" onclick="trocarAbaFicha(this,'historico')">Histórico</span>
         </div>
         <div class="ficha-corpo" id="ficha-corpo">
@@ -1064,6 +1065,7 @@ async function abrirFicha(cnpj) {
             </td></tr>
             <tr><td><i class="ti ti-building" style="vertical-align:-2px;margin-right:6px;"></i>Assessoria</td><td>${c['ASSESSORIA']||'—'}</td></tr>
           </table>
+          <div id="ficha-origem-lead" style="margin-top:12px;"></div>
           <div class="ficha-botoes">
             <button class="ficha-btn-primario" onclick="abrirFormAtividade('${cnpj.replace(/'/g,'')}','${(c['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-plus"></i> Registrar atividade</button>
             <button class="ficha-btn-secundario" onclick="imprimirFichaCliente('${cnpj.replace(/'/g,'')}')"><i class="ti ti-printer"></i> Imprimir ficha</button>
@@ -1075,8 +1077,33 @@ async function abrirFicha(cnpj) {
         </div>
       </div>
     </div>`;
+  mostrarOrigemLead(cnpj);
 }
 function fecharFicha() { document.getElementById('ficha-container').innerHTML = ''; }
+
+// busca o lead que originou este cliente (por CNPJ) e mostra data de chegada, fechamento, fonte
+async function mostrarOrigemLead(cnpj) {
+  const alvo = cnpjLimpo(cnpj);
+  if (!alvo) return;
+  try {
+    await carregarLeads();
+    const lead = (kanbanLeads||[]).find(l => cnpjLimpo(l['CNPJ'])===alvo);
+    const div = document.getElementById('ficha-origem-lead');
+    if (!div || !lead) return;
+    const itens = [];
+    if (lead['DATA_CONTATO']) itens.push(`<span><i class="ti ti-calendar-plus" style="font-size:13px;vertical-align:-1px;"></i> Chegada: <b>${fmtDataBR(lead['DATA_CONTATO'])}</b></span>`);
+    if (lead['FONTE']) itens.push(`<span><i class="ti ti-route" style="font-size:13px;vertical-align:-1px;"></i> Origem: <b>${lead['FONTE']}</b></span>`);
+    if (lead['DATA_INICIO_COLETAS']) itens.push(`<span><i class="ti ti-truck" style="font-size:13px;vertical-align:-1px;"></i> Início coletas: <b>${fmtDataBR(lead['DATA_INICIO_COLETAS'])}</b></span>`);
+    if (lead['DATA_ASSINATURA_CONTRATO']) itens.push(`<span><i class="ti ti-file-check" style="font-size:13px;vertical-align:-1px;"></i> Assinatura: <b>${fmtDataBR(lead['DATA_ASSINATURA_CONTRATO'])}</b></span>`);
+    if (lead['CONSULTOR']) itens.push(`<span><i class="ti ti-user" style="font-size:13px;vertical-align:-1px;"></i> Consultor: <b>${lead['CONSULTOR']}</b></span>`);
+    if (!itens.length) return;
+    div.innerHTML = `
+      <div style="background:var(--verde-claro-bg);border-radius:10px;padding:10px 12px;">
+        <div style="font-size:11px;font-weight:600;color:var(--verde-escuro);margin-bottom:6px;"><i class="ti ti-flag"></i> ORIGEM (veio do funil)</div>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--cinza-700);">${itens.join('')}</div>
+      </div>`;
+  } catch(e) {}
+}
 
 // ===== ADITIVOS =====
 async function renderAbaAditivos(corpo) {
@@ -1269,7 +1296,12 @@ async function salvarContato(cnpj, cliente) {
     const r = await resp.json();
     if (!r.ok) { document.getElementById('ct-msg').innerHTML=`<div class="sem-acesso">${r.erro||'verifique se o Apps Script foi republicado.'}</div>`; return; }
     document.getElementById('ct-msg').innerHTML = '<div style="background:var(--verde-ok-bg);border-radius:8px;padding:10px;margin-top:10px;color:var(--verde-ok);font-size:13px;"><i class="ti ti-circle-check"></i> Contato salvo!</div>';
-    setTimeout(()=>{ const o=document.getElementById('form-contato-overlay'); if(o)o.remove(); }, 1200);
+    setTimeout(()=>{
+      const o=document.getElementById('form-contato-overlay'); if(o)o.remove();
+      // recarrega a aba de contatos da ficha, se estiver aberta
+      const corpo = document.getElementById('ficha-corpo');
+      if (corpo && typeof renderAbaContatos==='function') renderAbaContatos(corpo);
+    }, 1000);
   } catch(e) { document.getElementById('ct-msg').innerHTML='<div class="sem-acesso">Erro de conexão.</div>'; }
 }
 
@@ -1503,6 +1535,7 @@ async function trocarAbaFicha(el, aba) {
   if (aba === 'aditivos') { renderAbaAditivos(corpo); return; }
   if (aba === 'reajustes') { renderAbaReajustes(corpo); return; }
   if (aba === 'faturamento') { renderAbaFaturamento(corpo); return; }
+  if (aba === 'contatos') { renderAbaContatos(corpo); return; }
 }
 
 function cnpjLimpo(v){ return String(v||'').replace(/\D/g,''); }
@@ -1662,6 +1695,29 @@ function blocoRegulatorio(c) {
 
 
 // ---- Histórico/atividades do cliente ----
+async function renderAbaContatos(corpo) {
+  corpo.innerHTML = `<div style="text-align:center;color:var(--cinza-500);padding:20px;">Carregando contatos...</div>`;
+  const cnpj = cnpjLimpo(fichaClienteAtual['CNPJ']);
+  const nome = fichaClienteAtual['CLIENTE']||'';
+  const r = await buscarDados('Contatos');
+  const contatos = (r.ok?r.linhas:[]).filter(x=>cnpjLimpo(x['CNPJ'])===cnpj);
+  let html = `<div style="margin-bottom:12px;"><button class="ficha-btn-primario" style="padding:8px 14px;border:none;border-radius:8px;cursor:pointer;font-size:13px;" onclick="abrirFormContato('${cnpj}','${String(nome).replace(/'/g,'')}')"><i class="ti ti-plus"></i> Adicionar contato</button></div>`;
+  if (!contatos.length) {
+    html += `<div style="text-align:center;color:var(--cinza-500);padding:24px;font-size:13px;">Nenhum contato cadastrado ainda.</div>`;
+  } else {
+    html += contatos.map(ct=>`
+      <div style="background:white;border:1px solid var(--cinza-200);border-radius:10px;padding:12px;margin-bottom:8px;">
+        <div style="font-size:14px;font-weight:600;color:var(--cinza-800);">${ct['NOME']||'—'}${ct['CARGO']?`<span style="font-size:12px;font-weight:400;color:var(--cinza-500);"> · ${ct['CARGO']}</span>`:''}</div>
+        <div style="font-size:12.5px;color:var(--cinza-600);margin-top:4px;">
+          ${ct['TELEFONE']?`<i class="ti ti-phone" style="font-size:13px;vertical-align:-1px;"></i> ${ct['TELEFONE']}`:''}
+          ${ct['EMAIL']?`${ct['TELEFONE']?' · ':''}<i class="ti ti-mail" style="font-size:13px;vertical-align:-1px;"></i> ${ct['EMAIL']}`:''}
+        </div>
+        ${ct['CADASTRADO_POR']?`<div style="font-size:11px;color:var(--cinza-400);margin-top:4px;">cadastrado por ${ct['CADASTRADO_POR']}${ct['DATA']?' · '+fmtDataBR(ct['DATA']):''}</div>`:''}
+      </div>`).join('');
+  }
+  corpo.innerHTML = html;
+}
+
 async function renderHistoricoCliente(corpo) {
   corpo.innerHTML = `<div style="text-align:center;color:var(--cinza-500);padding:20px;">Carregando histórico...</div>`;
   const r = await buscarDados('Atividades_Cliente');
@@ -4427,16 +4483,48 @@ async function enviarSolicitacaoPreco() {
   } catch(e) { document.getElementById('pr-msg').innerHTML='<div class="sem-acesso">Erro de conexão.</div>'; }
 }
 
-function abrirFormResponderPreco(id, cliente) {
+async function abrirFormResponderPreco(id, cliente) {
   const cont = document.getElementById('ficha-container');
+  cont.innerHTML = `<div class="ficha-overlay"><div class="ficha" style="width:560px;"><div class="ficha-corpo"><div style="text-align:center;color:var(--cinza-500);padding:30px;">Carregando dados do lead...</div></div></div></div>`;
+  // busca os dados completos do lead (e a solicitação de preço) para o Roberto precificar
+  await carregarLeads();
+  const lead = (kanbanLeads||[]).find(l=>String(l['CLIENTE'])===String(cliente)) || {};
+  // dados da solicitação de preço (descrição/observação que o vendedor mandou)
+  let solic = {};
+  try { const rp = await buscarDados('Precificacao'); solic = (rp.ok?rp.linhas:[]).find(x=>String(x['ID'])===String(id)) || {}; } catch(e) {}
+
+  const linhaInfo = (rot, val) => val ? `<tr><td style="padding:5px 8px;color:var(--cinza-600);font-size:12.5px;white-space:nowrap;vertical-align:top;">${rot}</td><td style="padding:5px 8px;font-size:12.5px;color:var(--cinza-800);">${val}</td></tr>` : '';
+  const dados = `
+    <div style="background:var(--verde-claro-bg);border-radius:10px;padding:12px;margin-bottom:14px;">
+      <div style="font-size:12px;font-weight:600;color:var(--verde-escuro);margin-bottom:6px;"><i class="ti ti-clipboard-list"></i> DADOS DO LEAD (para precificar)</div>
+      <table style="width:100%;border-collapse:collapse;">
+        ${linhaInfo('Endereço', lead['ENDERECO'])}
+        ${linhaInfo('CEP', lead['CEP'])}
+        ${linhaInfo('Tipo de resíduo', lead['RESIDUO'])}
+        ${linhaInfo('Acondicionamento', lead['CATEGORIA_RESIDUO'])}
+        ${linhaInfo('Frequência', lead['FREQUENCIA'])}
+        ${linhaInfo('Quantidade', lead['QUANTIDADE'])}
+        ${linhaInfo('Transportadora atual', lead['EMPRESA_COLETA_ATUAL'])}
+        ${linhaInfo('Informação adicional', lead['INFO_ADICIONAL'])}
+        ${linhaInfo('Descrição (vendedor)', solic['DESCRICAO'])}
+        ${linhaInfo('Observação (vendedor)', solic['OBS'])}
+      </table>
+    </div>`;
+
   cont.innerHTML = `
     <div class="ficha-overlay" onclick="if(event.target===this)fecharFicha()">
-      <div class="ficha" style="width:440px;">
+      <div class="ficha" style="width:560px;max-width:95vw;">
         <div class="ficha-topo"><button class="fechar" onclick="fecharFicha()"><i class="ti ti-x"></i></button>
           <div class="nome"><i class="ti ti-tag"></i> Definir preço</div><div class="cnpj">${cliente}</div></div>
         <div class="ficha-corpo">
-          <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Preço (R$)</label>
-            <input type="text" id="rp-preco" placeholder="ex: 1.500,00" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+          ${dados}
+          <div style="font-size:12px;font-weight:600;color:var(--cinza-700);margin-bottom:8px;"><i class="ti ti-list-numbers"></i> PRECIFICAÇÃO POR ITEM</div>
+          <div id="pr-itens"></div>
+          <button onclick="addItemPreco()" style="margin-bottom:14px;padding:6px 12px;border:1.5px dashed var(--verde-medio);background:white;color:var(--verde-escuro);border-radius:8px;cursor:pointer;font-size:12px;"><i class="ti ti-plus"></i> Adicionar item</button>
+          <div style="background:var(--cinza-100);border-radius:8px;padding:10px 12px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-size:13px;color:var(--cinza-700);font-weight:600;">Total</span>
+            <span id="pr-total" style="font-size:16px;font-weight:700;color:var(--verde-escuro);">R$ 0,00</span>
+          </div>
           <div style="margin-bottom:14px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Observação (condições, validade...)</label>
             <textarea id="rp-obs" rows="2" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;font-family:var(--fonte-corpo);"></textarea></div>
           <div class="ficha-botoes">
@@ -4447,11 +4535,46 @@ function abrirFormResponderPreco(id, cliente) {
         </div>
       </div>
     </div>`;
+  // começa com 1 item já preenchido com o resíduo do lead
+  window._itensPreco = [];
+  addItemPreco(lead['RESIDUO']||lead['CATEGORIA_RESIDUO']||'');
+}
+
+// itens de precificação (Roberto pode precificar serviço por serviço)
+function addItemPreco(descInicial) {
+  const cont = document.getElementById('pr-itens');
+  if (!cont) return;
+  const idx = (window._itensPreco = window._itensPreco || []).length;
+  window._itensPreco.push(idx);
+  const div = document.createElement('div');
+  div.id = 'pr-item-'+idx;
+  div.style.cssText = 'display:flex;gap:6px;margin-bottom:8px;align-items:center;';
+  div.innerHTML = `
+    <input type="text" id="pri-desc-${idx}" value="${(descInicial||'').replace(/"/g,'&quot;')}" placeholder="descrição do serviço/item" style="flex:1;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;font-size:12.5px;">
+    <input type="text" id="pri-val-${idx}" oninput="recalcTotalPreco()" placeholder="R$" style="width:110px;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;font-size:12.5px;">
+    <button onclick="document.getElementById('pr-item-${idx}').remove();recalcTotalPreco();" style="border:none;background:none;color:var(--vermelho);cursor:pointer;font-size:16px;" title="Remover"><i class="ti ti-trash"></i></button>`;
+  cont.appendChild(div);
+}
+function parseValor(s){ return parseFloat(String(s||'').replace(/[^\d,.-]/g,'').replace(/\./g,'').replace(',','.'))||0; }
+function recalcTotalPreco() {
+  let total = 0;
+  document.querySelectorAll('[id^="pri-val-"]').forEach(inp => total += parseValor(inp.value));
+  const el = document.getElementById('pr-total');
+  if (el) el.textContent = fmtMoeda(total);
 }
 async function enviarRespostaPreco(id) {
-  const preco = document.getElementById('rp-preco').value;
-  const obs = document.getElementById('rp-obs').value;
-  if (!preco) { document.getElementById('rp-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Informe o preço.</div>'; return; }
+  // soma os itens precificados
+  let total = 0; const detalhes = [];
+  document.querySelectorAll('[id^="pr-item-"]').forEach(div => {
+    const i = div.id.replace('pr-item-','');
+    const d = (document.getElementById('pri-desc-'+i)||{}).value || '';
+    const v = parseValor((document.getElementById('pri-val-'+i)||{}).value);
+    if (v > 0) { total += v; detalhes.push(`${d||'item'}: ${fmtMoeda(v)}`); }
+  });
+  const obsManual = document.getElementById('rp-obs').value;
+  if (total <= 0) { document.getElementById('rp-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Informe ao menos um item com valor.</div>'; return; }
+  const preco = total;
+  const obs = (detalhes.length>1 ? 'Itens — '+detalhes.join(' · ')+'. ' : '') + (obsManual||'');
   document.getElementById('rp-msg').innerHTML = '<div style="text-align:center;padding:10px;color:var(--cinza-500);">Enviando...</div>';
   try {
     const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
