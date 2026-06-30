@@ -390,6 +390,14 @@
 const API_URL = 'https://script.google.com/macros/s/AKfycbwpcfQ8LV-zZj31uHiOZT5neDNqk9x4zFXpy2pnFx7UqnIeNpaEL3tfwlWDlhSP69g_jw/exec';
 
 // ============================================================
+// CHAVE DO GOOGLE MAPS (Geocoding + Routes API)
+// >>> COLE SUA CHAVE ENTRE AS ASPAS ABAIXO, antes de subir pro GitHub <<<
+// A chave deve estar RESTRITA ao domínio ecotransambiental.github.io
+// e só com as APIs Geocoding e Routes ativadas.
+// ============================================================
+const GOOGLE_MAPS_KEY = 'AIzaSyC4oIgrSglCR1TckpKjE7DlSGLLCWSvddM';
+
+// ============================================================
 // CONFIGURAÇÃO — perfis e acessos
 // A lista abaixo serve para popular o dropdown de login e definir
 // quais módulos cada PERFIL enxerga. As senhas e a validação real
@@ -415,6 +423,7 @@ const MODULOS = [
       { id: 'crm-leads',      nome: 'Leads',             icone: 'ti-user-plus' },
       { id: 'crm-propostas',  nome: 'Propostas',         icone: 'ti-file-dollar' },
       { id: 'crm-precificacao', nome: 'Precificação',    icone: 'ti-tag' },
+      { id: 'crm-roteirizacao', nome: 'Roteirização',    icone: 'ti-route' },
       { id: 'crm-atividades', nome: 'Atividades',        icone: 'ti-checklist' },
       { id: 'crm-relatorios', nome: 'Relatórios',        icone: 'ti-chart-bar' },
       { id: 'crm-resultados', nome: 'Resultados',        icone: 'ti-target-arrow' },
@@ -771,6 +780,7 @@ async function renderConteudo(subId, subNome) {
   if (subId === 'cart-faturamento'){ renderFaturamento(area); return; }
   if (subId === 'cart-aprovacoes'){ renderAprovacoes(area); return; }
   if (subId === 'crm-precificacao'){ renderPrecificacao(area); return; }
+  if (subId === 'crm-roteirizacao'){ renderRoteirizacao(area); return; }
   if (subId === 'crm-propostas'){ renderPropostas(area); return; }
   if (subId === 'crm-atividades'){ renderAtividadesCRM(area); return; }
   if (subId === 'crm-relatorios'){ renderRelatoriosCRM(area); return; }
@@ -2099,6 +2109,7 @@ function aplicarKanban() {
         <div class="cli">${ehNovo?'<span style="display:inline-block;background:#F0C808;color:#5a4a00;font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:5px;vertical-align:1px;">NOVO</span>':''}${tagSt}${temFU?'<span style="display:inline-block;background:#6B5B95;color:white;font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:5px;vertical-align:1px;">FOLLOW-UP</span>':''}${l['CLIENTE']||'—'}</div>
         <div class="meta">${l['CONSULTOR']||'—'}${l['FONTE']?' · '+l['FONTE']:''}</div>
         ${temFU?`<div class="meta" style="margin-top:3px;color:#6B5B95;"><i class="ti ti-calendar-clock" style="font-size:12px;vertical-align:-1px;"></i> Follow-up: ${fmtDataBR(l['FOLLOWUP'])}</div>`:''}
+        ${l['CLIENTE_PROX']?`<div class="meta" style="margin-top:3px;color:var(--verde-medio);"><i class="ti ti-map-pin" style="font-size:12px;vertical-align:-1px;"></i> ${l['CLIENTE_PROX']} (${l['DIST_KM']||'?'} km${l['TEMPO_ROTA']?' · '+l['TEMPO_ROTA']:''})</div>`:''}
         ${l['EMPRESA_COLETA_ATUAL']?`<div class="meta" style="margin-top:3px;"><i class="ti ti-truck" style="font-size:12px;vertical-align:-1px;"></i> ${l['EMPRESA_COLETA_ATUAL']}</div>`:''}
       </div>`;
     });
@@ -4423,6 +4434,179 @@ async function excluirPedidoPreco(id, cliente) {
     renderPrecificacao(document.getElementById('area-conteudo'));
     atualizarSino();
   } catch(e) { alert('Erro de conexão.'); }
+}
+
+// ============================================================
+// ROTEIRIZAÇÃO — acha o cliente mais próximo de um lead (Google Maps)
+// Só roda quando o usuário clica em "Roteirizar". Salva o resultado no lead.
+// ============================================================
+async function renderRoteirizacao(area) {
+  area.innerHTML = `<div style="text-align:center;color:var(--cinza-500);padding:30px;">Carregando leads...</div>`;
+  await Promise.all([carregarLeads(), carregarClientes()]);
+  const semChave = !GOOGLE_MAPS_KEY || GOOGLE_MAPS_KEY === 'COLE_SUA_CHAVE_AQUI';
+  // leads ativos (fora de fechado/declinado/cobertura) com endereço
+  const leads = (kanbanLeads||[]).filter(l => {
+    const et = String(l['ETAPA']||'');
+    return et!=='Fechado' && et!=='Declinado' && et!=='Cobertura';
+  });
+  let html = `
+    <div style="margin-bottom:16px;">
+      <h2 style="font-family:var(--fonte-display);font-size:18px;color:var(--verde-escuro);margin:0 0 4px;"><i class="ti ti-route"></i> Roteirização de leads</h2>
+      <p style="font-size:13px;color:var(--cinza-600);margin:0;">Clique em "Roteirizar" para achar o cliente ativo mais próximo do lead (distância e tempo de carro). O resultado fica salvo no lead e aparece no card do funil.</p>
+    </div>`;
+  if (semChave) {
+    html += `<div class="sem-acesso" style="margin-bottom:16px;"><i class="ti ti-key-off"></i> A chave do Google Maps ainda não foi configurada no código. Cole a chave em GOOGLE_MAPS_KEY antes de subir.</div>`;
+  }
+  // contadores
+  const jaRot = leads.filter(l=>l['CLIENTE_PROX']).length;
+  html += `<div class="kpi-funil" style="margin-bottom:16px;">
+    <div class="kpi-card" style="border-top:3px solid var(--verde-medio);"><div class="kpi-num" style="color:var(--verde-medio);">${leads.length}</div><div class="kpi-lbl">Leads ativos</div></div>
+    <div class="kpi-card" style="border-top:3px solid var(--verde-ok);"><div class="kpi-num" style="color:var(--verde-ok);">${jaRot}</div><div class="kpi-lbl">Já roteirizados</div></div>
+  </div>`;
+  html += `<div class="grid-cards">`;
+  leads.forEach(l => {
+    const id = String(l['ID_LEAD']||'');
+    const temEnd = !!(l['ENDERECO'] || l['CEP']);
+    const jaTem = l['CLIENTE_PROX'];
+    html += `<div class="reaj-card" style="cursor:default;">
+      <div class="reaj-topo"><div style="min-width:0;"><div class="reaj-nome">${l['CLIENTE']||'—'}</div><div class="reaj-cnpj">${l['ENDERECO']||'sem endereço'}</div></div></div>
+      ${jaTem?`<div style="background:var(--verde-claro-bg);border-radius:8px;padding:8px 10px;margin:8px 0;font-size:12.5px;color:var(--verde-escuro);"><i class="ti ti-map-pin"></i> Mais próximo: <b>${l['CLIENTE_PROX']}</b><br><span style="font-size:12px;">${l['DIST_KM']||'—'} km${l['TEMPO_ROTA']?' · '+l['TEMPO_ROTA']:''}</span></div>`:''}
+      ${temEnd?`<button class="ficha-btn-primario" style="width:100%;margin-top:8px;padding:8px;border:none;border-radius:7px;cursor:${semChave?'not-allowed':'pointer'};font-size:12px;opacity:${semChave?'0.5':'1'};" ${semChave?'disabled':''} onclick="roteirizarLead('${id}')"><i class="ti ti-route"></i> ${jaTem?'Roteirizar de novo':'Roteirizar'}</button>`:`<div style="font-size:12px;color:var(--cinza-500);margin-top:8px;text-align:center;">Preencha o endereço do lead primeiro</div>`}
+      <div id="rot-msg-${id}" style="font-size:12px;margin-top:6px;"></div>
+    </div>`;
+  });
+  html += `</div>`;
+  area.innerHTML = html;
+}
+
+// geocodifica um endereço -> {lat,lng} usando a Geocoding API
+async function geocodificar(endereco) {
+  const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(endereco)}&region=br&key=${GOOGLE_MAPS_KEY}`;
+  const resp = await fetch(url);
+  const data = await resp.json();
+  if (data.status === 'OK' && data.results[0]) {
+    const loc = data.results[0].geometry.location;
+    return { lat: loc.lat, lng: loc.lng };
+  }
+  return null;
+}
+
+// distância em linha reta (Haversine) em km — usada para achar os candidatos mais próximos
+function distLinhaReta(lat1, lng1, lat2, lng2) {
+  const R = 6371, rad = x => x*Math.PI/180;
+  const dLat = rad(lat2-lat1), dLng = rad(lng2-lng1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(rad(lat1))*Math.cos(rad(lat2))*Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+async function roteirizarLead(idLead) {
+  const msg = document.getElementById('rot-msg-'+idLead);
+  const setMsg = (t,cor) => { if(msg){ msg.textContent=t; msg.style.color=cor||'var(--cinza-500)'; } };
+  const lead = (kanbanLeads||[]).find(l=>String(l['ID_LEAD'])===String(idLead));
+  if (!lead) return;
+  setMsg('Localizando o lead...', 'var(--cinza-500)');
+  try {
+    // 1) coordenada do lead (geocodifica se ainda não tem)
+    let latL = parseFloat(lead['LAT']), lngL = parseFloat(lead['LNG']);
+    if (isNaN(latL) || isNaN(lngL)) {
+      const endLead = [lead['ENDERECO'], lead['CEP'], 'São Paulo, SP, Brasil'].filter(Boolean).join(', ');
+      const geo = await geocodificar(endLead);
+      if (!geo) { setMsg('Não consegui localizar o endereço do lead. Confira o endereço/CEP.', 'var(--vermelho)'); return; }
+      latL = geo.lat; lngL = geo.lng;
+      // salva a coordenada do lead pra não geocodificar de novo
+      fetch(API_URL, { method:'POST', body: JSON.stringify({ acao:'atualizarLeadCampos', token: sessaoToken, dados:{ idLead:String(idLead), campos:{ LAT:latL, LNG:lngL } } })});
+    }
+    // 2) candidatos: clientes com coordenada já salva; senão geocodifica os que faltam (uma vez)
+    setMsg('Comparando com os clientes...', 'var(--cinza-500)');
+    const clientes = (cacheClientes||[]).filter(c => c['ENDERECO']);
+    // calcula linha reta com quem já tem coordenada
+    const comCoord = [];
+    for (const c of clientes) {
+      let la = parseFloat(c['LAT']), ln = parseFloat(c['LNG']);
+      if (!isNaN(la) && !isNaN(ln)) comCoord.push({ c, lat:la, lng:ln });
+    }
+    // se quase ninguém tem coordenada, geocodifica os 30 mais provavelmente próximos? 
+    // Estratégia: ordena por linha reta os que têm coord; pega os 10 mais perto p/ Routes API
+    if (!comCoord.length) {
+      setMsg('Os clientes ainda não têm coordenadas. Use o botão "Geocodificar clientes" (uma vez) no topo.', 'var(--vermelho)');
+      mostrarBotaoGeocodificar();
+      return;
+    }
+    comCoord.forEach(o => o.reta = distLinhaReta(latL, lngL, o.lat, o.lng));
+    comCoord.sort((a,b)=>a.reta-b.reta);
+    const top = comCoord.slice(0, 1); // o mais próximo em linha reta
+    const maisProx = top[0];
+    // 3) Routes API: km + tempo reais do lead até o cliente mais próximo
+    setMsg('Calculando a rota real...', 'var(--cinza-500)');
+    const rota = await calcularRota(latL, lngL, maisProx.lat, maisProx.lng);
+    const distKm = rota ? rota.km : maisProx.reta.toFixed(1);
+    const tempo = rota ? rota.tempo : '';
+    // 4) salva no lead
+    fetch(API_URL, { method:'POST', body: JSON.stringify({ acao:'atualizarLeadCampos', token: sessaoToken, dados:{ idLead:String(idLead), campos:{
+      CLIENTE_PROX: maisProx.c['CLIENTE'], DIST_KM: distKm, TEMPO_ROTA: tempo, DATA_ROTEIRIZACAO: new Date().toISOString().slice(0,10)
+    } } })});
+    lead['CLIENTE_PROX']=maisProx.c['CLIENTE']; lead['DIST_KM']=distKm; lead['TEMPO_ROTA']=tempo;
+    if (typeof limparCacheBusca==='function') limparCacheBusca();
+    setMsg('', 'var(--cinza-500)');
+    renderRoteirizacao(document.getElementById('area-conteudo'));
+  } catch(e) { setMsg('Erro: '+(e.message||'verifique a chave do Google.'), 'var(--vermelho)'); }
+}
+
+// Routes API: distância e tempo de carro entre dois pontos
+async function calcularRota(latO, lngO, latD, lngD) {
+  try {
+    const resp = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'X-Goog-Api-Key': GOOGLE_MAPS_KEY, 'X-Goog-FieldMask':'routes.distanceMeters,routes.duration' },
+      body: JSON.stringify({
+        origin:{ location:{ latLng:{ latitude:latO, longitude:lngO } } },
+        destination:{ location:{ latLng:{ latitude:latD, longitude:lngD } } },
+        travelMode:'DRIVE'
+      })
+    });
+    const data = await resp.json();
+    if (data.routes && data.routes[0]) {
+      const m = data.routes[0].distanceMeters || 0;
+      const segs = parseInt(String(data.routes[0].duration||'0').replace('s','')) || 0;
+      return { km: (m/1000).toFixed(1), tempo: segs>=3600 ? Math.floor(segs/3600)+'h'+Math.round((segs%3600)/60)+'min' : Math.round(segs/60)+' min' };
+    }
+  } catch(e) {}
+  return null;
+}
+
+// geocodifica em lote os clientes que ainda não têm coordenada (roda uma vez, sob demanda)
+function mostrarBotaoGeocodificar() {
+  const area = document.getElementById('area-conteudo');
+  if (document.getElementById('btn-geo-clientes')) return;
+  const aviso = document.createElement('div');
+  aviso.id = 'btn-geo-clientes';
+  aviso.style.cssText = 'background:var(--amarelo-bg);border-radius:10px;padding:14px;margin:12px 0;';
+  aviso.innerHTML = `<div style="font-size:13px;color:#7a5c00;margin-bottom:8px;"><b>Primeira vez:</b> os clientes ainda não têm coordenadas. Clique abaixo para geocodificar (acontece uma vez só; cada cliente consome 1 uso do Google).</div>
+    <button class="ficha-btn-primario" style="padding:8px 14px;border:none;border-radius:8px;cursor:pointer;font-size:13px;" onclick="geocodificarClientes()"><i class="ti ti-map-2"></i> Geocodificar clientes</button>
+    <div id="geo-prog" style="font-size:12px;color:#7a5c00;margin-top:8px;"></div>`;
+  area.insertBefore(aviso, area.querySelector('.grid-cards'));
+}
+
+async function geocodificarClientes() {
+  const prog = document.getElementById('geo-prog');
+  await carregarClientes();
+  const semCoord = (cacheClientes||[]).filter(c => c['ENDERECO'] && (isNaN(parseFloat(c['LAT'])) || isNaN(parseFloat(c['LNG']))));
+  if (!semCoord.length) { if(prog) prog.textContent = 'Todos os clientes já têm coordenadas!'; return; }
+  let ok=0, falhou=0;
+  for (let i=0;i<semCoord.length;i++) {
+    const c = semCoord[i];
+    if (prog) prog.textContent = `Geocodificando ${i+1} de ${semCoord.length}... (${c['CLIENTE']})`;
+    const end = [c['ENDERECO'], c['CEP'], 'São Paulo, SP, Brasil'].filter(Boolean).join(', ');
+    const geo = await geocodificar(end);
+    if (geo) {
+      ok++;
+      await fetch(API_URL, { method:'POST', body: JSON.stringify({ acao:'atualizarCoordCliente', token: sessaoToken, dados:{ cnpj: c['CNPJ'], lat: geo.lat, lng: geo.lng } })});
+      c['LAT']=geo.lat; c['LNG']=geo.lng;
+    } else falhou++;
+    await new Promise(r=>setTimeout(r, 120)); // respira entre chamadas
+  }
+  if (prog) prog.textContent = `Pronto! ${ok} geocodificados${falhou?', '+falhou+' falharam (endereço incompleto)':''}.`;
+  if (typeof limparCacheBusca==='function') limparCacheBusca();
 }
 
 async function renderPrecificacao(area) {
