@@ -4444,11 +4444,26 @@ async function renderRoteirizacao(area) {
   area.innerHTML = `<div style="text-align:center;color:var(--cinza-500);padding:30px;">Carregando leads...</div>`;
   await Promise.all([carregarLeads(), carregarClientes()]);
   const semChave = !GOOGLE_MAPS_KEY || GOOGLE_MAPS_KEY === 'COLE_SUA_CHAVE_AQUI';
-  // leads ativos (fora de fechado/declinado/cobertura) com endereço
-  const leads = (kanbanLeads||[]).filter(l => {
+  // leads ativos — exclui Fechado, Declinado e Cobertura
+  let leads = (kanbanLeads||[]).filter(l => {
     const et = String(l['ETAPA']||'');
     return et!=='Fechado' && et!=='Declinado' && et!=='Cobertura';
   });
+  // filtro de mês (pela data de chegada do lead) — mantém o valor selecionado
+  const mesSel = (document.getElementById('rot-mes')||{}).value || window._rotMesSel || '';
+  window._rotMesSel = mesSel;
+  if (mesSel) {
+    leads = leads.filter(l => {
+      const d = parseDataReaj(l['DATA_CONTATO']);
+      if (!d) return false;
+      const ym = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+      return ym === mesSel;
+    });
+  }
+  // monta opções de mês a partir das datas dos leads ativos
+  const mesesDisp = [...new Set((kanbanLeads||[]).map(l=>{ const d=parseDataReaj(l['DATA_CONTATO']); return d?d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'):null; }).filter(Boolean))].sort().reverse();
+  const rotMesLabel = ym => { const ab=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez']; const [a,m]=ym.split('-'); return ab[parseInt(m,10)-1]+'/'+a.slice(-2); };
+
   let html = `
     <div style="margin-bottom:16px;">
       <h2 style="font-family:var(--fonte-display);font-size:18px;color:var(--verde-escuro);margin:0 0 4px;"><i class="ti ti-route"></i> Roteirização de leads</h2>
@@ -4457,13 +4472,22 @@ async function renderRoteirizacao(area) {
   if (semChave) {
     html += `<div class="sem-acesso" style="margin-bottom:16px;"><i class="ti ti-key-off"></i> A chave do Google Maps ainda não foi configurada no código. Cole a chave em GOOGLE_MAPS_KEY antes de subir.</div>`;
   }
+  // barra: filtro de mês + botão de geocodificar clientes (sempre visível)
+  const cliSemCoord = (cacheClientes||[]).filter(c => c['ENDERECO'] && (isNaN(parseFloat(c['LAT'])) || isNaN(parseFloat(c['LNG'])))).length;
+  const cliComCoord = (cacheClientes||[]).filter(c => !isNaN(parseFloat(c['LAT'])) && !isNaN(parseFloat(c['LNG']))).length;
+  html += `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
+    <select class="filtro-sel" id="rot-mes" onchange="renderRoteirizacao(document.getElementById('area-conteudo'))"><option value="">Todos os meses</option>${mesesDisp.map(m=>`<option value="${m}" ${m===mesSel?'selected':''}>${rotMesLabel(m)}</option>`).join('')}</select>
+    <button class="ficha-btn-secundario" style="padding:8px 14px;border:1.5px solid var(--verde-medio);background:white;color:var(--verde-escuro);border-radius:8px;cursor:${semChave?'not-allowed':'pointer'};font-size:13px;opacity:${semChave?'0.5':'1'};" ${semChave?'disabled':''} onclick="geocodificarClientes()"><i class="ti ti-map-2"></i> Geocodificar clientes (${cliComCoord} prontos${cliSemCoord?', '+cliSemCoord+' faltam':''})</button>
+    <div id="geo-prog" style="font-size:12px;color:var(--cinza-600);"></div>
+  </div>`;
   // contadores
   const jaRot = leads.filter(l=>l['CLIENTE_PROX']).length;
   html += `<div class="kpi-funil" style="margin-bottom:16px;">
-    <div class="kpi-card" style="border-top:3px solid var(--verde-medio);"><div class="kpi-num" style="color:var(--verde-medio);">${leads.length}</div><div class="kpi-lbl">Leads ativos</div></div>
+    <div class="kpi-card" style="border-top:3px solid var(--verde-medio);"><div class="kpi-num" style="color:var(--verde-medio);">${leads.length}</div><div class="kpi-lbl">Leads${mesSel?' ('+rotMesLabel(mesSel)+')':' ativos'}</div></div>
     <div class="kpi-card" style="border-top:3px solid var(--verde-ok);"><div class="kpi-num" style="color:var(--verde-ok);">${jaRot}</div><div class="kpi-lbl">Já roteirizados</div></div>
   </div>`;
   html += `<div class="grid-cards">`;
+  if (!leads.length) html += `<div style="grid-column:1/-1;text-align:center;color:var(--cinza-500);padding:24px;font-size:13px;">Nenhum lead ativo${mesSel?' neste mês':''}.</div>`;
   leads.forEach(l => {
     const id = String(l['ID_LEAD']||'');
     const temEnd = !!(l['ENDERECO'] || l['CEP']);
