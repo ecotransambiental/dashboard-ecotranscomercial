@@ -653,13 +653,22 @@ function recarregarDados() {
 }
 
 // ---- Buscar dados de uma aba do Sheets ----
-async function buscarDados(aba) {
+const _cacheBusca = {};
+async function buscarDados(aba, forcar) {
+  const agora = Date.now();
+  // cache leve de 45s por aba — evita rebaixar a mesma aba várias vezes na mesma navegação
+  if (!forcar && _cacheBusca[aba] && (agora - _cacheBusca[aba].t < 45000)) {
+    return _cacheBusca[aba].dados;
+  }
   const resp = await fetch(API_URL, {
     method: 'POST',
     body: JSON.stringify({ acao: 'dados', token: sessaoToken, aba: aba })
   });
-  return await resp.json();
+  const dados = await resp.json();
+  _cacheBusca[aba] = { t: agora, dados };
+  return dados;
 }
+function limparCacheBusca(){ for (const k in _cacheBusca) delete _cacheBusca[k]; }
 
 // ---- Iniciar app após login ----
 function iniciarApp() {
@@ -668,13 +677,15 @@ function iniciarApp() {
   kanbanLeads = null; cacheClientes = null; cacheFaturamento = null; cacheLeads = null;
   cacheReajustes = null; cacheInad = null; cacheFat = null; cacheFatCols = null;
   cacheCanc = null; cacheAgenda = null; window._histEtapas = null;
+  if (typeof limparCacheBusca === 'function') limparCacheBusca();
   document.getElementById('tela-login').style.display = 'none';
   document.getElementById('app').style.display = 'block';
   document.getElementById('footer-nome').textContent = usuarioAtual.nome;
   document.getElementById('footer-role').textContent = usuarioAtual.role;
   document.getElementById('badge-perfil').textContent = usuarioAtual.role;
   renderModulos();
-  atualizarSino();
+  // sininho roda em segundo plano (não trava a entrada no sistema)
+  setTimeout(()=>{ atualizarSino(); }, 1500);
 }
 
 
@@ -2937,8 +2948,8 @@ async function atualizarSino() {
     }
     const badge = document.getElementById('sino-badge');
     if (veFollowUps) {
-      // follow-ups com data nos próximos 7 dias (usa o filtro de CRM: cada um vê os seus)
-      await carregarLeads();
+      // follow-ups com data nos próximos 7 dias — reusa os leads já carregados (não baixa de novo)
+      if (!kanbanLeads) await carregarLeads();
       const hoje = new Date(new Date().toDateString());
       const fim = new Date(hoje); fim.setDate(fim.getDate()+7);
       const fus = (kanbanLeads||[]).filter(l=>{ const d=parseDataReaj(l['FOLLOWUP']); return d && d>=hoje && d<=fim; })
