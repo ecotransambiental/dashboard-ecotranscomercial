@@ -1068,6 +1068,7 @@ async function abrirFicha(cnpj) {
               <button onclick="salvarEnderecoFicha('${cnpj.replace(/'/g,'')}')" style="margin-left:6px;padding:5px 10px;border:none;background:var(--verde-medio);color:white;border-radius:6px;cursor:pointer;font-size:12px;"><i class="ti ti-check"></i></button>` : (c['ENDERECO']||'—')}
             </td></tr>
             <tr><td><i class="ti ti-calendar-repeat" style="vertical-align:-2px;margin-right:6px;"></i>Frequência de coleta</td><td>${c['FREQUENCIA_COLETA']||'—'}</td></tr>
+            <tr><td><i class="ti ti-target" style="vertical-align:-2px;margin-right:6px;"></i>Mínima de coleta</td><td>${c['MINIMA_COLETA']||'—'}</td></tr>
             <tr><td><i class="ti ti-briefcase" style="vertical-align:-2px;margin-right:6px;"></i>Consultor</td><td>
               <select id="ficha-consultor" style="padding:5px 8px;border:1.5px solid var(--cinza-300);border-radius:6px;font-size:13px;font-family:var(--fonte-corpo);">
                 ${['— a definir','Bruna Campos','Elaine Souza','Rogério Sabino','Danielly Santos','Maria Fernanda','Andrea Fernandes','Roberto Fernandes'].map(n=>`<option ${(c['CONSULTOR']||'— a definir')===n||(c['CONSULTOR']&&n!=='— a definir'&&c['CONSULTOR'].includes(n.split(' ')[0]))?'selected':''}>${n}</option>`).join('')}
@@ -1340,7 +1341,10 @@ async function imprimirFichaCliente(cnpj) {
   let contratosHtml = contratos.length ? contratos.map(ct=>`<table class="t"><tr><td>Nº Contrato</td><td>${ct['Nº CTO']||'—'}</td></tr><tr><td>Assinatura</td><td>${fmtDataBR(ct['ASS. CTO'])}</td></tr><tr><td>Vencimento</td><td>${fmtDataBR(ct['VENC.'])}</td></tr><tr><td>Período</td><td>${ct['PERÍODO']||'—'}</td></tr><tr><td>Aditivo (ass/venc)</td><td>${fmtDataBR(ct['ASS. ADITIVO'])} / ${fmtDataBR(ct['VENC. ADITIVO'])}</td></tr><tr><td>Índice</td><td>${ct['ÍNDICE']||'—'}</td></tr><tr><td>Multa</td><td>${ct['MULTA']||'—'}</td></tr></table>`).join('') : '<p style="color:#999;">Sem contratos.</p>';
   let reajHtml = reajustes.length ? `<table class="t"><tr style="background:#f0f7ec;"><th>Serviço</th><th>Anterior</th><th>Reajustado</th><th>Índice</th><th>Data</th></tr>${reajustes.map(r=>`<tr><td>${r['TP DE SERVIÇO']||'—'}</td><td>${fmtMoeda(r['PREÇO ANTERIOR'])}</td><td>${fmtMoeda(r['VALOR REAJUSTADO'])}</td><td>${r['ÍNDICE']||'—'}</td><td>${fmtDataBR(r['DATA ÚLTIMO REAJUSTE ']||r['DATA ÚLTIMO REAJUSTE'])}</td></tr>`).join('')}</table>` : '<p style="color:#999;">Sem reajustes.</p>';
   let equipHtml = equip.length ? `<table class="t"><tr style="background:#f0f7ec;"><th>Equipamento</th><th>Valor</th></tr>${equip.map(e=>`<tr><td>${e['EQUIPAMENTO']||e['DESCRIÇÃO']||e['TIPO']||'—'}</td><td>${fmtMoeda(e['VALOR']||e['VALOR_UNIT']||e['PREÇO'])}</td></tr>`).join('')}</table>` : '<p style="color:#999;">Sem equipamentos cadastrados.</p>';
-  let fatHtml = fatur.length ? `<table class="t">${Object.keys(fatur[0]).filter(k=>!['CNPJ','CLIENTE'].includes(k) && fatur[0][k]).slice(0,8).map(k=>`<tr><td>${k}</td><td>${fmtMoeda(fatur[0][k])}</td></tr>`).join('')}</table>` : '<p style="color:#999;">Sem faturamento.</p>';
+  // formata valor: colunas de COLETAS/quantidade ficam como número; resto como R$
+  const ehColeta = k => /COLETA|QTD|QUANT|QUANTIDADE/i.test(String(k));
+  const fmtFat = (k,v) => ehColeta(k) ? (v!=null&&v!==''?String(v).replace(/\.0+$/,''):'—') : fmtMoeda(v);
+  let fatHtml = fatur.length ? `<table class="t">${Object.keys(fatur[0]).filter(k=>!['CNPJ','CLIENTE'].includes(k) && fatur[0][k]).slice(0,8).map(k=>`<tr><td>${k}</td><td>${fmtFat(k, fatur[0][k])}</td></tr>`).join('')}</table>` : '<p style="color:#999;">Sem faturamento.</p>';
 
   const win = window.open('', '_blank');
   win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Ficha ${c['CLIENTE']||''}</title>
@@ -1352,7 +1356,7 @@ async function imprimirFichaCliente(cnpj) {
     </div>
     <h2 style="color:#2d5a3d;font-size:17px;margin:10px 0 4px;">${c['CLIENTE']||'—'}</h2>
     <div style="color:#666;margin-bottom:8px;">${c['CNPJ']||''} · ${c['TIPO']||'Contrato'} · Consultor: ${c['CONSULTOR']||'—'}</div>
-    <table class="t"><tr><td>Contato</td><td>${c['CONTATO']||'—'}</td></tr><tr><td>E-mail</td><td>${c['EMAIL']||'—'}</td></tr><tr><td>Telefone</td><td>${c['TELEFONE']||'—'}</td></tr><tr><td>Assessoria</td><td>${c['ASSESSORIA']||'—'}</td></tr></table>
+    <table class="t"><tr><td>Contato</td><td>${c['CONTATO']||'—'}</td></tr><tr><td>E-mail</td><td>${c['EMAIL']||'—'}</td></tr><tr><td>Telefone</td><td>${c['TELEFONE']||'—'}</td></tr><tr><td>Assessoria</td><td>${c['ASSESSORIA']||'—'}</td></tr>${c['FREQUENCIA_COLETA']?`<tr><td>Frequência de coleta</td><td>${c['FREQUENCIA_COLETA']}</td></tr>`:''}${c['MINIMA_COLETA']?`<tr><td>Mínima de coleta</td><td>${c['MINIMA_COLETA']}</td></tr>`:''}</table>
     ${tab('Contrato', contratosHtml)}
     ${tab('Reajustes', reajHtml)}
     ${tab('Equipamentos e valores', equipHtml)}
@@ -1637,13 +1641,17 @@ async function renderAbaFaturamento(corpo) {
   function num(v){ if(v==null||v==='')return 0; if(typeof v==='number')return v; let s=String(v).replace(/[^\d,.-]/g,''); if(s.includes(',')&&s.lastIndexOf(',')>s.lastIndexOf('.'))s=s.replace(/\./g,'').replace(',','.'); const n=parseFloat(s); return isNaN(n)?0:n; }
 
   let html = '';
-  // mínima contratual (puxada dos contratos do cliente)
+  // mínima: primeiro a do cliente (vale p/ eventual também); senão a dos contratos
   try {
-    const rct = await buscarDados('Contratos');
-    const meusCtr = (rct.ok?rct.linhas:[]).filter(x=>cnpjLimpo(x['CNPJ'])===alvo);
-    const minimas = meusCtr.map(x=> (x['MINIMA_EQUIP_QTD']||x['MINIMA_EQUIP_TIPO']) ? `${x['MINIMA_EQUIP_QTD']||''} ${x['MINIMA_EQUIP_TIPO']||''}`.trim() : '').filter(Boolean);
-    if (minimas.length) {
-      html += `<div style="background:var(--verde-claro-bg);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:13px;"><b style="color:var(--verde-escuro);"><i class="ti ti-target"></i> Mínima contratual:</b> ${[...new Set(minimas)].join(' · ')}</div>`;
+    let minTxt = fichaClienteAtual['MINIMA_COLETA'] || '';
+    if (!minTxt) {
+      const rct = await buscarDados('Contratos');
+      const meusCtr = (rct.ok?rct.linhas:[]).filter(x=>cnpjLimpo(x['CNPJ'])===alvo);
+      const minimas = meusCtr.map(x=> (x['MINIMA_EQUIP_QTD']||x['MINIMA_EQUIP_TIPO']) ? `${x['MINIMA_EQUIP_QTD']||''} ${x['MINIMA_EQUIP_TIPO']||''}`.trim() : '').filter(Boolean);
+      minTxt = [...new Set(minimas)].join(' · ');
+    }
+    if (minTxt) {
+      html += `<div style="background:var(--verde-claro-bg);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:13px;"><b style="color:var(--verde-escuro);"><i class="ti ti-target"></i> Mínima contratual:</b> ${minTxt}</div>`;
     }
   } catch(e) {}
   // R$ faturado por mês (da Variação)
