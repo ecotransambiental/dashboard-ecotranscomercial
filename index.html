@@ -664,20 +664,15 @@ function recarregarDados() {
 // ---- Buscar dados de uma aba do Sheets ----
 const _cacheBusca = {};
 async function buscarDados(aba, forcar) {
-  const agora = Date.now();
-  // cache leve de 45s por aba — evita rebaixar a mesma aba várias vezes na mesma navegação
-  if (!forcar && _cacheBusca[aba] && (agora - _cacheBusca[aba].t < 45000)) {
-    return _cacheBusca[aba].dados;
-  }
+  // SEM CACHE: sempre lê do Google na hora. O cache anterior fazia dados recém-salvos
+  // "sumirem" da tela (a tela relia a versão velha). Ler fresco é o correto e seguro.
   const resp = await fetch(API_URL, {
     method: 'POST',
     body: JSON.stringify({ acao: 'dados', token: sessaoToken, aba: aba })
   });
-  const dados = await resp.json();
-  _cacheBusca[aba] = { t: agora, dados };
-  return dados;
+  return await resp.json();
 }
-function limparCacheBusca(){ for (const k in _cacheBusca) delete _cacheBusca[k]; }
+function limparCacheBusca(){ /* mantido por compatibilidade; não há mais cache */ }
 
 // ---- Iniciar app após login ----
 function iniciarApp() {
@@ -1015,8 +1010,9 @@ function listaClientes(lista) {
   let html = '<div class="lista-cli">';
   lista.slice(0, 300).forEach(c => {
     const cnpj = String(c['CNPJ']||'');
-    html += `<div class="lista-cli-item" onclick="abrirFicha('${cnpj.replace(/'/g,'')}')">
-      <div><b style="color:var(--cinza-900);">${c['CLIENTE']||'—'}</b><br><span style="color:var(--cinza-500);font-size:12px;">${cnpj}</span></div>
+    const nome = String(c['CLIENTE']||'').replace(/'/g,"\\'");
+    html += `<div class="lista-cli-item" onclick="abrirFicha('${cnpj.replace(/'/g,'')}','${nome}')">
+      <div><b style="color:var(--cinza-900);">${c['CLIENTE']||'—'}</b><br><span style="color:var(--cinza-500);font-size:12px;">${cnpj||'sem CNPJ'}</span></div>
       <span style="color:var(--cinza-600);">${c['CONSULTOR']||'—'}</span>
       <span style="color:var(--verde-escuro);font-weight:600;">${fmtMoeda(cacheFaturamento[cnpj])}</span>
     </div>`;
@@ -1028,14 +1024,23 @@ function listaClientes(lista) {
 // ---- Ficha do cliente (modal) ----
 let fichaAbaAtual = 'geral';
 let fichaClienteAtual = null;
-async function abrirFicha(cnpj) {
+async function abrirFicha(cnpj, nome) {
   // garantir que os clientes estão carregados (pode ter vindo direto de Contratos)
   if (!cacheClientes) { await carregarClientes(); }
   const alvo = String(cnpj||'').replace(/\D/g,'');
-  let c = cacheClientes.find(x => String(x['CNPJ']) === cnpj)
-       || cacheClientes.find(x => String(x['CNPJ']||'').replace(/\D/g,'') === alvo);
+  let c;
+  if (alvo && alvo.length >= 11) {
+    // tem CNPJ válido: busca por CNPJ
+    c = cacheClientes.find(x => String(x['CNPJ']) === cnpj)
+     || cacheClientes.find(x => String(x['CNPJ']||'').replace(/\D/g,'') === alvo);
+  }
+  // sem CNPJ (ou não achou): busca por nome, pra não abrir o cliente errado
+  if (!c && nome) {
+    const nomeAlvo = String(nome).trim().toUpperCase();
+    c = cacheClientes.find(x => String(x['CLIENTE']||'').trim().toUpperCase() === nomeAlvo);
+  }
   // se não existe na aba Clientes (ex: contrato sem cliente cadastrado), monta ficha mínima
-  if (!c) c = { CLIENTE: '(cliente não cadastrado na aba Clientes)', CNPJ: cnpj, TIPO: 'Contrato' };
+  if (!c) c = { CLIENTE: nome || '(cliente não cadastrado na aba Clientes)', CNPJ: cnpj, TIPO: 'Contrato' };
   fichaClienteAtual = c;
   fichaAbaAtual = 'geral';
   const fat = cacheFaturamento ? cacheFaturamento[cnpj] : 0;
@@ -2399,7 +2404,7 @@ function abrirCriarClienteDeLead(lead) {
       </div>
     </div>`;
 }
-async function salvarClienteDeLead(cnpjLead, tipo) {
+async function salvarClienteDeLead(cnpjLead, tipo, permitirDuplicado) {
   const TIPOS = { contrato:'Contrato', eventual:'Eventual', pendente:'Contratual - pendente' };
   const campos = {
     'CLIENTE': document.getElementById('cl-nome').value,
@@ -2413,10 +2418,25 @@ async function salvarClienteDeLead(cnpjLead, tipo) {
   if (!campos['CLIENTE']) { document.getElementById('cl-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Informe o nome do cliente.</div>'; return; }
   document.getElementById('cl-msg').innerHTML = '<div style="text-align:center;padding:10px;color:var(--cinza-500);">Criando...</div>';
   try {
-    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({ acao:'novoRegistro', token: sessaoToken, dados:{ aba:'Clientes', campos } })});
+    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({ acao:'novoRegistro', token: sessaoToken, dados:{ aba:'Clientes', campos, permitirDuplicado: !!permitirDuplicado } })});
     const r = await resp.json();
-    if (!r.ok) { document.getElementById('cl-msg').innerHTML=`<div class="sem-acesso">${r.erro||'verifique se o Apps Script foi republicado.'}</div>`; return; }
+    if (!r.ok) {
+      if (r.duplicado) {
+        // oferece a opção de criar mesmo assim (unidade nova)
+        document.getElementById('cl-msg').innerHTML = `
+          <div style="background:var(--amarelo-bg);border-radius:8px;padding:12px;margin-top:10px;color:#8a6d00;font-size:12.5px;">
+            <i class="ti ti-alert-triangle"></i> ${r.erro}
+            <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+              <button onclick="salvarClienteDeLead('${cnpjLead}','${tipo}',true)" style="padding:7px 12px;border:none;background:#8a6d00;color:white;border-radius:7px;cursor:pointer;font-size:12px;">É uma unidade nova, criar mesmo assim</button>
+              <button onclick="fecharFicha()" style="padding:7px 12px;border:1px solid var(--cinza-300);background:white;border-radius:7px;cursor:pointer;font-size:12px;">Cancelar (é duplicado)</button>
+            </div>
+          </div>`;
+        return;
+      }
+      document.getElementById('cl-msg').innerHTML=`<div class="sem-acesso">${r.erro||'verifique se o Apps Script foi republicado.'}</div>`; return;
+    }
     cacheClientes = null;
+    if (typeof limparCacheBusca==='function') limparCacheBusca();
     if (tipo === 'contrato') {
       await carregarClientes();
       abrirFormContrato(campos['CLIENTE'], campos['CNPJ']);
