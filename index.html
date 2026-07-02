@@ -395,7 +395,7 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbwpcfQ8LV-zZj31uHiOZT5n
 // A chave deve estar RESTRITA ao domínio ecotransambiental.github.io
 // e só com as APIs Geocoding e Routes ativadas.
 // ============================================================
-const GOOGLE_MAPS_KEY = 'COLE_SUA_CHAVE_AQUI';
+const GOOGLE_MAPS_KEY = 'AIzaSyC4oIgrSglCR1TckpKjE7DlSGLLCWSvddM';
 
 // ============================================================
 // CONFIGURAÇÃO — perfis e acessos
@@ -470,7 +470,7 @@ const ACESSO = {
   diretor:     ['crm','carteira','agenda','regula'],          // Roberto — tudo
   supervisor:  ['crm','carteira','agenda'],                  // Rogério — sem SP Regula; financeiro bloqueado (ver SUBMODULOS_BLOQUEADOS)
   assistente:  ['crm','carteira','agenda','regula'],          // Danielly — CRM de todos; carteira só os próprios + "quem atende"; SP Regula completo
-  vendedor:    ['crm','agenda'],                            // Bruna, Elaine — só CRM e Agenda (carteira removida por ora; reativar adicionando 'carteira')
+  vendedor:    ['crm','carteira','agenda'],                // Bruna, Elaine — CRM, Carteira (só os próprios clientes/contratos) e Agenda
   financeiro:  ['carteira'],                                  // Joyce — só carteira, sem CRM
 };
 
@@ -4621,7 +4621,7 @@ async function excluirPedidoPreco(id, cliente) {
 async function renderRoteirizacao(area) {
   area.innerHTML = `<div style="text-align:center;color:var(--cinza-500);padding:30px;">Carregando leads...</div>`;
   await Promise.all([carregarLeads(), carregarClientes()]);
-  const semChave = !GOOGLE_MAPS_KEY || GOOGLE_MAPS_KEY === 'AIzaSyC4oIgrSglCR1TckpKjE7DlSGLLCWSvddM';
+  const semChave = !GOOGLE_MAPS_KEY || GOOGLE_MAPS_KEY === 'COLE_SUA_CHAVE_AQUI';
   // leads ativos — exclui Fechado, Declinado e Cobertura
   let leads = (kanbanLeads||[]).filter(l => {
     const et = String(l['ETAPA']||'');
