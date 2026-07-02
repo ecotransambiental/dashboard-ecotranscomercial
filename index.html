@@ -395,7 +395,7 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbwpcfQ8LV-zZj31uHiOZT5n
 // A chave deve estar RESTRITA ao domínio ecotransambiental.github.io
 // e só com as APIs Geocoding e Routes ativadas.
 // ============================================================
-const GOOGLE_MAPS_KEY = 'AIzaSyC4oIgrSglCR1TckpKjE7DlSGLLCWSvddM';
+const GOOGLE_MAPS_KEY = 'COLE_SUA_CHAVE_AQUI';
 
 // ============================================================
 // CONFIGURAÇÃO — perfis e acessos
@@ -3444,14 +3444,23 @@ async function renderFaturamento(area) {
       <span class="filtro-chip ativo" id="ff-todos" onclick="setFiltroFat('todos',this)">Todos</span>
       <span class="filtro-chip" id="ff-contrato" onclick="setFiltroFat('Contrato',this)">Contrato</span>
       <span class="filtro-chip" id="ff-eventual" onclick="setFiltroFat('Eventual',this)">Eventual</span>
-      <select class="filtro-sel" id="fat-ordem" onchange="filtraTabelaFat()" style="margin-left:auto;min-width:170px;">
+      <select class="filtro-sel" id="fat-visao" onchange="filtraTabelaFat()" style="min-width:180px;">
+        <option value="mes">Mês único (atual vs anterior)</option>
+        <option value="3meses">Últimos 3 meses</option>
+        <option value="media3">Média dos últimos 3 meses</option>
+      </select>
+      <select class="filtro-sel" id="fat-ordem" onchange="filtraTabelaFat()" style="margin-left:auto;min-width:190px;">
         <option value="maior">Maior faturamento</option>
         <option value="menor">Menor faturamento</option>
+        <option value="var-maior">Variação: maior → menor</option>
+        <option value="var-menor">Variação: menor → maior</option>
         <option value="nome">Nome (A-Z)</option>
       </select>
+      <button class="filtro-chip" onclick="exportarFaturamento()" style="border:1.5px solid var(--verde-medio);color:var(--verde-escuro);"><i class="ti ti-printer"></i> Exportar</button>
     </div>
     <div id="fat-tabela-area"></div>`;
 
+  window._fatMeses = meses;
   window._fatMes = mesAtual;
   window._fatMesAnt = mesAnterior;
   window._fatRotulo = rotuloMes;
@@ -3470,40 +3479,127 @@ function setFiltroFat(t, el) {
 
 function filtraTabelaFat() {
   const termo = ((document.getElementById('fat-busca')||{}).value||'').toLowerCase();
+  const meses = window._fatMeses || [];
   const mes = window._fatMes, mesAnt = window._fatMesAnt, tipos = window._tipoPorCnpj;
   const vm = window._valMes || ((l,m)=>parseFloat(l[m])||0);
   const rot = window._fatRotulo || (m=>m);
   const filtroTipo = window._filtroFatTipo || 'todos';
+  const visao = (document.getElementById('fat-visao')||{}).value || 'mes';
+  // os últimos 3 meses disponíveis (ordem cronológica: antigo -> recente)
+  const idxAtual = meses.indexOf(mes);
+  const ultimos3 = meses.slice(Math.max(0, idxAtual-2), idxAtual+1);
+
   let lista = cacheFat.slice();
   if (termo) lista = lista.filter(l => String(l['CLIENTE']||'').toLowerCase().includes(termo));
   if (filtroTipo !== 'todos') lista = lista.filter(l => (tipos[cnpjLimpo(l['CNPJ'])]||'Contrato') === filtroTipo);
-  const ordem = (document.getElementById('fat-ordem')||{}).value || 'maior';
-  if (ordem === 'menor') lista = lista.sort((a,b)=>vm(a,mes)-vm(b,mes));
-  else if (ordem === 'nome') lista = lista.sort((a,b)=>String(a['CLIENTE']||'').localeCompare(String(b['CLIENTE']||'')));
-  else lista = lista.sort((a,b)=>vm(b,mes)-vm(a,mes));
 
-  let html = `<table class="fat-tabela"><thead><tr>
-    <th>Cliente</th><th>Tipo</th><th class="num">${rot(mes)}</th>${mesAnt?`<th class="num">${rot(mesAnt)}</th><th class="num">Variação</th>`:''}
-    </tr></thead><tbody>`;
-  lista.slice(0,200).forEach(l => {
-    const atual = vm(l, mes);
-    const ant = mesAnt ? vm(l, mesAnt) : null;
-    const tipo = tipos[cnpjLimpo(l['CNPJ'])] || 'Contrato';
-    let varCol = '';
-    if (mesAnt) {
-      if (ant === 0) varCol = `<td class="num fat-var-zero">novo</td>`;
-      else { const p=((atual-ant)/ant*100); varCol = `<td class="num ${p>0.05?'fat-var-pos':p<-0.05?'fat-var-neg':'fat-var-zero'}">${p>0?'+':''}${p.toFixed(1)}%</td>`; }
-    }
-    html += `<tr onclick="abrirFicha('${String(l['CNPJ']).replace(/'/g,'')}')">
-      <td><b style="color:var(--cinza-900);">${l['CLIENTE']||'—'}</b></td>
-      <td><span class="tag ${tipo==='Eventual'?'tag-eventual':'tag-contrato'}">${tipo}</span></td>
-      <td class="num"><b>${fmtMoeda(atual)}</b></td>
-      ${mesAnt?`<td class="num" style="color:var(--cinza-600);">${fmtMoeda(ant)}</td>${varCol}`:''}
-    </tr>`;
-  });
-  html += `</tbody></table>`;
+  // funções de valor conforme a visão
+  const media3 = l => { const vs=ultimos3.map(m=>vm(l,m)); return vs.reduce((a,b)=>a+b,0)/(vs.length||1); };
+  const varPct = l => { const a=vm(l,mes), b=mesAnt?vm(l,mesAnt):0; if(!b) return null; return (a-b)/b*100; };
+
+  // ordenação
+  const ordem = (document.getElementById('fat-ordem')||{}).value || 'maior';
+  const valOrd = l => visao==='media3' ? media3(l) : vm(l, mes);
+  if (ordem === 'menor') lista.sort((a,b)=>valOrd(a)-valOrd(b));
+  else if (ordem === 'nome') lista.sort((a,b)=>String(a['CLIENTE']||'').localeCompare(String(b['CLIENTE']||'')));
+  else if (ordem === 'var-maior') lista.sort((a,b)=>((varPct(b)??-Infinity)-(varPct(a)??-Infinity)));
+  else if (ordem === 'var-menor') lista.sort((a,b)=>((varPct(a)??Infinity)-(varPct(b)??Infinity)));
+  else lista.sort((a,b)=>valOrd(b)-valOrd(a));
+
+  window._fatListaExport = lista; // guarda pra exportar
+
+  let html = '';
+  if (visao === '3meses') {
+    // colunas: cliente, tipo, mês-2, mês-1, mês atual (esquerda->direita, antigo->recente), variação do último par
+    html = `<table class="fat-tabela"><thead><tr><th>Cliente</th><th>Tipo</th>${ultimos3.map(m=>`<th class="num">${rot(m)}</th>`).join('')}<th class="num">Variação</th></tr></thead><tbody>`;
+    lista.slice(0,200).forEach(l => {
+      const tipo = tipos[cnpjLimpo(l['CNPJ'])] || 'Contrato';
+      const vs = ultimos3.map(m=>vm(l,m));
+      const p = (vs.length>=2 && vs[vs.length-2]!==0) ? ((vs[vs.length-1]-vs[vs.length-2])/vs[vs.length-2]*100) : null;
+      const varCol = p===null ? '<td class="num fat-var-zero">—</td>' : `<td class="num ${p>0.05?'fat-var-pos':p<-0.05?'fat-var-neg':'fat-var-zero'}">${p>0?'+':''}${p.toFixed(1)}%</td>`;
+      html += `<tr onclick="abrirFicha('${String(l['CNPJ']).replace(/'/g,'')}','${String(l['CLIENTE']||'').replace(/'/g,"\\'")}')">
+        <td><b style="color:var(--cinza-900);">${l['CLIENTE']||'—'}</b></td>
+        <td><span class="tag ${tipo==='Eventual'?'tag-eventual':'tag-contrato'}">${tipo}</span></td>
+        ${vs.map((v,i)=>`<td class="num" style="${i===vs.length-1?'font-weight:700;':'color:var(--cinza-600);'}">${fmtMoeda(v)}</td>`).join('')}
+        ${varCol}
+      </tr>`;
+    });
+    html += `</tbody></table>`;
+  } else if (visao === 'media3') {
+    html = `<table class="fat-tabela"><thead><tr><th>Cliente</th><th>Tipo</th><th class="num">Média 3 meses</th><th class="num" style="font-size:11px;">(${ultimos3.map(rot).join(', ')})</th></tr></thead><tbody>`;
+    lista.slice(0,200).forEach(l => {
+      const tipo = tipos[cnpjLimpo(l['CNPJ'])] || 'Contrato';
+      const m = media3(l);
+      const detalhe = ultimos3.map(mm=>fmtMoeda(vm(l,mm))).join(' · ');
+      html += `<tr onclick="abrirFicha('${String(l['CNPJ']).replace(/'/g,'')}','${String(l['CLIENTE']||'').replace(/'/g,"\\'")}')">
+        <td><b style="color:var(--cinza-900);">${l['CLIENTE']||'—'}</b></td>
+        <td><span class="tag ${tipo==='Eventual'?'tag-eventual':'tag-contrato'}">${tipo}</span></td>
+        <td class="num"><b>${fmtMoeda(m)}</b></td>
+        <td class="num" style="color:var(--cinza-500);font-size:12px;">${detalhe}</td>
+      </tr>`;
+    });
+    html += `</tbody></table>`;
+  } else {
+    // mês único: ANTERIOR à esquerda, ATUAL à direita, depois variação
+    html = `<table class="fat-tabela"><thead><tr><th>Cliente</th><th>Tipo</th>${mesAnt?`<th class="num">${rot(mesAnt)}</th>`:''}<th class="num">${rot(mes)}</th>${mesAnt?`<th class="num">Variação</th>`:''}</tr></thead><tbody>`;
+    lista.slice(0,200).forEach(l => {
+      const atual = vm(l, mes);
+      const ant = mesAnt ? vm(l, mesAnt) : null;
+      const tipo = tipos[cnpjLimpo(l['CNPJ'])] || 'Contrato';
+      let varCol = '';
+      if (mesAnt) {
+        if (ant === 0) varCol = `<td class="num fat-var-zero">novo</td>`;
+        else { const p=((atual-ant)/ant*100); varCol = `<td class="num ${p>0.05?'fat-var-pos':p<-0.05?'fat-var-neg':'fat-var-zero'}">${p>0?'+':''}${p.toFixed(1)}%</td>`; }
+      }
+      html += `<tr onclick="abrirFicha('${String(l['CNPJ']).replace(/'/g,'')}','${String(l['CLIENTE']||'').replace(/'/g,"\\'")}')">
+        <td><b style="color:var(--cinza-900);">${l['CLIENTE']||'—'}</b></td>
+        <td><span class="tag ${tipo==='Eventual'?'tag-eventual':'tag-contrato'}">${tipo}</span></td>
+        ${mesAnt?`<td class="num" style="color:var(--cinza-600);">${fmtMoeda(ant)}</td>`:''}
+        <td class="num"><b>${fmtMoeda(atual)}</b></td>
+        ${varCol}
+      </tr>`;
+    });
+    html += `</tbody></table>`;
+  }
   if (lista.length > 200) html += `<div style="margin-top:8px;font-size:12px;color:var(--cinza-500);">Mostrando 200 de ${lista.length}. Use a busca.</div>`;
   document.getElementById('fat-tabela-area').innerHTML = html;
+}
+
+// exporta a tabela de faturamento atual para uma janela de impressão
+function exportarFaturamento() {
+  const lista = window._fatListaExport || [];
+  const meses = window._fatMeses || [];
+  const mes = window._fatMes, mesAnt = window._fatMesAnt, tipos = window._tipoPorCnpj || {};
+  const vm = window._valMes || ((l,m)=>parseFloat(l[m])||0);
+  const rot = window._fatRotulo || (m=>m);
+  const visao = (document.getElementById('fat-visao')||{}).value || 'mes';
+  const idxAtual = meses.indexOf(mes);
+  const ultimos3 = meses.slice(Math.max(0, idxAtual-2), idxAtual+1);
+  let cabTab, linhas;
+  if (visao === '3meses') {
+    cabTab = `<th>Cliente</th><th>Tipo</th>${ultimos3.map(m=>`<th>${rot(m)}</th>`).join('')}<th>Variação</th>`;
+    linhas = lista.map(l=>{ const vs=ultimos3.map(m=>vm(l,m)); const p=(vs.length>=2&&vs[vs.length-2]!==0)?((vs[vs.length-1]-vs[vs.length-2])/vs[vs.length-2]*100):null;
+      return `<tr><td>${l['CLIENTE']||'—'}</td><td>${tipos[cnpjLimpo(l['CNPJ'])]||'Contrato'}</td>${vs.map(v=>`<td>${fmtMoeda(v)}</td>`).join('')}<td>${p===null?'—':(p>0?'+':'')+p.toFixed(1)+'%'}</td></tr>`; }).join('');
+  } else if (visao === 'media3') {
+    cabTab = `<th>Cliente</th><th>Tipo</th><th>Média 3 meses (${ultimos3.map(rot).join(', ')})</th>`;
+    linhas = lista.map(l=>{ const vs=ultimos3.map(m=>vm(l,m)); const md=vs.reduce((a,b)=>a+b,0)/(vs.length||1);
+      return `<tr><td>${l['CLIENTE']||'—'}</td><td>${tipos[cnpjLimpo(l['CNPJ'])]||'Contrato'}</td><td>${fmtMoeda(md)}</td></tr>`; }).join('');
+  } else {
+    cabTab = `<th>Cliente</th><th>Tipo</th>${mesAnt?`<th>${rot(mesAnt)}</th>`:''}<th>${rot(mes)}</th>${mesAnt?'<th>Variação</th>':''}`;
+    linhas = lista.map(l=>{ const a=vm(l,mes), b=mesAnt?vm(l,mesAnt):null; const p=(mesAnt&&b!==0)?((a-b)/b*100):null;
+      return `<tr><td>${l['CLIENTE']||'—'}</td><td>${tipos[cnpjLimpo(l['CNPJ'])]||'Contrato'}</td>${mesAnt?`<td>${fmtMoeda(b)}</td>`:''}<td>${fmtMoeda(a)}</td>${mesAnt?`<td>${p===null?'novo':(p>0?'+':'')+p.toFixed(1)+'%'}</td>`:''}</tr>`; }).join('');
+  }
+  const win = window.open('', '_blank');
+  win.document.write(`<html><head><title>Faturamento — ${rot(mes)}</title>
+    <style>body{font-family:Arial,sans-serif;padding:24px;color:#22221e;}h1{color:#2d5a3d;font-size:20px;}
+    table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px;}th{background:#2d5a3d;color:#fff;padding:6px 8px;text-align:left;}
+    td{padding:5px 8px;border-bottom:1px solid #eee;}tr:nth-child(even) td{background:#f7f7f4;}</style></head><body>
+    <h1>Ecotrans Ambiental — Faturamento</h1>
+    <p>Visão: ${visao==='3meses'?'Últimos 3 meses':visao==='media3'?'Média dos últimos 3 meses':'Mês '+rot(mes)} · Gerado em ${new Date().toLocaleDateString('pt-BR')}</p>
+    <table><thead><tr>${cabTab}</tr></thead><tbody>${linhas}</tbody></table>
+    </body></html>`);
+  win.document.close();
+  setTimeout(()=>win.print(), 400);
 }
 
 // ---- Importar CSV de faturamento (processa no navegador) ----
