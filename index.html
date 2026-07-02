@@ -4621,7 +4621,7 @@ async function excluirPedidoPreco(id, cliente) {
 async function renderRoteirizacao(area) {
   area.innerHTML = `<div style="text-align:center;color:var(--cinza-500);padding:30px;">Carregando leads...</div>`;
   await Promise.all([carregarLeads(), carregarClientes()]);
-  const semChave = !GOOGLE_MAPS_KEY || GOOGLE_MAPS_KEY === 'COLE_SUA_CHAVE_AQUI';
+  const semChave = !GOOGLE_MAPS_KEY || GOOGLE_MAPS_KEY === 'AIzaSyC4oIgrSglCR1TckpKjE7DlSGLLCWSvddM';
   // leads ativos — exclui Fechado, Declinado e Cobertura
   let leads = (kanbanLeads||[]).filter(l => {
     const et = String(l['ETAPA']||'');
