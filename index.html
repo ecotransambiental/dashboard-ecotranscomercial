@@ -3569,18 +3569,38 @@ async function processarVariacao() {
   const msg = document.getElementById('imp-var-msg');
   if (!texto) { msg.innerHTML='<div class="sem-acesso" style="margin-top:10px;">Cole as linhas da variação.</div>'; return; }
   // separar linhas e colunas (aceita tab, ; ou 2+ espaços)
-  const linhas = texto.split('\n').map(l=>l.trim()).filter(Boolean).map(l => l.split(/\t|;|\s{2,}/).map(c=>c.trim()));
-  // primeira coluna = cliente; demais = valores (pega a última não vazia como mês mais recente)
+  let todasLinhas = texto.split('\n').map(l=>l.trim()).filter(Boolean).map(l => l.split(/\t|;|\s{2,}/).map(c=>c.trim()));
+  // tenta achar o cabeçalho (linha que tem "Cliente" e nomes de mês) pra capturar os meses
+  let mesesNomes = [];
+  const MESES_VALIDOS = ['janeiro','fevereiro','março','marco','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+  const linhaCab = todasLinhas.find(cols => cols.join(' ').toLowerCase().includes('cliente') && cols.some(c=>MESES_VALIDOS.includes(String(c).toLowerCase().trim())));
+  if (linhaCab) {
+    mesesNomes = linhaCab.filter(c => MESES_VALIDOS.includes(String(c).toLowerCase().trim()));
+  }
+  // remove cabeçalho das linhas de dados
+  let linhas = todasLinhas.filter(cols => {
+    const j = cols.join(' ').toLowerCase();
+    return !(j.includes('cliente') && (j.includes('variação')||j.includes('variacao')||MESES_VALIDOS.some(m=>j.includes(m))));
+  });
+  // detecta se a 1ª coluna é "Dia de Faturamento" (número) em vez do cliente
+  let offsetCliente = 0;
+  const amostra = linhas.slice(0, 10);
+  const primeiraNumerica = amostra.filter(c => c.length>=2 && /^\d+$/.test(String(c[0]).trim()) && !/^\d+$/.test(String(c[1]).trim())).length;
+  if (amostra.length && primeiraNumerica >= Math.ceil(amostra.length*0.6)) offsetCliente = 1;
+  // primeira coluna (após offset) = cliente; demais = valores
   const registros = linhas.map(cols => {
-    const cliente = cols[0];
-    const valores = cols.slice(1).map(v => { let s=String(v).replace(/[^\d,.-]/g,'').replace(/\./g,'').replace(',','.'); const n=parseFloat(s); return isNaN(n)?0:n; });
+    const cliente = cols[offsetCliente];
+    let valores = cols.slice(offsetCliente+1).map(v => { let s=String(v).replace(/[^\d,.-]/g,'').replace(/\./g,'').replace(',','.'); const n=parseFloat(s); return isNaN(n)?0:n; });
+    // remove a última coluna se for a "Variação" (geralmente -100, 0, etc — não é mês)
+    if (mesesNomes.length && valores.length > mesesNomes.length) valores = valores.slice(0, mesesNomes.length);
     return { cliente, valores };
-  }).filter(r => r.cliente && r.cliente.length>2);
+  }).filter(r => r.cliente && r.cliente.length>2 && !/^\d+$/.test(r.cliente));
   if (!registros.length) { msg.innerHTML='<div class="sem-acesso" style="margin-top:10px;">Não consegui ler nenhuma linha. Verifique o formato.</div>'; return; }
+  if (!mesesNomes.length) { msg.innerHTML='<div class="sem-acesso" style="margin-top:10px;">Não achei os nomes dos meses. <b>Cole junto a linha de cabeçalho</b> (a que tem Cliente, Abril, Maio, Junho...) pra eu saber quais meses são.</div>'; return; }
   msg.innerHTML = '<div style="text-align:center;padding:10px;color:var(--cinza-500);">Processando merge...</div>';
   try {
     const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
-      acao:'importarVariacao', token: sessaoToken, dados:{ registros }
+      acao:'importarVariacao', token: sessaoToken, dados:{ registros, meses: mesesNomes }
     })});
     const r = await resp.json();
     if (!r.ok) { msg.innerHTML=`<div class="sem-acesso">${r.erro||'verifique se o Apps Script foi republicado.'}</div>`; return; }
@@ -3734,7 +3754,9 @@ function filtraCanc() {
   if (window._modoCanc === 'lista') {
     let html = '<div class="lista-cli">';
     lista.slice(0,300).forEach(c => {
-      html += `<div class="lista-cli-item" style="grid-template-columns:1fr auto auto;">
+      const cnpjC = String(c['CNPJ']||'').replace(/'/g,'');
+      const nomeC = String(c['CLIENTE']||'').replace(/'/g,"\\'");
+      html += `<div class="lista-cli-item" style="grid-template-columns:1fr auto auto;cursor:pointer;" onclick="abrirFicha('${cnpjC}','${nomeC}')">
         <div><b style="color:var(--cinza-900);">${c['CLIENTE']||'—'}</b><br><span style="color:var(--cinza-500);font-size:12px;">${c['MOTIVO']||'Motivo não informado'}</span></div>
         <span style="color:var(--cinza-600);">${fmtDataBR(c['DATA DE CANCELAMENTO'])}</span>
         <span style="color:var(--vermelho);font-weight:600;">${c['CONSULTOR']||''}</span>
@@ -3746,7 +3768,9 @@ function filtraCanc() {
   if (!lista.length) { res.innerHTML = '<div class="sem-acesso">Nenhum cancelamento com esses filtros.</div>'; return; }
   let html = '<div class="grid-cards">';
   lista.slice(0,150).forEach(c => {
-    html += `<div class="card-cli cancelado" style="cursor:default;">
+    const cnpjC = String(c['CNPJ']||'').replace(/'/g,'');
+    const nomeC = String(c['CLIENTE']||'').replace(/'/g,"\\'");
+    html += `<div class="card-cli cancelado" style="cursor:pointer;" onclick="abrirFicha('${cnpjC}','${nomeC}')">
       <div class="card-cli-topo">
         <div class="card-cli-avatar" style="background:var(--vermelho-bg);color:var(--vermelho);">${iniciais(c['CLIENTE'])}</div>
         <div style="min-width:0;">
