@@ -1310,6 +1310,7 @@ async function salvarContato(cnpj, cliente) {
   const nome = document.getElementById('ct-nome').value;
   if (!nome) { document.getElementById('ct-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Informe o nome.</div>'; return; }
   const campos = {
+    'ID': 'CT'+Date.now(),
     'CNPJ': cnpj, 'CLIENTE': cliente, 'NOME': nome,
     'CARGO': document.getElementById('ct-cargo').value,
     'TELEFONE': document.getElementById('ct-tel').value,
@@ -1330,6 +1331,21 @@ async function salvarContato(cnpj, cliente) {
       if (corpo && typeof renderAbaContatos==='function') renderAbaContatos(corpo);
     }, 1000);
   } catch(e) { document.getElementById('ct-msg').innerHTML='<div class="sem-acesso">Erro de conexão.</div>'; }
+}
+
+// ===== EXCLUIR CONTATO =====
+async function excluirContato(id, nomeContato, cnpj, nomeCliente) {
+  if (!confirm(`Excluir o contato "${nomeContato}"?`)) return;
+  try {
+    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
+      acao:'excluirLinha', token: sessaoToken, dados:{ aba:'Contatos', id: id, nome: nomeContato, cnpj: cnpj }
+    })});
+    const r = await resp.json();
+    if (!r.ok) { alert('Erro ao excluir: '+(r.erro||'verifique se o Apps Script foi republicado.')); return; }
+    // recarrega a aba de contatos
+    const corpo = document.getElementById('ficha-corpo');
+    if (corpo && typeof renderAbaContatos==='function') renderAbaContatos(corpo);
+  } catch(e) { alert('Erro de conexão.'); }
 }
 
 // ===== IMPRIMIR FICHA COMPLETA =====
@@ -1760,8 +1776,9 @@ async function renderAbaContatos(corpo) {
     html += `<div style="text-align:center;color:var(--cinza-500);padding:24px;font-size:13px;">Nenhum contato cadastrado ainda.</div>`;
   } else {
     html += contatos.map(ct=>`
-      <div style="background:white;border:1px solid var(--cinza-200);border-radius:10px;padding:12px;margin-bottom:8px;">
-        <div style="font-size:14px;font-weight:600;color:var(--cinza-800);">${ct['NOME']||'—'}${ct['CARGO']?`<span style="font-size:12px;font-weight:400;color:var(--cinza-500);"> · ${ct['CARGO']}</span>`:''}</div>
+      <div style="background:white;border:1px solid var(--cinza-200);border-radius:10px;padding:12px;margin-bottom:8px;position:relative;">
+        <button onclick="excluirContato('${String(ct['ID']||'').replace(/'/g,'')}','${String(ct['NOME']||'').replace(/'/g,"")}','${cnpj}','${String(nome).replace(/'/g,'')}')" title="Excluir contato" style="position:absolute;top:10px;right:10px;background:none;border:none;color:var(--vermelho);cursor:pointer;font-size:16px;"><i class="ti ti-trash"></i></button>
+        <div style="font-size:14px;font-weight:600;color:var(--cinza-800);padding-right:24px;">${ct['NOME']||'—'}${ct['CARGO']?`<span style="font-size:12px;font-weight:400;color:var(--cinza-500);"> · ${ct['CARGO']}</span>`:''}</div>
         <div style="font-size:12.5px;color:var(--cinza-600);margin-top:4px;">
           ${ct['TELEFONE']?`<i class="ti ti-phone" style="font-size:13px;vertical-align:-1px;"></i> ${ct['TELEFONE']}`:''}
           ${ct['EMAIL']?`${ct['TELEFONE']?' · ':''}<i class="ti ti-mail" style="font-size:13px;vertical-align:-1px;"></i> ${ct['EMAIL']}`:''}
