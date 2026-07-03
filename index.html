@@ -663,16 +663,46 @@ function recarregarDados() {
 
 // ---- Buscar dados de uma aba do Sheets ----
 const _cacheBusca = {};
+// ===== CACHE DE SESSÃO (seguro) =====
+// Guarda o resultado de cada aba pra não rebuscar no Google a cada troca de tela.
+// Segurança: (1) qualquer operação de ESCRITA limpa todo o cache automaticamente
+// (ver enviarAcao abaixo), e (2) o cache expira em 90s como rede de segurança.
+// Assim ganhamos velocidade sem o risco de mostrar dado velho após salvar.
+const _cacheDados = {};
+const _CACHE_TTL = 90000; // 90 segundos
 async function buscarDados(aba, forcar) {
-  // SEM CACHE: sempre lê do Google na hora. O cache anterior fazia dados recém-salvos
-  // "sumirem" da tela (a tela relia a versão velha). Ler fresco é o correto e seguro.
+  const agora = Date.now();
+  const c = _cacheDados[aba];
+  if (!forcar && c && (agora - c.t < _CACHE_TTL)) {
+    return c.dados;
+  }
   const resp = await fetch(API_URL, {
     method: 'POST',
     body: JSON.stringify({ acao: 'dados', token: sessaoToken, aba: aba })
   });
-  return await resp.json();
+  const dados = await resp.json();
+  _cacheDados[aba] = { t: agora, dados: dados };
+  return dados;
 }
-function limparCacheBusca(){ /* mantido por compatibilidade; não há mais cache */ }
+function limparCacheBusca(){ for (const k in _cacheDados) delete _cacheDados[k]; }
+
+// Interceptador global: qualquer POST para a API com ação de escrita limpa o cache
+// automaticamente. Assim, todas as ~30 operações de salvar/editar/excluir já existentes
+// invalidam o cache sem eu precisar alterar cada uma (à prova de esquecimento).
+(function(){
+  const _fetchOriginal = window.fetch;
+  window.fetch = function(url, opts){
+    try {
+      if (opts && opts.body && typeof opts.body === 'string' && String(url).indexOf('script.google.com') !== -1) {
+        const corpo = JSON.parse(opts.body);
+        if (corpo && corpo.acao && corpo.acao !== 'dados' && corpo.acao !== 'login') {
+          limparCacheBusca();
+        }
+      }
+    } catch(e) { /* se não der pra ler o corpo, ignora */ }
+    return _fetchOriginal.apply(this, arguments);
+  };
+})();
 
 // ---- Iniciar app após login ----
 function iniciarApp() {
