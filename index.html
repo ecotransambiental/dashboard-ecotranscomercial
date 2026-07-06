@@ -395,7 +395,7 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbwpcfQ8LV-zZj31uHiOZT5n
 // A chave deve estar RESTRITA ao domínio ecotransambiental.github.io
 // e só com as APIs Geocoding e Routes ativadas.
 // ============================================================
-const GOOGLE_MAPS_KEY = 'AIzaSyC4oIgrSglCR1TckpKjE7DlSGLLCWSvddM';
+const GOOGLE_MAPS_KEY = 'COLE_SUA_CHAVE_AQUI';
 
 // ============================================================
 // CONFIGURAÇÃO — perfis e acessos
@@ -462,28 +462,42 @@ const MODULOS = [
       { id: 'reg-renov',  nome: 'Renovados',    icone: 'ti-refresh' },
     ]
   },
+  {
+    id: 'financeiro', nome: 'Financeiro', icone: 'ti-report-money',
+    subs: [
+      { id: 'fin-relatorios',  nome: 'Relatórios (upload)', icone: 'ti-upload' },
+      { id: 'fin-saude',       nome: 'Saúde Financeira',    icone: 'ti-heart-rate-monitor' },
+      { id: 'fin-pagar',       nome: 'Contas a Pagar',      icone: 'ti-arrow-up-right' },
+      { id: 'fin-receber',     nome: 'Contas a Receber',    icone: 'ti-arrow-down-left' },
+      { id: 'fin-coletas',     nome: 'Coletas (semanal)',   icone: 'ti-recycle' },
+      { id: 'fin-faturamento', nome: 'Faturamento',         icone: 'ti-chart-line' },
+    ]
+  },
 ];
 
 // Quais módulos cada perfil enxerga
 const ACESSO = {
-  admin:       ['crm','carteira','agenda','regula'],          // Mafe, Andrea — tudo
-  diretor:     ['crm','carteira','agenda','regula'],          // Roberto — tudo
+  admin:       ['crm','carteira','agenda','regula','financeiro'],   // Mafe, Andrea — tudo
+  diretor:     ['crm','carteira','agenda','regula','financeiro'],   // Roberto — tudo
   supervisor:  ['crm','carteira','agenda'],                  // Rogério — sem SP Regula; financeiro bloqueado (ver SUBMODULOS_BLOQUEADOS)
   assistente:  ['crm','carteira','agenda','regula'],          // Danielly — CRM de todos; carteira só os próprios + "quem atende"; SP Regula completo
   vendedor:    ['crm','carteira','agenda'],                // Bruna, Elaine — CRM, Carteira (só os próprios clientes/contratos) e Agenda
-  financeiro:  ['carteira'],                                  // Joyce — só carteira, sem CRM
+  financeiro:  ['carteira','financeiro'],                     // Joyce — carteira + módulo financeiro
 };
 
 // Submódulos que cada perfil NÃO pode ver (controle fino dentro do módulo)
 // Valores do mês (faturamento, visão geral, gráficos) = só Roberto(diretor), Andrea/Mafe(admin), Joyce(financeiro)
 const SUBMODULOS_BLOQUEADOS = {
-  // Rogério: vê só os próprios (Clientes/Contratos/Buscar) + tabela "quem atende quem"; sem financeiro/visão/cancelados
-  supervisor: ['cart-faturamento','cart-visao','cart-graficos','cart-reajustes','cart-inadimplencia','cart-aprovacoes','cart-cancelados'],
+  // Rogério: vê só os próprios (Clientes/Contratos/Buscar) + tabela "quem atende quem"; sem financeiro/visão/cancelados.
+  // Resultados Comerciais (crm-resultados) = só Mafe, Andrea, Roberto.
+  supervisor: ['cart-faturamento','cart-visao','cart-graficos','cart-reajustes','cart-inadimplencia','cart-aprovacoes','cart-cancelados','crm-resultados'],
   // Danielly: idem Rogério
-  assistente: ['cart-faturamento','cart-visao','cart-graficos','cart-reajustes','cart-inadimplencia','cart-aprovacoes','cart-cancelados'],
+  assistente: ['cart-faturamento','cart-visao','cart-graficos','cart-reajustes','cart-inadimplencia','cart-aprovacoes','cart-cancelados','crm-resultados'],
   // Bruna e Elaine: na carteira só veem Clientes e Contratos (dos próprios) e Buscar; nada de financeiro/visão/cancelados
   vendedor:   ['cart-faturamento','cart-visao','cart-graficos','cart-reajustes','cart-inadimplencia','cart-cancelados','cart-aprovacoes',
                'crm-relatorios','crm-resultados'],
+  // Joyce (financeiro): dentro do módulo Financeiro, NÃO vê Saúde Financeira, Contas a Pagar nem Contas a Receber
+  financeiro: ['fin-saude','fin-pagar','fin-receber'],
 };
 
 // Perfis que veem SOMENTE os próprios dados
@@ -507,6 +521,12 @@ const LISTA_FONTES = ["Cliente","Google","Indicação","Licitação","Prospecç�
 const LISTA_MOTIVOS_PERDA = ["Baixo Volume","CADRI Coletivo","Concorrência/Bid/Licitação","Demanda Encerrada","Escopo Inviável","Falta de Informação","Horário Incompatível","Menor Preço","Preço","Rota Inviável","Sem Retorno do Cliente","Terceirização Serviço","Outros"];
 const LISTA_CATEGORIA_RESIDUO = ["Classe I","Classe II","Classe I + Classe II","Assessoria"];
 
+// quem pode editar o percentual/valor de um reajuste: admin/diretor (mafe, andrea, roberto) + joyce
+function podeEditarReajuste() {
+  if (!usuarioAtual) return false;
+  const id = String(usuarioAtual.id||'').toLowerCase();
+  return ['mafe','andrea','roberto','joyce'].includes(id);
+}
 // filtro do CRM (leads, atividades, agenda): só as vendedoras veem apenas os próprios
 function veSomenteProprios() {
   if (!usuarioAtual) return false;
@@ -815,6 +835,7 @@ async function renderConteudo(subId, subNome) {
   if (subId === 'crm-relatorios'){ renderRelatoriosCRM(area); return; }
   if (subId === 'crm-resultados'){ renderResultadosCRM(area); return; }
   if (subId === 'cart-cancelados'){ renderCancelados(area); return; }
+  if (subId && subId.indexOf('fin-')===0){ renderFinanceiro(area, subId); return; }
   if (subId === 'cart-contratos'){ renderContratos(area); return; }
   if (subId === 'cart-quematende'){ renderQuemAtende(area); return; }
   if (subId === 'ag-dia' || subId === 'ag-mes' || subId === 'ag-semana'){ renderAgenda(area, subId.replace('ag-','')); return; }
@@ -1710,19 +1731,77 @@ async function renderAbaReajustes(corpo) {
   </div>`;
   if (!lista.length) { corpo.innerHTML = btnAdd + `<div style="text-align:center;color:var(--cinza-500);padding:24px;font-size:13px;">Nenhum reajuste registrado para este cliente.</div>`; return; }
   let html = btnAdd + '<div class="lista-cli">';
-  lista.forEach(c => {
+  lista.forEach((c, idx) => {
     const ant = parseMoedaReaj(c['PREÇO ANTERIOR']);
     const novo = parseMoedaReaj(c['VALOR REAJUSTADO']);
     let pct = null;
     if (c['ALIQUOTA']!=null && c['ALIQUOTA']!=='') pct = parseFloat(c['ALIQUOTA'])*100;
     else if (ant!=null && ant!==0 && novo!=null) pct = (novo-ant)/ant*100;
     const pctTxt = pct!=null ? `<span style="background:var(--verde-claro-bg);color:var(--verde-escuro);border-radius:5px;padding:1px 7px;font-size:12px;font-weight:600;">${pct.toFixed(1).replace('.',',')}%</span>` : '';
+    const btnEditar = podeEditarReajuste()
+      ? `<button onclick='abrirEditarReajuste(${JSON.stringify(c).replace(/'/g,"&#39;")})' title="Editar %" style="background:none;border:none;color:var(--verde-medio);cursor:pointer;font-size:15px;margin-left:6px;"><i class="ti ti-edit"></i></button>`
+      : '';
     html += `<div class="lista-cli-item" style="grid-template-columns:1fr auto;cursor:default;">
-      <div><b style="color:var(--cinza-900);">${c['TP DE SERVIÇO']||'Serviço'}</b> ${pctTxt}<br><span style="color:var(--cinza-500);font-size:12px;">${c['ÍNDICE']||''} · último ${fmtDataBR(c['DATA ÚLTIMO REAJUSTE ']||c['DATA ÚLTIMO REAJUSTE'])}</span></div>
+      <div><b style="color:var(--cinza-900);">${c['TP DE SERVIÇO']||'Serviço'}</b> ${pctTxt}${btnEditar}<br><span style="color:var(--cinza-500);font-size:12px;">${c['ÍNDICE']||''} · último ${fmtDataBR(c['DATA ÚLTIMO REAJUSTE ']||c['DATA ÚLTIMO REAJUSTE'])}</span></div>
       <div style="text-align:right;"><span style="color:var(--cinza-500);font-size:12px;">${fmtMoeda(c['PREÇO ANTERIOR'])} →</span><br><b style="color:var(--verde-escuro);">${fmtMoeda(c['VALOR REAJUSTADO'])}</b></div>
     </div>`;
   });
   corpo.innerHTML = html + '</div>';
+}
+
+// abre o formulário de edição do % de um reajuste (só admin/diretor + joyce)
+function abrirEditarReajuste(reaj) {
+  if (!podeEditarReajuste()) { alert('Você não tem permissão para editar reajustes.'); return; }
+  const ant = parseMoedaReaj(reaj['PREÇO ANTERIOR']) || 0;
+  let pctAtual = '';
+  if (reaj['ALIQUOTA']!=null && reaj['ALIQUOTA']!=='') pctAtual = (parseFloat(reaj['ALIQUOTA'])*100).toFixed(2);
+  const ov = document.createElement('div');
+  ov.id = 'edit-reaj-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999;';
+  ov.innerHTML = `
+    <div style="background:white;border-radius:14px;padding:22px;max-width:420px;width:92%;">
+      <div style="font-size:16px;font-weight:700;color:var(--cinza-900);margin-bottom:4px;">Editar reajuste</div>
+      <div style="font-size:13px;color:var(--cinza-500);margin-bottom:14px;">${reaj['CLIENTE']||''} · ${reaj['TP DE SERVIÇO']||''}</div>
+      <div style="background:var(--cinza-100);border-radius:8px;padding:10px;margin-bottom:14px;font-size:13px;color:var(--cinza-700);">
+        Preço anterior: <b>${fmtMoeda(reaj['PREÇO ANTERIOR'])}</b>
+      </div>
+      <label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Novo percentual de reajuste (%)</label>
+      <input type="number" id="er-pct" step="0.01" value="${pctAtual}" oninput="calcNovoValorReaj(${ant})" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;margin-bottom:12px;">
+      <div style="font-size:13px;color:var(--cinza-700);margin-bottom:16px;">Novo valor reajustado: <b id="er-novovalor" style="color:var(--verde-escuro);">—</b></div>
+      <div id="er-msg"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button onclick="document.getElementById('edit-reaj-overlay').remove()" style="padding:9px 16px;border:1.5px solid var(--cinza-300);background:white;border-radius:8px;cursor:pointer;">Cancelar</button>
+        <button class="ficha-btn-primario" onclick='salvarEdicaoReajuste(${JSON.stringify(reaj).replace(/'/g,"&#39;")}, ${ant})'><i class="ti ti-check"></i> Salvar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  calcNovoValorReaj(ant);
+}
+function calcNovoValorReaj(ant) {
+  const pct = parseFloat(document.getElementById('er-pct').value) || 0;
+  const novo = ant * (1 + pct/100);
+  document.getElementById('er-novovalor').textContent = fmtMoeda(novo);
+}
+async function salvarEdicaoReajuste(reaj, ant) {
+  const pct = parseFloat(document.getElementById('er-pct').value);
+  if (isNaN(pct)) { document.getElementById('er-msg').innerHTML='<div class="sem-acesso" style="margin-bottom:10px;">Informe um percentual válido.</div>'; return; }
+  const novoValor = ant * (1 + pct/100);
+  const dif = novoValor - ant;
+  document.getElementById('er-msg').innerHTML = '<div style="text-align:center;padding:8px;color:var(--cinza-500);">Salvando...</div>';
+  try {
+    // salvar por chave CNPJ + TP DE SERVIÇO (identifica a linha exata do reajuste)
+    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
+      acao:'salvar', token: sessaoToken, aba:'Reajustes', chaveExtra:'TP DE SERVIÇO',
+      dados:{
+        'CNPJ': reaj['CNPJ'], 'TP DE SERVIÇO': reaj['TP DE SERVIÇO'],
+        'ALIQUOTA': (pct/100), 'VALOR REAJUSTADO': novoValor.toFixed(2), 'DIFERENÇA R$': dif.toFixed(2)
+      }
+    })});
+    const r = await resp.json();
+    if (!r.ok) { document.getElementById('er-msg').innerHTML=`<div class="sem-acesso">${r.erro||'Verifique se o Apps Script foi republicado.'}</div>`; return; }
+    document.getElementById('edit-reaj-overlay').remove();
+    const corpo = document.getElementById('ficha-corpo'); if (corpo) renderAbaReajustes(corpo);
+  } catch(e) { document.getElementById('er-msg').innerHTML='<div class="sem-acesso">Erro de conexão.</div>'; }
 }
 
 async function renderAbaFaturamento(corpo) {
@@ -5971,7 +6050,39 @@ async function gerarRelatorioPDF() {
 
   const win = window.open('', '_blank');
   win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Relatório Ecotrans</title>
-    <style>body{font-family:Arial,sans-serif;color:#222;padding:30px;} h1{color:#2d5a3d;font-size:20px;margin:0;} .sub{color:#666;font-size:13px;margin:4px 0 20px;} table{width:100%;border-collapse:collapse;} th{background:#2d5a3d;color:white;text-align:left;padding:8px 10px;font-size:12px;}</style>
+    <style>body{font-family:Arial,sans-serif;color:#222;padding:30px;} h1{color:#2d5a3d;font-size:20px;margin:0;} .sub{color:#666;font-size:13px;margin:4px 0 20px;} table{width:100%;border-collapse:collapse;} th{background:#2d5a3d;color:white;text-align:left;padding:8px 10px;font-size:12px;}
+/* ===== estilos do módulo Financeiro (escopados em #fin-wrap) ===== */
+#fin-wrap .card{background:var(--branco);border:1px solid var(--cinza-200);border-radius:12px;padding:18px;margin-bottom:16px;}
+#fin-wrap .card h2{font-family:var(--fonte-display);font-size:16px;color:var(--verde-escuro);margin-bottom:12px;}
+#fin-wrap .upload-box{border:2px dashed var(--cinza-300);border-radius:12px;padding:20px;text-align:center;background:var(--branco);margin-bottom:12px;}
+#fin-wrap .upload-box.ok{border-color:var(--verde-medio);background:var(--verde-claro-bg);}
+#fin-wrap .upload-box label{cursor:pointer;color:var(--verde-escuro);font-weight:500;}
+#fin-wrap .upload-box input{display:none;}
+#fin-wrap .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px;}
+#fin-wrap .kpi{background:var(--branco);border:1px solid var(--cinza-200);border-radius:12px;padding:14px;border-top:3px solid var(--verde-medio);}
+#fin-wrap .kpi .num{font-family:var(--fonte-display);font-size:24px;font-weight:700;color:var(--verde-escuro);}
+#fin-wrap .kpi .lbl{font-size:12px;color:var(--cinza-600);margin-top:2px;}
+#fin-wrap .kpi.verm{border-top-color:var(--vermelho);} .kpi.verm .num{color:var(--vermelho);}
+#fin-wrap .kpi.roxo{border-top-color:var(--roxo);} .kpi.roxo .num{color:var(--roxo);}
+#fin-wrap table{width:100%;border-collapse:collapse;font-size:13px;}
+#fin-wrap th{background:var(--verde-escuro);color:#fff;padding:8px 10px;text-align:left;font-weight:600;font-size:12px;}
+#fin-wrap td{padding:7px 10px;border-bottom:1px solid var(--cinza-100);}
+#fin-wrap .pos{color:var(--verde-medio);font-weight:600;} .neg{color:var(--vermelho);font-weight:600;}
+#fin-wrap .filtros{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;}
+#fin-wrap select, #fin-wrap button.btn{font-family:var(--fonte-corpo);font-size:13px;padding:8px 12px;border:1.5px solid var(--cinza-300);border-radius:8px;background:#fff;cursor:pointer;}
+#fin-wrap button.btn{background:var(--verde-medio);color:#fff;border:none;font-weight:500;}
+#fin-wrap button.btn.sec{background:#fff;color:var(--verde-escuro);border:1.5px solid var(--verde-medio);}
+#fin-wrap .clicavel{cursor:pointer;} .clicavel:hover{text-decoration:underline;}
+#fin-wrap .vazio{text-align:center;color:var(--cinza-500);padding:30px;font-size:14px;}
+#fin-wrap .barra{height:8px;background:var(--cinza-100);border-radius:4px;overflow:hidden;margin-top:4px;}
+#fin-wrap .barra > div{height:100%;background:var(--verde-medio);}
+#fin-wrap .aviso{background:var(--amarelo-bg);border-radius:8px;padding:10px 12px;font-size:13px;color:#8a6d00;margin-bottom:12px;}
+#fin-wrap .badge{display:inline-block;font-size:10px;padding:1px 7px;border-radius:4px;font-weight:600;}
+#fin-wrap table{width:100%;border-collapse:collapse;font-size:13px;}
+#fin-wrap th{background:var(--verde-escuro,#2d5a3d);color:#fff;text-align:left;padding:8px 10px;font-size:12px;}
+#fin-wrap td{border-bottom:1px solid #eee;padding:7px 10px;}
+#fin-wrap h2{font-size:16px;color:var(--verde-escuro,#2d5a3d);margin-bottom:10px;}
+</style>
     </head><body>
     <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #8bc34a;padding-bottom:12px;margin-bottom:16px;">
       <div><h1>Ecotrans Ambiental</h1><div class="sub">Relatório de atividades comerciais</div></div>
@@ -6036,7 +6147,8 @@ function calcResultados() {
         <div class="kpi-card" style="border-top:3px solid #BA7517;"><div class="kpi-num" style="color:#BA7517;">${emProposta}</div><div class="kpi-lbl">Proposta enviada</div></div>
         <div class="kpi-card" style="border-top:3px solid var(--verde-ok);"><div class="kpi-num" style="color:var(--verde-ok);">${emFechado}</div><div class="kpi-lbl">Fechado</div></div>
         <div class="kpi-card" style="border-top:3px solid var(--vermelho);"><div class="kpi-num" style="color:var(--vermelho);">${emDeclinado}</div><div class="kpi-lbl">Declinado</div></div>
-      </div>`;
+      </div>
+      ${blocoFechamentosComissao()}`;
     return;
   }
 
@@ -6075,7 +6187,41 @@ function calcResultados() {
         <tr style="border-bottom:1px solid var(--cinza-100);"><td style="padding:8px 0;color:var(--cinza-700);">Movidos para "Fechado"</td><td style="text-align:right;font-weight:600;color:var(--verde-ok);">${fechados}</td></tr>
         <tr><td style="padding:8px 0;color:var(--cinza-700);">Prospecções no período</td><td style="text-align:right;font-weight:600;">${totalProspec}</td></tr>
       </table>
+    </div>
+    ${blocoFechamentosComissao()}`;
+}
+
+// bloco de fechamentos vindos da planilha de comissões (processada no módulo Financeiro).
+// Mostra fechamentos por consultor + aditivos/recicláveis à parte. Se não há dados, orienta subir.
+function blocoFechamentosComissao() {
+  let fech = [];
+  try { if (typeof FIN_carregar==='function') { FIN_carregar(); fech = (typeof FINdados!=='undefined' && FINdados.fechamentos) ? FINdados.fechamentos : []; } } catch(e) {}
+  if (!fech.length) {
+    return `<div style="background:white;border:1px solid var(--cinza-200);border-radius:12px;padding:20px;margin-top:18px;">
+      <h3 style="font-family:var(--fonte-display);font-size:15px;margin:0 0 8px;">Fechamentos (planilha de comissões)</h3>
+      <div style="background:var(--amarelo-bg);border-radius:8px;padding:12px;font-size:13px;color:#8a6d00;">Para ver os fechamentos aqui, suba a planilha de comissões no módulo <b>Financeiro › Relatórios</b>.</div>
     </div>`;
+  }
+  const contam = fech.filter(f=>!f.foraDoTotal);
+  const fora = fech.filter(f=>f.foraDoTotal);
+  const totVal = contam.reduce((s,x)=>s+(x.valor||0),0);
+  const porCons = {};
+  contam.forEach(f=>{ porCons[f.consultor]=porCons[f.consultor]||{n:0,v:0}; porCons[f.consultor].n++; porCons[f.consultor].v+=(f.valor||0); });
+  const linhasCons = Object.entries(porCons).sort((a,b)=>b[1].v-a[1].v)
+    .map(([c,o])=>`<tr style="border-bottom:1px solid var(--cinza-100);"><td style="padding:8px 0;">${c}</td><td style="text-align:right;">${o.n}</td><td style="text-align:right;font-weight:600;">${fmtMoeda(o.v)}</td></tr>`).join('');
+  const foraTxt = fora.length ? `<div style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--cinza-300);">
+      <div style="font-size:13px;color:var(--roxo);font-weight:600;margin-bottom:6px;">Aditivos e Eventuais Recicláveis (${fora.length}) — não somam ao total</div>
+      <div style="font-size:12px;color:var(--cinza-600);">Total à parte: ${fmtMoeda(fora.reduce((s,x)=>s+(x.valor||0),0))}</div>
+    </div>` : '';
+  return `<div style="background:white;border:1px solid var(--cinza-200);border-radius:12px;padding:20px;margin-top:18px;">
+    <h3 style="font-family:var(--fonte-display);font-size:15px;margin:0 0 4px;">Fechamentos (planilha de comissões)</h3>
+    <div style="font-size:12px;color:var(--cinza-500);margin-bottom:12px;">${contam.length} fechamentos · ${fmtMoeda(totVal)}</div>
+    <table style="width:100%;font-size:13px;border-collapse:collapse;">
+      <tr style="border-bottom:2px solid var(--cinza-200);"><th style="text-align:left;padding:8px 0;">Consultor</th><th style="text-align:right;">Fechamentos</th><th style="text-align:right;">Valor</th></tr>
+      ${linhasCons}
+    </table>
+    ${foraTxt}
+  </div>`;
 }
 
 // ---- Abrir detalhes de um lead (clique no card do Kanban) ----
@@ -6386,6 +6532,889 @@ async function salvarCancelamento(cnpj, cliente) {
 
 // ---- Retomar sessão ao abrir ----
 checarSessao();
+
+
+
+// ============ CÓDIGO DO MÓDULO FINANCEIRO ============
+// ============ ESTADO (guardado no navegador, deduplica por Título) ============
+let FINdados = { pagar:[], receber:[], recebeReceb:[], fechamentos:[], coletas:[], faturamento:[] };
+const FIN_LS_KEY = 'ecotrans_fin_testes';
+
+function finSalvar(){ try{ localStorage.setItem(FIN_LS_KEY, JSON.stringify(FINdados)); }catch(e){} }
+function finCarregar(){
+  try{ const d=localStorage.getItem(FIN_LS_KEY); if(d) FINdados=JSON.parse(d); }catch(e){}
+  // garante que todos os campos existem (evita erro se o dado salvo é de uma versão antiga)
+  if(!FINdados || typeof FINdados!=='object') FINdados={};
+  if(!Array.isArray(FINdados.pagar)) FINdados.pagar=[];
+  if(!Array.isArray(FINdados.receber)) FINdados.receber=[];
+  if(!Array.isArray(FINdados.recebeReceb)) FINdados.recebeReceb=[];
+  if(!Array.isArray(FINdados.fechamentos)) FINdados.fechamentos=[];
+  if(!Array.isArray(FINdados.coletas)) FINdados.coletas=[];
+  if(!Array.isArray(FINdados.faturamento)) FINdados.faturamento=[];
+}
+function FIN_limparTudo(){ if(confirm('Apagar todos os FINdados de teste e recomeçar?')){ FINdados={pagar:[],receber:[],recebeReceb:[],fechamentos:[],coletas:[],faturamento:[]}; finSalvar(); finAtualizarTudo(); } }
+
+function finFmtM(v){ const n=parseFloat(v)||0; return 'R$ '+n.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+// converte valor que pode vir como número (já certo) ou texto BR ("1.234,56")
+function finParseValorBR(v){
+  if(typeof v==='number') return v; // já é número, usa direto
+  let s=String(v||'').trim(); if(!s) return 0;
+  // texto BR: remove separador de milhar (.) e troca vírgula decimal por ponto
+  if(s.indexOf(',')>=0) s=s.replace(/\./g,'').replace(',','.');
+  s=s.replace(/[^\d.-]/g,'');
+  return parseFloat(s)||0;
+}
+function finLc(s){ return String(s==null?'':s).replace(/\u00a0/g,' ').trim(); }
+function finNormNome(s){ return finLc(s).toUpperCase().replace(/\([^)]*\)/g,'').replace(/[^A-Z0-9 ]/g,'').replace(/\b(LTDA|SA|EIRELI|ME|EPP|THE|NEW|DO BRASIL)\b/g,'').replace(/\s+/g,' ').trim().slice(0,18); }
+
+const FIN_MESES={'janeiro':'01','fevereiro':'02','março':'03','marco':'03','abril':'04','maio':'05','junho':'06','julho':'07','agosto':'08','setembro':'09','outubro':'10','novembro':'11','dezembro':'12'};
+const FIN_MESNOME={'01':'Jan','02':'Fev','03':'Mar','04':'Abr','05':'Mai','06':'Jun','07':'Jul','08':'Ago','09':'Set','10':'Out','11':'Nov','12':'Dez'};
+function finCompYM(v){ const s=finLc(v).toLowerCase(); const m=s.match(/([a-zç]+)\/(\d{4})/); return (m&&FIN_MESES[m[1]])?`${m[2]}-${FIN_MESES[m[1]]}`:''; }
+function finRotMes(ym){ if(!ym) return '—'; const [a,m]=ym.split('-'); return (FIN_MESNOME[m]||m)+'/'+a.slice(2); }
+
+function finTrocarAba(el, id){
+  document.querySelectorAll('.aba').forEach(a=>a.classList.remove('ativa'));
+  el.classList.add('ativa');
+  document.querySelectorAll('.painel').forEach(p=>p.classList.remove('ativo'));
+  document.getElementById('p-'+id).classList.add('ativo');
+  if(id==='saude') FIN_renderSaude();
+  if(id==='pagar') FIN_renderPagar();
+  if(id==='receber') FIN_renderReceber();
+  if(id==='resultados') FIN_renderResultados();
+  if(id==='coletas') FIN_renderColetas();
+  if(id==='faturamento') FIN_renderFaturamentoVar();
+}
+
+// ============ LEITURA DOS ARQUIVOS (com deduplicação) ============
+function FIN_lerArquivo(input, tipo){
+  const file = input.files[0]; if(!file) return;
+  const st = document.getElementById('st-'+tipo);
+  st.textContent = 'Lendo...';
+  // relatório de serviços é CSV (latin-1) — lê como texto
+  if (tipo === 'servicos') {
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        FIN_processarServicos(e.target.result, st);
+        finSalvar(); finAtualizarTudo();
+        document.getElementById('ub-servicos').classList.add('ok');
+      } catch(err) { st.innerHTML='Erro ao ler: '+err.message; st.style.color='var(--vermelho)'; }
+    };
+    reader.readAsText(file, 'ISO-8859-1'); // latin-1
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = async e => {
+    try{
+      const arr = new Uint8Array(e.target.result);
+      let wb;
+      try {
+        wb = XLSX.read(arr, {type:'array', cellStyles:false, cellHTML:false, cellFormula:false, sheetStubs:false, bookVBA:false});
+      } catch(err1) {
+        wb = await FIN_lerViaRecompactacaoNativa(arr);
+      }
+      if(tipo==='pagar') FIN_processarPagar(wb, st);
+      else if(tipo==='receber') FIN_processarReceber(wb, st, 'receber');
+      else if(tipo==='recebeReceb') FIN_processarReceber(wb, st, 'recebeReceb');
+      else if(tipo==='comissao') FIN_processarComissao(wb, st, file.name);
+      else if(tipo==='faturamento') FIN_processarFaturamentoVar(wb, st);
+      finSalvar(); finAtualizarTudo();
+      document.getElementById('ub-'+tipo).classList.add('ok');
+    }catch(err){
+      st.innerHTML='Não consegui ler o arquivo. <b>Dica:</b> abra no Excel/Google Sheets e use "Salvar como" → .xlsx, depois suba de novo.<br><span style="font-size:11px;">Detalhe: '+err.message+'</span>';
+      st.style.color='var(--vermelho)';
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// Recompacta um .xlsx "meio quebrado" sem depender de biblioteca externa.
+async function FIN_lerViaRecompactacaoNativa(arr){
+  const arquivos = await FIN_descompactarZipNativo(arr);
+  return XLSX.read(FIN_montarZipSimples(arquivos), {type:'array', cellStyles:false, cellFormula:false, bookVBA:false});
+}
+
+// lê as entradas de um ZIP usando DecompressionStream (nativo do navegador)
+async function FIN_descompactarZipNativo(bytes){
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const td = new TextDecoder();
+  const arquivos = {};
+  let i = 0;
+  while (i < bytes.length - 4) {
+    const sig = dv.getUint32(i, true);
+    if (sig !== 0x04034b50) break;
+    const method = dv.getUint16(i+8, true);
+    const compSize = dv.getUint32(i+18, true);
+    const nameLen = dv.getUint16(i+26, true);
+    const extraLen = dv.getUint16(i+28, true);
+    const nameStart = i + 30;
+    const nome = td.decode(bytes.subarray(nameStart, nameStart+nameLen));
+    const dataStart = nameStart + nameLen + extraLen;
+    const comp = bytes.subarray(dataStart, dataStart + compSize);
+    if (!nome.endsWith('/')) {
+      let conteudo;
+      if (method === 0) conteudo = comp.slice();
+      else if (method === 8) conteudo = await FIN_inflaRaw(comp);
+      else conteudo = comp.slice();
+      arquivos[nome] = conteudo;
+    }
+    i = dataStart + compSize;
+  }
+  if (!Object.keys(arquivos).length) throw new Error('não foi possível abrir o arquivo (formato inesperado).');
+  return arquivos;
+}
+
+async function FIN_inflaRaw(bytes){
+  const ds = new DecompressionStream('deflate-raw');
+  const stream = new Response(new Blob([bytes])).body.pipeThrough(ds);
+  const buf = await new Response(stream).arrayBuffer();
+  return new Uint8Array(buf);
+}
+
+// remonta um ZIP simples (tudo STORE) que o SheetJS lê sem problema
+function FIN_montarZipSimples(arquivos){
+  const enc = new TextEncoder();
+  const partes = []; const central = []; let offset = 0; let nCentral = 0;
+  function u16(n){ return [n&255,(n>>8)&255]; }
+  function u32(n){ return [n&255,(n>>8)&255,(n>>16)&255,(n>>24)&255]; }
+  function crc32(buf){ let c=~0; for(let i=0;i<buf.length;i++){ c^=buf[i]; for(let k=0;k<8;k++) c=(c>>>1)^(0xEDB88320&-(c&1)); } return ~c>>>0; }
+  for (const nome in arquivos){
+    const nomeB = enc.encode(nome);
+    const data = arquivos[nome];
+    const crc = crc32(data);
+    const lh = [...u32(0x04034b50),...u16(20),...u16(0),...u16(0),...u16(0),...u16(0),...u32(crc),...u32(data.length),...u32(data.length),...u16(nomeB.length),...u16(0)];
+    partes.push(new Uint8Array(lh), nomeB, data);
+    const ch = [...u32(0x02014b50),...u16(20),...u16(20),...u16(0),...u16(0),...u16(0),...u16(0),...u32(crc),...u32(data.length),...u32(data.length),...u16(nomeB.length),...u16(0),...u16(0),...u16(0),...u16(0),...u32(0),...u32(offset)];
+    central.push(new Uint8Array(ch), nomeB);
+    offset += lh.length + nomeB.length + data.length; nCentral++;
+  }
+  let centralSize=0; central.forEach(p=>centralSize+=p.length);
+  const eocd = new Uint8Array([...u32(0x06054b50),...u16(0),...u16(0),...u16(nCentral),...u16(nCentral),...u32(centralSize),...u32(offset),...u16(0)]);
+  const todas=[...partes,...central,eocd];
+  let tam=0; todas.forEach(p=>tam+=p.length);
+  const out=new Uint8Array(tam); let pos=0;
+  todas.forEach(p=>{ out.set(p,pos); pos+=p.length; });
+  return out;
+}
+
+function finAchaCol(cols, ...termos){
+  return cols.find(c => { const u=finLc(c).toUpperCase(); return termos.every(t=>u.includes(t.toUpperCase())); });
+}
+
+function FIN_processarPagar(wb, st){
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws, {defval:''});
+  if(!rows.length){ st.textContent='Planilha vazia.'; return; }
+  const cols = Object.keys(rows[0]);
+  const cTit=finAchaCol(cols,'Título')||finAchaCol(cols,'Titulo');
+  const jaTem = new Set(FINdados.pagar.map(x=>String(x.titulo)));
+  let novos=0;
+  rows.forEach(r=>{
+    const tit = String(r[cTit]||'').trim();
+    if(!tit || jaTem.has(tit)) return;
+    FINdados.pagar.push({
+      titulo:tit,
+      fornecedor:finLc(r[finAchaCol(cols,'Fornecedor')]),
+      centro:finLc(r[finAchaCol(cols,'Custo')])||'(sem centro)',
+      despesa:finLc(r[finAchaCol(cols,'Despesa')]),
+      situacao:finLc(r[finAchaCol(cols,'Situação')]||r[finAchaCol(cols,'Situacao')]),
+      competencia:finLc(r[finAchaCol(cols,'Competência')]||r[finAchaCol(cols,'Competencia')]),
+      emissao:finLc(r[finAchaCol(cols,'Emissão')]||r[finAchaCol(cols,'Emissao')]),
+      vencimento:finLc(r[finAchaCol(cols,'Vencimento')]),
+      pagamento:finLc(r[finAchaCol(cols,'Pagamento')]),
+      valor:parseFloat(r[finAchaCol(cols,'Valor')])||0,
+      pago:parseFloat(r[finAchaCol(cols,'Vlr. Pago')]||r[finAchaCol(cols,'Pago')])||0,
+      saldo:parseFloat(r[finAchaCol(cols,'Saldo')])||0
+    });
+    jaTem.add(tit); novos++;
+  });
+  st.textContent = `${novos} títulos novos adicionados (${FINdados.pagar.length} no total).`; st.style.color='var(--verde-medio)';
+}
+
+function FIN_processarReceber(wb, st, destino){
+  destino = destino || 'receber';
+  const alvo = FINdados[destino];
+  let ws=null;
+  for(const nome of wb.SheetNames){
+    const test=XLSX.utils.sheet_to_json(wb.Sheets[nome],{defval:''});
+    if(test.length && Object.keys(test[0]).some(c=>finLc(c).toUpperCase()==='CLIENTE')){ ws=wb.Sheets[nome]; break; }
+  }
+  if(!ws) ws=wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws,{defval:''});
+  if(!rows.length){ st.textContent='Planilha vazia.'; return; }
+  const cols=Object.keys(rows[0]);
+  const cTit=finAchaCol(cols,'Título')||finAchaCol(cols,'Titulo');
+  const jaTem=new Set(alvo.map(x=>String(x.titulo)));
+  let novos=0;
+  rows.forEach(r=>{
+    const tit=String(r[cTit]||'').trim();
+    if(!tit || jaTem.has(tit)) return;
+    const cliRaw=finLc(r[finAchaCol(cols,'Cliente')]);
+    const cnpjM=cliRaw.match(/(\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2})/);
+    alvo.push({
+      titulo:tit,
+      cnpj:cnpjM?cnpjM[1]:'',
+      cliente:cliRaw.replace(/\(?(CNPJ|CPF)[:\s]*[\d.\/-]+\)?/gi,'').trim(),
+      situacao:finLc(r[finAchaCol(cols,'Situação')]||r[finAchaCol(cols,'Situacao')]),
+      competencia:finLc(r[finAchaCol(cols,'Competência')]||r[finAchaCol(cols,'Competencia')]),
+      emissao:finLc(r[finAchaCol(cols,'Emissão')]||r[finAchaCol(cols,'Emissao')]),
+      vencimento:finLc(r[finAchaCol(cols,'Vencimento')]),
+      valor:parseFloat(r[finAchaCol(cols,'Valor')])||0,
+      recebido:parseFloat(r[finAchaCol(cols,'Vlr. Recebido')]||r[finAchaCol(cols,'Recebido')])||0,
+      saldo:parseFloat(r[finAchaCol(cols,'Saldo')])||0
+    });
+    jaTem.add(tit); novos++;
+  });
+  st.textContent=`${novos} títulos novos adicionados (${alvo.length} no total).`; st.style.color='var(--verde-medio)';
+}
+
+// extrai o mês/ano (YYYY-MM) do nome do arquivo de comissão.
+// Aceita "05_2026_Maio_2026.xlsx", "Maio 2026", "2026-05", "05-2026", etc.
+function FIN_mesDoNomeArquivo(nome){
+  const s = String(nome||'').toLowerCase().replace(/\.xlsx?$/,'');
+  const anoM = s.match(/20\d{2}/);
+  const ano = anoM ? anoM[0] : String(new Date().getFullYear());
+  // tenta nome do mês por extenso
+  for (const nm in FIN_MESES) { if (s.includes(nm)) return ano+'-'+FIN_MESES[nm]; }
+  // tenta número de mês (01..12) próximo ao início ou junto do ano
+  const numM = s.match(/(?:^|[^0-9])(0[1-9]|1[0-2])(?:[^0-9]|$)/);
+  if (numM) return ano+'-'+numM[1];
+  return ano+'-00'; // não identificado
+}
+
+function FIN_processarComissao(wb, st, nomeArquivo){
+  const jaTem=new Set(FINdados.fechamentos.map(x=>x.chave));
+  let novos=0;
+  // extrai mês/ano do NOME DO ARQUIVO (ex: "05_2026_Maio_2026.xlsx" -> 2026-05)
+  const mesArquivo = FIN_mesDoNomeArquivo(nomeArquivo || '');
+  wb.SheetNames.forEach(nomeAba=>{
+    if(nomeAba.toLowerCase()==='rascunho') return;
+    const consultor=nomeAba;
+    const grade=XLSX.utils.sheet_to_json(wb.Sheets[nomeAba],{header:1,defval:''});
+    let hrow=-1;
+    for(let i=0;i<grade.length;i++){ if(grade[i].some(v=>finLc(v).toUpperCase()==='CLIENTE')){ hrow=i; break; } }
+    if(hrow<0) return;
+    const cab=grade[hrow].map(v=>finLc(v).toUpperCase());
+    const iCli=cab.findIndex(c=>c==='CLIENTE');
+    const iData=cab.findIndex(c=>c.includes('DATA'));
+    const iTipo=cab.findIndex(c=>c.includes('TIPO'));
+    const iVal=cab.findIndex(c=>c.includes('VALOR'));
+    for(let i=hrow+1;i<grade.length;i++){
+      const cli=finLc(grade[i][iCli]); const tipo=finLc(grade[i][iTipo]).toUpperCase();
+      const su=cli.toUpperCase();
+      if(!cli || su.startsWith('TOTAL') || su.startsWith('___') || su.includes('ROBERTO FERNANDES') || su.includes('ANDREA')) continue;
+      if(!tipo || tipo.includes('CARTEIRA')) continue;
+      const valor=parseFloat(grade[i][iVal])||0;
+      const dataRaw=grade[i][iData];
+      // aditivos e eventuais recicláveis: aparecem pro diretor, mas NÃO entram no total comercial
+      const foraDoTotal = tipo.includes('ADITIVO') || (tipo.includes('RECIC'));
+      const chave = (mesArquivo||'')+'|'+consultor+'|'+finNormNome(cli)+'|'+tipo+'|'+valor;
+      if(jaTem.has(chave)) continue;
+      FINdados.fechamentos.push({ chave, consultor, cliente:cli, tipo, valor, data:finLc(dataRaw), mesArq:nomeAba, mesRef: mesArquivo, foraDoTotal });
+      jaTem.add(chave); novos++;
+    }
+  });
+  st.textContent=`${novos} fechamentos novos adicionados (${FINdados.fechamentos.length} no total).`; st.style.color='var(--verde-medio)';
+}
+
+// processa o relatório de serviços (CSV). Conta Qtde-Serviço (equipamentos) e Qtde-Taxa (peso ton,
+// só p/ caçamba/roll-on/compactadora). Ignora cabeçalhos repetidos e linhas de resumo.
+// Deduplica por Num. Interno (identificador único de cada coleta).
+function FIN_processarServicos(texto, st){
+  // parse CSV simples (separador ;) — o relatório não tem aspas escapando ;
+  const linhas = texto.split(/\r?\n/).filter(l=>l.trim());
+  if (!linhas.length) { st.textContent='Arquivo vazio.'; return; }
+  const parseLinha = l => l.split(';').map(c=>c.trim().replace(/^"|"$/g,''));
+  // usa o PRIMEIRO cabeçalho pra achar os índices (é o único com todas as colunas)
+  const cab = parseLinha(linhas[0]).map(c=>c.replace(/\uFEFF/g,''));
+  const norm = s => String(s).toLowerCase().replace(/ç/g,'c').replace(/ã|á|à/g,'a').replace(/é|ê/g,'e').replace(/í/g,'i').replace(/ó|ô/g,'o').replace(/ú/g,'u');
+  const acha = termo => cab.findIndex(c => norm(c).includes(norm(termo)));
+  const iCli=acha('cliente'), iCnpj=acha('cnpj'), iData=acha('data'), iClasse=acha('classe'),
+        iStatus=acha('status'), iEquip=acha('tipo de equip'), iResiduo=acha('residuo'),
+        iEnd=acha('end. de coleta'), iNum=acha('num. interno');
+  // Qtde - Serviço e Qtde - Taxa (cuidado: tem "Qtde. de Equip." que não serve).
+  // casa por "qtde"+"serv"/"taxa" sem depender do acento de "serviço" (encoding varia).
+  let iQServ=-1, iQTaxa=-1;
+  cab.forEach((c,i)=>{ const n=norm(c); if(n.includes('qtde')&&n.includes('serv')) iQServ=i; if(n.includes('qtde')&&n.includes('taxa')) iQTaxa=i; });
+
+  const jaTem = new Set(FINdados.coletas.map(x=>x.num));
+  const numColsCab = cab.length;
+  const reNum = /^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/;
+  const reData = /^(\d{2})\/(\d{2})\/(\d{2,4})/;
+  const EQUIP_PESO = ['cacamba','caçamba','roll on','roll-on','rollon','compactadora'];
+  const num2 = v => { let s=String(v||'').replace(/\./g,'').replace(',','.').replace(/[^\d.-]/g,''); const n=parseFloat(s); return isNaN(n)?0:n; };
+  let novos=0, ignoradas=0;
+  linhas.slice(1).forEach(l=>{
+    const row = parseLinha(l);
+    // linha válida = tem colunas suficientes, CNPJ e data no formato certo, status concluído/liberado
+    if (row.length < numColsCab-2) { ignoradas++; return; }
+    const cnpj = (row[iCnpj]||'').trim();
+    if (!reNum.test(cnpj)) { ignoradas++; return; }
+    const md = String(row[iData]||'').match(reData);
+    if (!md) { ignoradas++; return; }
+    const status = norm(row[iStatus]||'');
+    if (!status.includes('conclu') && !status.includes('liberad')) { ignoradas++; return; }
+    const numInterno = (row[iNum]||'').trim() || (cnpj+'|'+row[iData]+'|'+row[iEquip]+'|'+Math.random());
+    if (jaTem.has(numInterno)) return; // dedup
+    // data -> ISO e semana do calendário (segunda a domingo)
+    let ano = md[3].length===2 ? '20'+md[3] : md[3];
+    const dataISO = `${ano}-${md[2]}-${md[1]}`;
+    const dt = new Date(parseInt(ano), parseInt(md[2])-1, parseInt(md[1]));
+    const equip = (row[iEquip]||'').trim();
+    const ehPeso = EQUIP_PESO.some(e=>norm(equip).includes(norm(e)));
+    FINdados.coletas.push({
+      num: numInterno,
+      cnpj, cliente:(row[iCli]||'').trim(),
+      equip, classe:(row[iClasse]||'').trim(), residuo:(row[iResiduo]||'').trim(),
+      endereco:(row[iEnd]||'').trim(),
+      data: dataISO, ym: `${ano}-${md[2]}`, semana: FIN_semanaDoMes(dt),
+      qtdeServ: num2(row[iQServ]),
+      pesoTon: ehPeso ? num2(row[iQTaxa]) : 0
+    });
+    jaTem.add(numInterno); novos++;
+  });
+  st.textContent = `${novos} coletas novas (${FINdados.coletas.length} no total).`; st.style.color='var(--verde-medio)';
+}
+
+// número da semana dentro do mês por BLOCOS FIXOS DE DIAS (opção A):
+// dias 1-7 = sem1, 8-14 = sem2, 15-21 = sem3, 22-28 = sem4, 29+ = sem5.
+// Blocos iguais em todo mês -> alinham entre meses (dia 1-7 de maio vs dia 1-7 de junho).
+function FIN_semanaDoMes(dt){
+  return Math.min(5, Math.floor((dt.getDate()-1)/7) + 1);
+}
+// rótulo amigável da semana (mostra os dias do bloco)
+function FIN_rotSemana(s){
+  const faixas={1:'dias 1–7',2:'dias 8–14',3:'dias 15–21',4:'dias 22–28',5:'dia 29+'};
+  return `Semana ${s} (${faixas[s]||''})`;
+}
+
+function finAtualizarTudo(){
+  const el=document.getElementById('resumo-acumulado');
+  if(!FINdados.pagar.length && !FINdados.receber.length && !FINdados.recebeReceb.length && !FINdados.fechamentos.length && !FINdados.coletas.length){
+    el.className='vazio'; el.textContent='Nenhum relatório carregado ainda.'; return;
+  }
+  el.className='';
+  el.innerHTML=`<div class="kpis">
+    <div class="kpi"><div class="num">${FINdados.receber.length}</div><div class="lbl">receber · emitidos</div></div>
+    <div class="kpi"><div class="num">${FINdados.recebeReceb.length}</div><div class="lbl">receber · recebidos</div></div>
+    <div class="kpi verm"><div class="num">${FINdados.pagar.length}</div><div class="lbl">títulos a pagar</div></div>
+    <div class="kpi roxo"><div class="num">${FINdados.fechamentos.length}</div><div class="lbl">fechamentos</div></div>
+    <div class="kpi"><div class="num">${FINdados.coletas.length}</div><div class="lbl">coletas</div></div>
+    <div class="kpi"><div class="num">${FINdados.faturamento.length}</div><div class="lbl">clientes (faturamento)</div></div>
+  </div>`;
+}
+
+// ============ SAÚDE FINANCEIRA ============
+function finYmDeData(s){ const m=finLc(s).match(/(\d{2})\/(\d{2})\/(\d{2,4})/); if(!m) return ''; let ano=m[3].length===2?'20'+m[3]:m[3]; return `${ano}-${m[2]}`; }
+function FIN_renderSaude(){
+  const p=document.getElementById('p-saude');
+  if(!FINdados.pagar.length && !FINdados.receber.length){ p.innerHTML='<div class="card"><div class="vazio">Suba os relatórios de Pagar e Receber primeiro.</div></div>'; return; }
+  const baseData = (window._saudeBase||'emissao');
+  const receita={}, despesa={};
+  // receita = emitidos, agrupados por emissão (alinha com o cartão "Emitido no mês")
+  FINdados.receber.filter(r=>!String(r.situacao||'').toLowerCase().includes('cancel')).forEach(r=>{
+    const ym = baseData==='competencia' ? finCompYM(r.competencia) : finYmDeData(r.emissao);
+    if(ym){ receita[ym]=(receita[ym]||0)+r.valor; }
+  });
+  // despesa = contas a pagar, agrupadas por pagamento (alinha com o cartão de pagar)
+  FINdados.pagar.filter(r=>!String(r.situacao||'').toLowerCase().includes('cancel')).forEach(r=>{
+    const ym = baseData==='competencia' ? finCompYM(r.competencia) : finYmDeData(r.pagamento);
+    if(ym){ despesa[ym]=(despesa[ym]||0)+r.valor; }
+  });
+  const meses=[...new Set([...Object.keys(receita),...Object.keys(despesa)])].filter(Boolean).sort();
+  const mesSel = window._saudeMes || 'todos';
+  const mesesMostrar = mesSel==='todos' ? meses : meses.filter(m=>m===mesSel);
+  let totR=0,totD=0;
+  let linhas=mesesMostrar.map(m=>{ const rv=receita[m]||0, dv=despesa[m]||0, res=rv-dv; totR+=rv; totD+=dv;
+    return `<tr><td>${finRotMes(m)}</td><td>${finFmtM(rv)}</td><td>${finFmtM(dv)}</td><td class="${res>=0?'pos':'neg'}">${finFmtM(res)}</td><td class="${res>=0?'pos':'neg'}">${rv?(res/rv*100).toFixed(1):'0'}%</td></tr>`;
+  }).join('');
+  const totRes=totR-totD;
+  const maiorCentro=(()=>{ const c={}; FINdados.pagar.forEach(x=>c[x.centro]=(c[x.centro]||0)+x.valor); return Object.entries(c).sort((a,b)=>b[1]-a[1])[0]; })();
+  p.innerHTML=`
+    <div class="filtros">
+      <span style="font-size:13px;color:var(--cinza-600);">Mês:</span>
+      <select onchange="window._saudeMes=this.value;FIN_renderSaude()">
+        <option value="todos" ${mesSel==='todos'?'selected':''}>Todos (evolução)</option>
+        ${meses.map(m=>`<option value="${m}" ${m===mesSel?'selected':''}>${finRotMes(m)}</option>`).join('')}
+      </select>
+      <span style="font-size:13px;color:var(--cinza-600);">Base:</span>
+      <select onchange="window._saudeBase=this.value;FIN_renderSaude()">
+        <option value="emissao" ${baseData==='emissao'?'selected':''}>Emissão/Pagamento (bate com os relatórios)</option>
+        <option value="competencia" ${baseData==='competencia'?'selected':''}>Competência (mês do serviço)</option>
+      </select>
+      <button class="btn sec" onclick="window.print()" style="margin-left:auto;"><i class="ti ti-printer"></i> Exportar / Imprimir</button>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><div class="num">${finFmtM(totR)}</div><div class="lbl">Receita total</div></div>
+      <div class="kpi verm"><div class="num">${finFmtM(totD)}</div><div class="lbl">Despesa total</div></div>
+      <div class="kpi ${totRes>=0?'':'verm'}"><div class="num">${finFmtM(totRes)}</div><div class="lbl">Resultado</div></div>
+      <div class="kpi"><div class="num">${totR?(totRes/totR*100).toFixed(1):'0'}%</div><div class="lbl">Margem</div></div>
+    </div>
+    <div class="card">
+      <h2>Receita vs Despesa por mês</h2>
+      <table><thead><tr><th>Mês</th><th>Receita</th><th>Despesa</th><th>Resultado</th><th>Margem</th></tr></thead>
+      <tbody>${linhas||'<tr><td colspan="5" class="vazio">Sem FINdados no período.</td></tr>'}</tbody></table>
+    </div>
+    <div class="card">
+      <h2>Leitura automática</h2>
+      <p style="font-size:14px;line-height:1.7;color:var(--cinza-700);">
+        No período carregado, a receita somou <b>${finFmtM(totR)}</b> e a despesa <b>${finFmtM(totD)}</b>,
+        resultando em <b class="${totRes>=0?'pos':'neg'}">${totRes>=0?'superávit':'déficit'} de ${finFmtM(Math.abs(totRes))}</b>
+        (margem de ${totR?(totRes/totR*100).toFixed(1):'0'}%).
+        ${maiorCentro?`O centro de custo de maior peso foi <b>${maiorCentro[0]}</b> (${finFmtM(maiorCentro[1])}).`:''}
+      </p>
+    </div>`;
+}
+
+// ============ CONTAS A PAGAR ============
+function FIN_renderPagar(){
+  const p=document.getElementById('p-pagar');
+  if(!FINdados.pagar.length){ p.innerHTML='<div class="card"><div class="vazio">Suba o relatório de Contas a Pagar.</div></div>'; return; }
+  // exclui cancelados
+  const base = FINdados.pagar.filter(x=>!String(x.situacao||'').toLowerCase().includes('cancel'));
+  // meses disponíveis (por data de pagamento)
+  const meses=[...new Set(base.map(x=>finYmDeData(x.pagamento)).filter(Boolean))].sort();
+  const mesSel = window._pagMes || 'todos';
+  const centroSel = window._pagCentro || 'todos';
+  // lista de centros (pra o filtro)
+  const centrosLista=[...new Set(base.map(x=>x.centro))].sort();
+  // aplica filtros
+  let lista = base.slice();
+  if(mesSel!=='todos') lista = lista.filter(x=>finYmDeData(x.pagamento)===mesSel);
+  if(centroSel!=='todos') lista = lista.filter(x=>x.centro===centroSel);
+  // total por centro (da lista filtrada)
+  const porCentro={}; lista.forEach(x=>porCentro[x.centro]=(porCentro[x.centro]||0)+x.valor);
+  const centros=Object.entries(porCentro).sort((a,b)=>b[1]-a[1]);
+  const totalP=centros.reduce((s,c)=>s+c[1],0);
+  // análise mensal por centro (usa a base toda, por pagamento)
+  const mesesAll=[...new Set(base.map(x=>finYmDeData(x.pagamento)).filter(Boolean))].sort();
+  let analise='';
+  if(mesesAll.length>=2){
+    const piv={}; base.forEach(x=>{ const ym=finYmDeData(x.pagamento); if(!ym)return; if(centroSel!=='todos'&&x.centro!==centroSel)return; piv[x.centro]=piv[x.centro]||{}; piv[x.centro][ym]=(piv[x.centro][ym]||0)+x.valor; });
+    let head='<tr><th>Centro de custo</th>'+mesesAll.map(m=>`<th>${finRotMes(m)}</th><th>Δ%</th>`).join('')+'</tr>';
+    let body=Object.entries(piv).sort((a,b)=>{const sa=Object.values(a[1]).reduce((x,y)=>x+y,0);const sb=Object.values(b[1]).reduce((x,y)=>x+y,0);return sb-sa;}).map(([c,mv])=>{
+      let ant=null; let tds=mesesAll.map(m=>{ const v=mv[m]||0; let d=''; if(ant!=null&&ant!==0) d=((v-ant)/ant*100); ant=v; return `<td>${v?finFmtM(v):'—'}</td><td class="${d===''?'':(d>=0?'neg':'pos')}">${d===''?'—':(d>=0?'+':'')+d.toFixed(0)+'%'}</td>`; }).join('');
+      return `<tr><td><b>${c}</b></td>${tds}</tr>`;
+    }).join('');
+    analise=`<div class="card"><h2>Análise mensal por centro de custo</h2><div style="overflow-x:auto;"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>
+      <p style="font-size:12px;color:var(--cinza-500);margin-top:8px;">Δ% = variação vs o mês anterior. Verde = caiu, vermelho = subiu.</p></div>`;
+  }
+  p.innerHTML=`
+    <div class="filtros">
+      <span style="font-size:13px;color:var(--cinza-600);">Mês (pagamento):</span>
+      <select onchange="window._pagMes=this.value;FIN_renderPagar()">
+        <option value="todos" ${mesSel==='todos'?'selected':''}>Todos</option>
+        ${meses.map(m=>`<option value="${m}" ${m===mesSel?'selected':''}>${finRotMes(m)}</option>`).join('')}
+      </select>
+      <span style="font-size:13px;color:var(--cinza-600);">Centro de custo:</span>
+      <select onchange="window._pagCentro=this.value;FIN_renderPagar()">
+        <option value="todos" ${centroSel==='todos'?'selected':''}>Todos</option>
+        ${centrosLista.map(c=>`<option value="${c.replace(/"/g,'')}" ${c===centroSel?'selected':''}>${c}</option>`).join('')}
+      </select>
+      <button class="btn sec" onclick="window.print()" style="margin-left:auto;"><i class="ti ti-printer"></i> Exportar / Imprimir</button>
+    </div>
+    <div class="kpis">
+      <div class="kpi verm"><div class="num">${finFmtM(totalP)}</div><div class="lbl">Total a pagar${mesSel!=='todos'?' · '+finRotMes(mesSel):''}${centroSel!=='todos'?' · '+centroSel:''}</div></div>
+      <div class="kpi"><div class="num">${lista.length}</div><div class="lbl">títulos</div></div>
+    </div>
+    <div class="card">
+      <h2>Despesa por centro de custo</h2>
+      <table><thead><tr><th>Centro de custo</th><th>Total</th><th>% do total</th></tr></thead><tbody>
+      ${centros.map(([c,v])=>`<tr><td>${c}</td><td>${finFmtM(v)}</td><td>${totalP?(v/totalP*100).toFixed(1):'0'}%<div class="barra"><div style="width:${totalP?(v/totalP*100).toFixed(1):0}%"></div></div></td></tr>`).join('')}
+      <tr style="background:var(--cinza-100);"><td><b>TOTAL</b></td><td><b>${finFmtM(totalP)}</b></td><td></td></tr>
+      </tbody></table>
+    </div>
+    ${analise}`;
+}
+
+// ============ CONTAS A RECEBER ============
+function FIN_renderReceber(){
+  const p=document.getElementById('p-receber');
+  const temEmit = FINdados.receber.length, temReceb = FINdados.recebeReceb.length;
+  if(!temEmit && !temReceb){ p.innerHTML='<div class="card"><div class="vazio">Suba os relatórios de Contas a Receber (Emitidos e/ou Recebidos).</div></div>'; return; }
+  const semCancel = x=>!String(x.situacao||'').toLowerCase().includes('cancel');
+  // EMITIDOS: base por emissão
+  const baseEmit = FINdados.receber.filter(semCancel);
+  // RECEBIDOS: base por data de recebimento (usa vencimento/competência como referência do mês do caixa)
+  const baseReceb = FINdados.recebeReceb.filter(semCancel);
+  // meses disponíveis (junta emissão dos emitidos)
+  const meses=[...new Set(baseEmit.map(x=>finYmDeData(x.emissao)).filter(Boolean))].sort();
+  const mesSel = window._recMes || 'todos';
+  // filtra emitidos por emissão
+  const listaEmit = mesSel==='todos' ? baseEmit : baseEmit.filter(x=>finYmDeData(x.emissao)===mesSel);
+  const emitido = listaEmit.reduce((s,x)=>s+x.valor,0);
+  const aberto = listaEmit.reduce((s,x)=>s+x.saldo,0);
+  // recebido: do relatório de recebidos (o que entrou no caixa). soma o Vlr. Recebido.
+  const recebidoTotal = baseReceb.reduce((s,x)=>s+(x.recebido||x.valor),0);
+  const porSit={}; listaEmit.forEach(x=>porSit[x.situacao||'—']=(porSit[x.situacao||'—']||0)+x.valor);
+  p.innerHTML=`
+    <div class="filtros">
+      <span style="font-size:13px;color:var(--cinza-600);">Mês (emissão):</span>
+      <select onchange="window._recMes=this.value;FIN_renderReceber()">
+        <option value="todos" ${mesSel==='todos'?'selected':''}>Todos</option>
+        ${meses.map(m=>`<option value="${m}" ${m===mesSel?'selected':''}>${finRotMes(m)}</option>`).join('')}
+      </select>
+      <button class="btn sec" onclick="window.print()" style="margin-left:auto;"><i class="ti ti-printer"></i> Exportar / Imprimir</button>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><div class="num">${finFmtM(emitido)}</div><div class="lbl">Emitido no mês (faturado)</div></div>
+      <div class="kpi" style="border-top-color:var(--verde-claro);"><div class="num" style="color:var(--verde-medio);">${temReceb?finFmtM(recebidoTotal):'—'}</div><div class="lbl">Recebido no mês (caixa)</div></div>
+      <div class="kpi verm"><div class="num">${finFmtM(aberto)}</div><div class="lbl">Em aberto (dos emitidos)</div></div>
+    </div>
+    <div class="aviso" style="background:var(--verde-claro-bg);color:var(--verde-escuro);"><i class="ti ti-info-circle"></i>
+      <b>Emitido</b> vem do relatório filtrado por Emissão (o que você faturou no mês).
+      <b>Recebido</b> vem do relatório filtrado por Recebimento (o que entrou no caixa no mês).
+      ${!temReceb?'<br><b>Falta subir o relatório de Recebidos</b> pra ver o valor recebido.':''}
+      ${!temEmit?'<br><b>Falta subir o relatório de Emitidos.</b>':''}
+    </div>
+    <div class="card"><h2>Emitidos por situação de pagamento${mesSel!=='todos'?' · '+finRotMes(mesSel):''}</h2>
+      <p style="font-size:12px;color:var(--cinza-500);margin-bottom:8px;">"Fechado" = título já pago/quitado. "Aberto" = ainda não pago (no prazo ou atrasado).</p>
+      <table><thead><tr><th>Situação</th><th>Valor emitido</th></tr></thead><tbody>
+      ${Object.entries(porSit).map(([s,v])=>{ const nome = s.toLowerCase()==='fechado'?'Fechado (pago)':s.toLowerCase()==='aberto'?'Aberto (a receber)':s; return `<tr><td>${nome}</td><td>${finFmtM(v)}</td></tr>`; }).join('')||'<tr><td colspan=2 class="vazio">Sem emitidos.</td></tr>'}
+      </tbody></table>
+    </div>`;
+}
+
+// ============ RESULTADOS COMERCIAIS ============
+function FIN_renderResultados(){
+  const p=document.getElementById('p-resultados');
+  if(!FINdados.fechamentos.length){ p.innerHTML='<div class="card"><div class="vazio">Suba a planilha de comissões pra ver os fechamentos.</div></div>'; return; }
+  // meses disponíveis (do nome do arquivo)
+  const mesesDisp=[...new Set(FINdados.fechamentos.map(f=>f.mesRef).filter(m=>m&&!m.endsWith('-00')))].sort();
+  const mesSel = window._resMes || 'todos';
+  // aplica filtro
+  const fechFiltrados = mesSel==='todos' ? FINdados.fechamentos : FINdados.fechamentos.filter(f=>f.mesRef===mesSel);
+  window._resFechFiltrados = fechFiltrados;
+  // separa os que contam no total dos que só aparecem (aditivos e eventuais recicláveis)
+  const contam = fechFiltrados.filter(f=>!f.foraDoTotal);
+  const naoContam = fechFiltrados.filter(f=>f.foraDoTotal);
+  const totFech=contam.length;
+  const valFech=contam.reduce((s,x)=>s+x.valor,0);
+  const porCons={};
+  contam.forEach(f=>{ porCons[f.consultor]=porCons[f.consultor]||{n:0,v:0}; porCons[f.consultor].n++; porCons[f.consultor].v+=f.valor; });
+  // seção separada de aditivos/recicláveis
+  let secaoFora='';
+  if(naoContam.length){
+    const valFora=naoContam.reduce((s,x)=>s+x.valor,0);
+    secaoFora=`<div class="card" style="border-left:3px solid var(--roxo);">
+      <h2 style="color:var(--roxo);">Aditivos e Eventuais Recicláveis <span style="font-size:12px;font-weight:400;color:var(--cinza-500);">(não entram no resultado comercial)</span></h2>
+      <p style="font-size:12px;color:var(--cinza-500);margin-bottom:8px;">Visíveis para o diretor, mas fora do total de fechamentos. Somam ${finFmtM(valFora)} à parte.</p>
+      <table><thead><tr><th>Cliente</th><th>Tipo</th><th>Consultor</th><th>Mês</th><th>Valor (R$)</th></tr></thead><tbody>
+      ${naoContam.map(f=>`<tr><td>${f.cliente}</td><td><span class="badge" style="background:#efe9f5;color:var(--roxo);">${f.tipo}</span></td><td>${f.consultor}</td><td>${f.mesRef&&!f.mesRef.endsWith('-00')?finRotMes(f.mesRef):'—'}</td><td>${finFmtM(f.valor)}</td></tr>`).join('')}
+      </tbody></table>
+    </div>`;
+  }
+  p.innerHTML=`
+    <div class="filtros">
+      <span style="font-size:13px;color:var(--cinza-600);">Mês do fechamento:</span>
+      <select onchange="window._resMes=this.value;FIN_renderResultados()">
+        <option value="todos" ${mesSel==='todos'?'selected':''}>Todos os meses</option>
+        ${mesesDisp.map(m=>`<option value="${m}" ${m===mesSel?'selected':''}>${finRotMes(m)}</option>`).join('')}
+      </select>
+      <button class="btn sec" onclick="window.print()" style="margin-left:auto;"><i class="ti ti-printer"></i> Exportar / Imprimir</button>
+    </div>
+    <div class="kpis">
+      <div class="kpi roxo"><div class="num">${totFech}</div><div class="lbl">Fechamentos${mesSel!=='todos'?' · '+finRotMes(mesSel):''}</div></div>
+      <div class="kpi"><div class="num">${finFmtM(valFech)}</div><div class="lbl">Valor fechado (R$)</div></div>
+      <div class="kpi"><div class="num">${totFech?finFmtM(valFech/totFech):'R$ 0,00'}</div><div class="lbl">Ticket médio</div></div>
+    </div>
+    <div class="card">
+      <h2>Fechamentos por consultor</h2>
+      <p style="font-size:12px;color:var(--cinza-500);margin-bottom:8px;">Clique num consultor para ver os clientes que ele fechou.</p>
+      <table><thead><tr><th>Consultor</th><th>Fechamentos</th><th>Valor (R$)</th></tr></thead><tbody>
+      ${Object.entries(porCons).sort((a,b)=>b[1].v-a[1].v).map(([c,o])=>`<tr class="clicavel" onclick="FIN_verFechamentos('${c.replace(/'/g,"")}')"><td><b>${c}</b> <i class="ti ti-chevron-right" style="font-size:12px;"></i></td><td>${o.n}</td><td>${finFmtM(o.v)}</td></tr>`).join('')}
+      </tbody></table>
+    </div>
+    <div id="detalhe-fech"></div>
+    ${secaoFora}`;
+}
+function FIN_verFechamentos(consultor){
+  const base = window._resFechFiltrados || FINdados.fechamentos;
+  const itens=base.filter(f=>f.consultor===consultor && !f.foraDoTotal);
+  const el=document.getElementById('detalhe-fech');
+  el.innerHTML=`<div class="card"><h2>Clientes fechados — ${consultor}</h2>
+    <table><thead><tr><th>Cliente</th><th>Tipo</th><th>Mês</th><th>Data</th><th>Valor (R$)</th></tr></thead><tbody>
+    ${itens.map(f=>`<tr><td>${f.cliente}</td><td><span class="badge" style="background:var(--verde-claro-bg);color:var(--verde-escuro);">${f.tipo}</span></td><td>${f.mesRef&&!f.mesRef.endsWith('-00')?finRotMes(f.mesRef):'—'}</td><td>${f.data||'—'}</td><td>${finFmtM(f.valor)}</td></tr>`).join('')}
+    </tbody></table></div>`;
+  el.scrollIntoView({behavior:'smooth'});
+}
+
+// ============ COLETAS (acompanhamento semanal + mensal) ============
+function FIN_renderColetas(){
+  const p=document.getElementById('p-coletas');
+  if(!FINdados.coletas.length){ p.innerHTML='<div class="card"><div class="vazio">Suba o Relatório de Serviços (.csv) na aba Relatórios.</div></div>'; return; }
+  // meses disponíveis
+  const meses=[...new Set(FINdados.coletas.map(c=>c.ym))].sort();
+  const modo = window._coletaModo || 'semana';
+  const rotYM = ym=>{ const [a,m]=ym.split('-'); return (FIN_MESNOME[m]||m)+'/'+a.slice(2); };
+  p.innerHTML=`
+    <div class="filtros">
+      <select onchange="window._coletaModo=this.value;FIN_renderColetas()">
+        <option value="semana" ${modo==='semana'?'selected':''}>Comparar por semana (entre 2 meses)</option>
+        <option value="mes" ${modo==='mes'?'selected':''}>Visão mensal por cliente</option>
+      </select>
+      <button class="btn sec" onclick="window.print()"><i class="ti ti-printer"></i> Exportar / Imprimir</button>
+    </div>
+    <div id="coleta-area"></div>`;
+  if(modo==='semana') FIN_renderColetaSemana(meses, rotYM);
+  else FIN_renderColetaMes(meses, rotYM);
+}
+
+// agrupa coletas por chave, somando qtde e peso
+function FIN_agrupaColetas(filtro){
+  const g={};
+  FINdados.coletas.filter(filtro).forEach(c=>{
+    // agrupa por NOME do cliente (junta todas as unidades/CNPJs da mesma empresa) + equipamento + classe.
+    // Antes usava CNPJ, mas clientes como PUC têm vários CNPJs por unidade, e a numeração muda
+    // entre relatórios — isso fazia a mesma empresa parecer que "parou" numa unidade e "nasceu" em outra.
+    const nomeChave = FIN_finNormNomeCli(c.cliente);
+    const chave=nomeChave+'||'+c.equip+'||'+c.classe;
+    if(!g[chave]) g[chave]={cliente:c.cliente,cnpj:c.cnpj,equip:c.equip,classe:c.classe,residuo:c.residuo,qtde:0,peso:0};
+    g[chave].qtde+=c.qtdeServ; g[chave].peso+=c.pesoTon;
+  });
+  return g;
+}
+// normaliza o nome do cliente pra juntar unidades (remove sufixos de unidade, acentos, etc)
+function FIN_finNormNomeCli(s){
+  return String(s||'').toUpperCase()
+    .replace(/[ÁÀÂÃ]/g,'A').replace(/[ÉÊ]/g,'E').replace(/[Í]/g,'I').replace(/[ÓÔÕ]/g,'O').replace(/[Ú]/g,'U').replace(/Ç/g,'C')
+    .replace(/\s*[-–]\s*(UNIDADE|UNID|FILIAL|MATRIZ|CAMPUS|BLOCO|PREDIO).*$/i,'')
+    .replace(/[^A-Z0-9 ]/g,'').replace(/\s+/g,' ').trim();
+}
+
+function FIN_renderColetaSemana(meses, rotYM){
+  const area=document.getElementById('coleta-area');
+  if(meses.length<2){ area.innerHTML='<div class="card"><div class="aviso">Suba pelo menos 2 meses pra comparar semanas (ex: junho e julho).</div></div>'; return; }
+  // seletores de mês A (base) e B (comparação) + semana
+  const mesA = window._coletaMesA || meses[meses.length-2];
+  const mesB = window._coletaMesB || meses[meses.length-1];
+  const semanas=[...new Set(FINdados.coletas.filter(c=>c.ym===mesA||c.ym===mesB).map(c=>Number(c.semana)))].sort((a,b)=>a-b);
+  const sem = Number(window._coletaSem || semanas[0]);
+  // agrupa por cliente+equip+classe em cada mês, só na semana escolhida (compara semana como número)
+  const gA=FIN_agrupaColetas(c=>c.ym===mesA && Number(c.semana)===sem);
+  const gB=FIN_agrupaColetas(c=>c.ym===mesB && Number(c.semana)===sem);
+  const chaves=[...new Set([...Object.keys(gA),...Object.keys(gB)])];
+  // monta linhas com variação
+  let linhas=chaves.map(k=>{
+    const a=gA[k], b=gB[k]; const base=a||b;
+    const qa=a?a.qtde:0, qb=b?b.qtde:0;
+    const varPct = qa===0 ? (qb>0?null:0) : ((qb-qa)/qa*100);
+    return {cliente:base.cliente, equip:base.equip, classe:base.classe, qa, qb, varPct, peso_a:a?a.peso:0, peso_b:b?b.peso:0};
+  }).sort((x,y)=>{ // quem mais caiu primeiro
+    const vx=x.varPct===null?999:x.varPct, vy=y.varPct===null?999:y.varPct; return vx-vy;
+  });
+  // filtro de exibição
+  const filtroEx = window._coletaFiltro || 'movimento';
+  let linhasEx = linhas;
+  if(filtroEx==='movimento') linhasEx = linhas.filter(l=>l.qa>0 && l.qb>0); // tem nos 2 meses
+  else if(filtroEx==='caiu') linhasEx = linhas.filter(l=>l.qa>0 && l.qb<l.qa); // caiu (inclui zerou)
+  else if(filtroEx==='parou') linhasEx = linhas.filter(l=>l.qa>0 && l.qb===0); // parou de vez
+  else if(filtroEx==='novos') linhasEx = linhas.filter(l=>l.qa===0 && l.qb>0); // clientes novos
+  // else 'todos' -> tudo
+  const nMovimento=linhas.filter(l=>l.qa>0&&l.qb>0).length, nParou=linhas.filter(l=>l.qa>0&&l.qb===0).length, nNovos=linhas.filter(l=>l.qa===0&&l.qb>0).length;
+  area.innerHTML=`
+    <div class="filtros" style="margin-bottom:10px;">
+      <span style="font-size:13px;color:var(--cinza-600);">Comparar</span>
+      <select onchange="window._coletaMesA=this.value;FIN_renderColetas()">${meses.map(m=>`<option value="${m}" ${m===mesA?'selected':''}>${rotYM(m)}</option>`).join('')}</select>
+      <span style="font-size:13px;color:var(--cinza-600);">com</span>
+      <select onchange="window._coletaMesB=this.value;FIN_renderColetas()">${meses.map(m=>`<option value="${m}" ${m===mesB?'selected':''}>${rotYM(m)}</option>`).join('')}</select>
+      <span style="font-size:13px;color:var(--cinza-600);">·</span>
+      <select onchange="window._coletaSem=parseInt(this.value);FIN_renderColetas()">${semanas.map(s=>`<option value="${s}" ${s===sem?'selected':''}>${FIN_rotSemana(s)}</option>`).join('')}</select>
+    </div>
+    <div class="filtros" style="margin-bottom:10px;">
+      <span style="font-size:13px;color:var(--cinza-600);">Mostrar:</span>
+      <select onchange="window._coletaFiltro=this.value;FIN_renderColetas()">
+        <option value="movimento" ${filtroEx==='movimento'?'selected':''}>Com movimento nos 2 meses (${nMovimento})</option>
+        <option value="caiu" ${filtroEx==='caiu'?'selected':''}>Só quem caiu</option>
+        <option value="parou" ${filtroEx==='parou'?'selected':''}>Só quem parou de coletar (${nParou})</option>
+        <option value="novos" ${filtroEx==='novos'?'selected':''}>Só clientes novos (${nNovos})</option>
+        <option value="todos" ${filtroEx==='todos'?'selected':''}>Todos</option>
+      </select>
+      <button class="btn sec" onclick="window.print()" style="margin-left:auto;"><i class="ti ti-printer"></i> Exportar</button>
+    </div>
+    <div class="card">
+      <h2>${FIN_rotSemana(sem)}: ${rotYM(mesA)} vs ${rotYM(mesB)}</h2>
+      <p style="font-size:12px;color:var(--cinza-500);margin-bottom:8px;">Ordenado pelos que mais caíram. Verde = subiu, vermelho = caiu. Mostrando ${linhasEx.length} de ${linhas.length}.</p>
+      <table><thead><tr><th>Cliente</th><th>Equipamento / Resíduo</th><th>${rotYM(mesA)}</th><th>${rotYM(mesB)}</th><th>Variação</th></tr></thead><tbody>
+      ${linhasEx.map(l=>{
+        const cor = l.varPct===null?'':(l.varPct>0.5?'pos':l.varPct<-0.5?'neg':'');
+        const vtxt = l.varPct===null?'<span class="badge" style="background:var(--verde-claro-bg);color:var(--verde-escuro);">novo</span>':(l.qb===0?'<span class="neg">parou</span>':(l.varPct>0?'+':'')+l.varPct.toFixed(0)+'%');
+        const pa = l.peso_a?` <span style="color:var(--cinza-400);font-size:11px;">(${l.peso_a.toFixed(1)}t)</span>`:'';
+        const pb = l.peso_b?` <span style="color:var(--cinza-400);font-size:11px;">(${l.peso_b.toFixed(1)}t)</span>`:'';
+        return `<tr><td><b>${l.cliente}</b></td><td style="font-size:12px;color:var(--cinza-600);">${l.equip}<br>${l.classe}</td><td>${l.qa}${pa}</td><td>${l.qb}${pb}</td><td class="${cor}">${vtxt}</td></tr>`;
+      }).join('')||'<tr><td colspan=5 class="vazio">Nenhum cliente neste filtro.</td></tr>'}
+      </tbody></table>
+    </div>`;
+}
+
+function FIN_renderColetaMes(meses, rotYM){
+  const area=document.getElementById('coleta-area');
+  const mes = window._coletaMesUnico || meses[meses.length-1];
+  const mesAnt = meses[meses.indexOf(mes)-1];
+  const g=FIN_agrupaColetas(c=>c.ym===mes);
+  const gAnt = mesAnt ? FIN_agrupaColetas(c=>c.ym===mesAnt) : {};
+  // agrupa por cliente (junta os equipamentos/resíduos dentro)
+  const porCliente={};
+  Object.keys(g).forEach(k=>{ const it=g[k]; if(!porCliente[it.cnpj]) porCliente[it.cnpj]={cliente:it.cliente,itens:[],totalQ:0,totalP:0}; 
+    const ant=gAnt[k]; porCliente[it.cnpj].itens.push({equip:it.equip,classe:it.classe,qtde:it.qtde,peso:it.peso,qtdeAnt:ant?ant.qtde:null});
+    porCliente[it.cnpj].totalQ+=it.qtde; porCliente[it.cnpj].totalP+=it.peso;
+  });
+  const lista=Object.values(porCliente).sort((a,b)=>b.totalQ-a.totalQ);
+  area.innerHTML=`
+    <div class="filtros" style="margin-bottom:10px;">
+      <span style="font-size:13px;color:var(--cinza-600);">Mês</span>
+      <select onchange="window._coletaMesUnico=this.value;FIN_renderColetas()">${meses.map(m=>`<option value="${m}" ${m===mes?'selected':''}>${rotYM(m)}</option>`).join('')}</select>
+      ${mesAnt?`<span style="font-size:12px;color:var(--cinza-500);">(comparando com ${rotYM(mesAnt)})</span>`:''}
+    </div>
+    ${lista.map(cl=>`
+      <div class="card" style="padding:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <b style="font-size:14px;">${cl.cliente}</b>
+          <span style="font-size:12px;color:var(--cinza-500);">${cl.totalQ} equip.${cl.totalP?` · ${cl.totalP.toFixed(1)}t`:''}</span>
+        </div>
+        <table><tbody>
+        ${cl.itens.map(it=>{
+          let vtxt='';
+          if(it.qtdeAnt!=null && it.qtdeAnt>0){ const v=(it.qtde-it.qtdeAnt)/it.qtdeAnt*100; vtxt=`<span class="${v>0.5?'pos':v<-0.5?'neg':''}">${v>0?'+':''}${v.toFixed(0)}%</span> <span style="color:var(--cinza-400);font-size:11px;">(era ${it.qtdeAnt})</span>`; }
+          else if(it.qtdeAnt===null && mesAnt){ vtxt='<span class="badge" style="background:var(--verde-claro-bg);color:var(--verde-escuro);">novo</span>'; }
+          return `<tr><td style="font-size:12px;">${it.equip} · ${it.classe}</td><td style="text-align:right;"><b>${it.qtde}</b>${it.peso?` <span style="color:var(--cinza-400);font-size:11px;">${it.peso.toFixed(1)}t</span>`:''}</td><td style="text-align:right;">${vtxt}</td></tr>`;
+        }).join('')}
+        </tbody></table>
+      </div>
+    `).join('')}`;
+}
+
+// ============ VARIAÇÃO DE FATURAMENTO (relatório geral de todos os clientes) ============
+function FIN_processarFaturamentoVar(wb, st){
+  // acha a aba com FINdados (SourceData ou a que tiver "Cliente")
+  let ws=null;
+  for(const nome of wb.SheetNames){
+    const t=XLSX.utils.sheet_to_json(wb.Sheets[nome],{header:1,defval:''});
+    if(t.length && t.some(r=>r.some(v=>finLc(v).toLowerCase()==='cliente'))){ ws=wb.Sheets[nome]; break; }
+  }
+  if(!ws) ws=wb.Sheets[wb.SheetNames.find(n=>n.toLowerCase()==='sourcedata')||wb.SheetNames[0]];
+  const grade=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+  // acha o cabeçalho (linha com "Cliente")
+  let hrow=grade.findIndex(r=>r.some(v=>finLc(v).toLowerCase()==='cliente'));
+  if(hrow<0){ st.textContent='Não achei a coluna Cliente.'; st.style.color='var(--vermelho)'; return; }
+  const cab=grade[hrow].map(v=>finLc(v));
+  const iCli=cab.findIndex(c=>c.toLowerCase()==='cliente');
+  // meses = colunas que são nome de mês
+  const idxMeses=[]; const nomesMeses=[];
+  cab.forEach((c,i)=>{ if(FIN_MESES[c.toLowerCase().trim()]){ idxMeses.push(i); nomesMeses.push(c.trim()); } });
+  if(!idxMeses.length){ st.textContent='Não achei colunas de mês (Abril, Maio...).'; st.style.color='var(--vermelho)'; return; }
+  // substitui tudo (é um retrato completo, não incremental como os títulos)
+  FINdados.faturamento=[];
+  let n=0;
+  for(let i=hrow+1;i<grade.length;i++){
+    const cli=finLc(grade[i][iCli]);
+    if(!cli || /^\d+$/.test(cli) || cli.toLowerCase().startsWith('total')) continue;
+    const valores={};
+    idxMeses.forEach((idx,k)=>{ valores[nomesMeses[k]]=finParseValorBR(grade[i][idx]); });
+    FINdados.faturamento.push({ cliente:cli, valores });
+    n++;
+  }
+  window._fatVarMeses = nomesMeses;
+  st.textContent=`${n} clientes carregados (meses: ${nomesMeses.join(', ')}).`; st.style.color='var(--verde-medio)';
+}
+
+function FIN_renderFaturamentoVar(){
+  const p=document.getElementById('p-faturamento');
+  if(!FINdados.faturamento.length){ p.innerHTML='<div class="card"><div class="vazio">Suba o relatório de Variação de Faturamento (.xlsx) na aba Relatórios.</div></div>'; return; }
+  const meses = window._fatVarMeses || Object.keys(FINdados.faturamento[0].valores);
+  const mesAtual = window._fatVarMes || meses[meses.length-1];
+  const iAtual = meses.indexOf(mesAtual);
+  const mesAnt = iAtual>0 ? meses[iAtual-1] : null;
+  const ordem = window._fatVarOrdem || 'var-menor';
+  const busca = (window._fatVarBusca||'').toLowerCase();
+  // monta linhas
+  let linhas = FINdados.faturamento.map(c=>{
+    const atual = c.valores[mesAtual]||0;
+    const ant = mesAnt ? (c.valores[mesAnt]||0) : null;
+    const varPct = (ant && ant!==0) ? ((atual-ant)/ant*100) : (atual>0&&ant===0?null:0);
+    return {cliente:c.cliente, atual, ant, varPct};
+  });
+  if(busca) linhas=linhas.filter(l=>l.cliente.toLowerCase().includes(busca));
+  // ordenação
+  if(ordem==='maior') linhas.sort((a,b)=>b.atual-a.atual);
+  else if(ordem==='menor') linhas.sort((a,b)=>a.atual-b.atual);
+  else if(ordem==='var-menor') linhas.sort((a,b)=>(a.varPct==null?999:a.varPct)-(b.varPct==null?999:b.varPct));
+  else if(ordem==='var-maior') linhas.sort((a,b)=>(b.varPct==null?-999:b.varPct)-(a.varPct==null?-999:a.varPct));
+  else linhas.sort((a,b)=>a.cliente.localeCompare(b.cliente));
+  const totAtual=linhas.reduce((s,l)=>s+l.atual,0);
+  const totAnt=mesAnt?linhas.reduce((s,l)=>s+(l.ant||0),0):0;
+  const varTot=totAnt?((totAtual-totAnt)/totAnt*100):0;
+  const caindo=linhas.filter(l=>l.varPct!==null&&l.varPct<-0.5).length;
+  p.innerHTML=`
+    <div class="filtros">
+      <span style="font-size:13px;color:var(--cinza-600);">Mês:</span>
+      <select onchange="window._fatVarMes=this.value;FIN_renderFaturamentoVar()">${meses.map(m=>`<option value="${m}" ${m===mesAtual?'selected':''}>${m}</option>`).join('')}</select>
+      <input type="text" placeholder="Buscar cliente..." value="${window._fatVarBusca||''}" oninput="window._fatVarBusca=this.value;FIN_renderFaturamentoVar()" style="padding:7px 10px;border:1.5px solid var(--cinza-300);border-radius:8px;font-size:13px;">
+      <select onchange="window._fatVarOrdem=this.value;FIN_renderFaturamentoVar()" style="margin-left:auto;">
+        <option value="var-menor" ${ordem==='var-menor'?'selected':''}>Variação: menor → maior (quem caiu)</option>
+        <option value="var-maior" ${ordem==='var-maior'?'selected':''}>Variação: maior → menor</option>
+        <option value="maior" ${ordem==='maior'?'selected':''}>Maior faturamento</option>
+        <option value="menor" ${ordem==='menor'?'selected':''}>Menor faturamento</option>
+        <option value="nome" ${ordem==='nome'?'selected':''}>Nome (A-Z)</option>
+      </select>
+      <button class="btn sec" onclick="window.print()"><i class="ti ti-printer"></i> Exportar</button>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><div class="num">${finFmtM(totAtual)}</div><div class="lbl">Faturamento ${mesAtual}</div></div>
+      ${mesAnt?`<div class="kpi ${varTot>=0?'':'verm'}"><div class="num" style="color:${varTot>=0?'var(--verde-medio)':'var(--vermelho)'};">${varTot>=0?'+':''}${varTot.toFixed(1)}%</div><div class="lbl">vs ${mesAnt}</div></div>`:''}
+      <div class="kpi verm"><div class="num">${caindo}</div><div class="lbl">clientes em queda</div></div>
+    </div>
+    <div class="card">
+      <h2>Faturamento por cliente${mesAnt?` — ${mesAnt} → ${mesAtual}`:` — ${mesAtual}`}</h2>
+      <p style="font-size:12px;color:var(--cinza-500);margin-bottom:8px;">Ordenado por quem mais caiu. Mostrando ${Math.min(linhas.length,300)} de ${linhas.length}.</p>
+      <table><thead><tr><th>Cliente</th>${mesAnt?`<th>${mesAnt}</th>`:''}<th>${mesAtual}</th>${mesAnt?'<th>Variação</th>':''}</tr></thead><tbody>
+      ${linhas.slice(0,300).map(l=>{
+        let varCol='';
+        if(mesAnt){ if(l.varPct===null) varCol='<td><span class="badge" style="background:var(--verde-claro-bg);color:var(--verde-escuro);">novo</span></td>';
+          else { const cor=l.varPct>0.5?'pos':l.varPct<-0.5?'neg':''; varCol=`<td class="${cor}">${l.varPct>0?'+':''}${l.varPct.toFixed(1)}%</td>`; } }
+        return `<tr><td><b>${l.cliente}</b></td>${mesAnt?`<td style="color:var(--cinza-600);">${finFmtM(l.ant)}</td>`:''}<td><b>${finFmtM(l.atual)}</b></td>${varCol}</tr>`;
+      }).join('')}
+      </tbody></table>
+    </div>`;
+}
+
+
+
+// ===================== MÓDULO FINANCEIRO (integrado do dashboard de testes) =====================
+// Alimentado por upload manual (localStorage deste navegador). Acesso: admin/diretor + financeiro.
+// Carrega o SheetJS sob demanda (só quando o módulo é aberto).
+let _finSheetJSCarregado = false;
+function FIN_garantirSheetJS(cb){
+  if (_finSheetJSCarregado || window.XLSX) { _finSheetJSCarregado = true; return cb(); }
+  const s = document.createElement('script');
+  s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+  s.onload = () => { _finSheetJSCarregado = true; cb(); };
+  s.onerror = () => { cb(); }; // se falhar, o parser nativo ainda tenta
+  document.head.appendChild(s);
+}
+const FIN_HTML_RELATORIOS = '\n    <div class="card" style="background:#fff;border:1px solid var(--cinza-200);border-radius:14px;padding:20px;margin-bottom:16px;">\n      <h2 style="color:var(--verde-escuro);font-size:16px;margin:0 0 10px;">Suba os relatórios</h2>\n      <div style="background:#eef4fb;color:#2c5282;border-radius:8px;padding:10px;font-size:12.5px;margin-bottom:14px;"><i class="ti ti-info-circle"></i> Os dados ficam só neste navegador. O sistema soma só o que veio a mais (não conta título repetido).</div>\n      <div class="upload-box" id="ub-pagar"><label for="f-pagar"><i class="ti ti-file-spreadsheet" style="font-size:22px;display:block;margin-bottom:6px;"></i> Contas a Pagar (.xlsx)</label><input type="file" id="f-pagar" accept=".xlsx" onchange="FIN_lerArquivo(this,\'pagar\')"><div id="st-pagar" style="font-size:12px;color:var(--cinza-500);margin-top:6px;"></div></div>\n      <div class="upload-box" id="ub-receber"><label for="f-receber"><i class="ti ti-file-spreadsheet" style="font-size:22px;display:block;margin-bottom:6px;"></i> Contas a Receber — <b>EMITIDOS no mês</b> (filtro Emissão)</label><input type="file" id="f-receber" accept=".xlsx" onchange="FIN_lerArquivo(this,\'receber\')"><div id="st-receber" style="font-size:12px;color:var(--cinza-500);margin-top:6px;"></div></div>\n      <div class="upload-box" id="ub-recebeReceb"><label for="f-recebeReceb"><i class="ti ti-cash" style="font-size:22px;display:block;margin-bottom:6px;"></i> Contas a Receber — <b>RECEBIDOS no mês</b> (filtro Recebimento)</label><input type="file" id="f-recebeReceb" accept=".xlsx" onchange="FIN_lerArquivo(this,\'recebeReceb\')"><div id="st-recebeReceb" style="font-size:12px;color:var(--cinza-500);margin-top:6px;"></div></div>\n      <div class="upload-box" id="ub-comissao"><label for="f-comissao"><i class="ti ti-file-spreadsheet" style="font-size:22px;display:block;margin-bottom:6px;"></i> Planilha de Comissões (uma aba por consultor)</label><input type="file" id="f-comissao" accept=".xlsx" onchange="FIN_lerArquivo(this,\'comissao\')"><div id="st-comissao" style="font-size:12px;color:var(--cinza-500);margin-top:6px;"></div></div>\n      <div class="upload-box" id="ub-servicos"><label for="f-servicos"><i class="ti ti-recycle" style="font-size:22px;display:block;margin-bottom:6px;"></i> Relatório de Serviços (coletas — .csv)</label><input type="file" id="f-servicos" accept=".csv" onchange="FIN_lerArquivo(this,\'servicos\')"><div id="st-servicos" style="font-size:12px;color:var(--cinza-500);margin-top:6px;"></div></div>\n      <div class="upload-box" id="ub-faturamento"><label for="f-faturamento"><i class="ti ti-chart-line" style="font-size:22px;display:block;margin-bottom:6px;"></i> Variação de Faturamento (todos os clientes — .xlsx)</label><input type="file" id="f-faturamento" accept=".xlsx" onchange="FIN_lerArquivo(this,\'faturamento\')"><div id="st-faturamento" style="font-size:12px;color:var(--cinza-500);margin-top:6px;"></div></div>\n      <div style="margin-top:12px;"><button class="ficha-btn-secundario" onclick="FIN_limparTudo()"><i class="ti ti-trash"></i> Limpar tudo</button></div>\n    </div>\n    <div class="card" style="background:#fff;border:1px solid var(--cinza-200);border-radius:14px;padding:20px;"><h2 style="color:var(--verde-escuro);font-size:16px;margin:0 0 10px;">O que já está acumulado</h2><div id="resumo-acumulado">Nenhum relatório carregado ainda.</div></div>\n';
+function renderFinanceiro(area, subId){
+  FIN_garantirSheetJS(function(){
+    FIN_carregar();
+    if (subId === 'fin-relatorios'){
+      area.innerHTML = '<div id="fin-wrap">' + FIN_HTML_RELATORIOS + '</div>';
+      FIN_atualizarTudo();
+      return;
+    }
+    // demais telas: cria um painel-alvo com o id que a render espera, e chama a render
+    const mapa = {
+      'fin-saude':      { id:'p-saude',      fn: FIN_renderSaude },
+      'fin-pagar':      { id:'p-pagar',      fn: FIN_renderPagar },
+      'fin-receber':    { id:'p-receber',    fn: FIN_renderReceber },
+      'fin-coletas':    { id:'p-coletas',    fn: FIN_renderColetas },
+      'fin-faturamento':{ id:'p-faturamento',fn: FIN_renderFaturamentoVar },
+    };
+    const alvo = mapa[subId];
+    if (!alvo){ area.innerHTML = '<div class="sem-acesso">Tela não encontrada.</div>'; return; }
+    area.innerHTML = '<div id="fin-wrap"><div id="'+alvo.id+'"></div></div>';
+    try { alvo.fn(); } catch(e){ area.innerHTML = '<div class="sem-acesso">Erro ao renderizar: '+e.message+'</div>'; }
+  });
+}
 
 </script>
 </body>
