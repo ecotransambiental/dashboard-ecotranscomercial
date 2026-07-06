@@ -6179,6 +6179,7 @@ function calcResultados() {
       ${cardTaxa('Propostas \u2192 Fechamento', fechados, propostas, taxaPropFechado, 'var(--verde-ok)', `${fechados} fechados de ${propostas} propostas no período`)}
       ${cardTaxa('Pendente \u2192 Proposta', prospParaProp, totalProspec, taxaProspProposta, '#BA7517', `${prospParaProp} pendentes viraram proposta de ${totalProspec}`)}
     </div>
+    ${blocoMetricasFunil(leadsPeriodo)}
     <div style="background:white;border:1px solid var(--cinza-200);border-radius:12px;padding:20px;margin-top:18px;">
       <h3 style="font-family:var(--fonte-display);font-size:15px;margin:0 0 14px;">Resumo do período (${fmtDataBR(ini)} a ${fmtDataBR(fim)})</h3>
       <table style="width:100%;font-size:13px;border-collapse:collapse;">
@@ -6189,6 +6190,33 @@ function calcResultados() {
       </table>
     </div>
     ${blocoFechamentosComissao()}`;
+}
+
+// métricas financeiras do funil (ticket médio, valor em jogo, conversão em fechamentos)
+// calculadas dos leads do período. Coberturas ficam de fora (regra do negócio).
+function blocoMetricasFunil(leadsPeriodo) {
+  const val = l => { const v=l['VALOR_R$']; if(v==null||v==='')return 0; if(typeof v==='number')return v; let s=String(v).replace(/[^\d,.-]/g,''); if(s.includes(',')&&s.lastIndexOf(',')>s.lastIndexOf('.'))s=s.replace(/\./g,'').replace(',','.'); return parseFloat(s)||0; };
+  const semCobertura = (leadsPeriodo||[]).filter(l=>l['ETAPA']!=='Cobertura');
+  // propostas enviadas = leads que passaram por Proposta Enviada (ou estão além dela)
+  const etapasEnviada = ['Proposta Enviada','Fechado','Declinado'];
+  const propostasEnv = semCobertura.filter(l=>etapasEnviada.includes(l['ETAPA']));
+  const valPropostas = propostasEnv.reduce((s,l)=>s+val(l),0);
+  const ticket = propostasEnv.length ? valPropostas/propostasEnv.length : 0;
+  // valor em jogo = propostas enviadas ainda em aberto (não fechadas nem declinadas)
+  const emAberto = semCobertura.filter(l=>l['ETAPA']==='Proposta Enviada');
+  const valorEmJogo = emAberto.reduce((s,l)=>s+val(l),0);
+  // conversão em fechamentos = fechados / propostas enviadas
+  const fechadosN = propostasEnv.filter(l=>l['ETAPA']==='Fechado').length;
+  const convFech = propostasEnv.length ? (fechadosN/propostasEnv.length*100) : 0;
+  const card = (lbl, valor, cor) => `<div style="background:white;border:1px solid var(--cinza-200);border-radius:12px;padding:16px;border-top:3px solid ${cor};">
+    <div style="font-size:22px;font-weight:700;font-family:var(--fonte-display);color:${cor};">${valor}</div>
+    <div style="font-size:12px;color:var(--cinza-600);margin-top:2px;">${lbl}</div></div>`;
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-top:16px;">
+    ${card('Propostas enviadas', propostasEnv.length, 'var(--verde-escuro)')}
+    ${card('Ticket médio', fmtMoeda(ticket), 'var(--verde-medio)')}
+    ${card('Valor em jogo (em aberto)', fmtMoeda(valorEmJogo), '#BA7517')}
+    ${card('Conversão em fechamentos', convFech.toFixed(1)+'%', 'var(--verde-ok)')}
+  </div>`;
 }
 
 // bloco de fechamentos vindos da planilha de comissões (processada no módulo Financeiro).
