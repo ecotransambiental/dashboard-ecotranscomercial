@@ -395,7 +395,7 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbwpcfQ8LV-zZj31uHiOZT5n
 // A chave deve estar RESTRITA ao domínio ecotransambiental.github.io
 // e só com as APIs Geocoding e Routes ativadas.
 // ============================================================
-const GOOGLE_MAPS_KEY = 'AIzaSyC4oIgrSglCR1TckpKjE7DlSGLLCWSvddM';
+const GOOGLE_MAPS_KEY = 'COLE_SUA_CHAVE_AQUI';
 
 // ============================================================
 // CONFIGURAÇÃO — perfis e acessos
@@ -670,18 +670,22 @@ const _cacheBusca = {};
 // Assim ganhamos velocidade sem o risco de mostrar dado velho após salvar.
 const _cacheDados = {};
 const _CACHE_TTL = 90000; // 90 segundos
-async function buscarDados(aba, forcar) {
+async function buscarDados(aba, forcar, filtroCnpj) {
   const agora = Date.now();
-  const c = _cacheDados[aba];
+  // chave de cache inclui o CNPJ quando filtrado (não mistura filtrado com aba inteira)
+  const chave = filtroCnpj ? (aba + '::' + String(filtroCnpj).replace(/\D/g,'')) : aba;
+  const c = _cacheDados[chave];
   if (!forcar && c && (agora - c.t < _CACHE_TTL)) {
     return c.dados;
   }
+  const payload = { acao: 'dados', token: sessaoToken, aba: aba };
+  if (filtroCnpj) payload.filtroCnpj = filtroCnpj;
   const resp = await fetch(API_URL, {
     method: 'POST',
-    body: JSON.stringify({ acao: 'dados', token: sessaoToken, aba: aba })
+    body: JSON.stringify(payload)
   });
   const dados = await resp.json();
-  _cacheDados[aba] = { t: agora, dados: dados };
+  _cacheDados[chave] = { t: agora, dados: dados };
   return dados;
 }
 function limparCacheBusca(){ for (const k in _cacheDados) delete _cacheDados[k]; }
@@ -1197,8 +1201,11 @@ async function renderAbaAditivos(corpo) {
       <div style="font-weight:600;color:var(--cinza-900);margin-bottom:8px;">Aditivo ${a['STATUS']?`<span style="font-size:11px;color:${cor};">· ${a['STATUS']}</span>`:''}</div>
       <table class="ficha-tab">
         <tr><td>Vigência</td><td>${a['VIGENCIA']||'—'}</td></tr>
+        ${a['NOVO_VENCIMENTO']?`<tr><td>Novo vencimento</td><td>${fmtDataBR(a['NOVO_VENCIMENTO'])}</td></tr>`:''}
         <tr><td>Multa</td><td>${a['MULTA']||'—'}</td></tr>
-        <tr><td>Alteração de valor</td><td>${a['VALOR_NOVO']?fmtMoeda(a['VALOR_NOVO']):'Não'}</td></tr>
+        <tr><td>Alteração de valor</td><td>${(a['ALTERA_VALOR']==='Sim'||a['VALOR_NOVO'])?'Sim':'Não'}</td></tr>
+        ${a['PERCENTUAL']?`<tr><td>Percentual</td><td>${a['PERCENTUAL']}%</td></tr>`:''}
+        ${a['VALOR_NOVO']?`<tr><td>Valor novo</td><td>${fmtMoeda(a['VALOR_NOVO'])}</td></tr>`:''}
         <tr><td>Solicitado por</td><td>${a['SOLICITADO_POR']||'—'}</td></tr>
         <tr><td>Observação</td><td>${a['OBS']||'—'}</td></tr>
       </table>
@@ -1219,11 +1226,17 @@ function abrirFormAditivo(cnpj, cliente, ehSolicitacao) {
         <div class="ficha-corpo">
           <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Vigência *</label>
             <input type="text" id="ad-vigencia" placeholder="ex: 12 meses a partir de 01/07/2026" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+          <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Novo vencimento do contrato (com o aditivo)</label>
+            <input type="date" id="ad-novovenc" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;">
+            <div style="font-size:11px;color:var(--cinza-500);margin-top:4px;">Se preencher, o vencimento do contrato é atualizado — assim ele não fica constando como vencido.</div></div>
           <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Tem multa?</label>
             <select id="ad-multa" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"><option value="">Não</option><option>Sim</option></select></div>
           <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Tem alteração de valor?</label>
             <select id="ad-temvalor" onchange="document.getElementById('ad-valor-wrap').style.display=this.value==='Sim'?'block':'none'" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"><option value="">Não</option><option>Sim</option></select></div>
-          <div id="ad-valor-wrap" style="margin-bottom:12px;display:none;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Valor novo (R$)</label>
+          <div id="ad-valor-wrap" style="margin-bottom:12px;display:none;">
+            <label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Percentual de alteração (%)</label>
+            <input type="number" id="ad-perc" step="0.01" placeholder="ex: 8.5" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;margin-bottom:10px;">
+            <label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Valor novo (R$)</label>
             <input type="number" id="ad-valor" step="0.01" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
           <div style="margin-bottom:14px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Observação</label>
             <textarea id="ad-obs" rows="2" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;font-family:var(--fonte-corpo);"></textarea></div>
@@ -1240,10 +1253,14 @@ async function salvarAditivo(cnpj, cliente, ehSolicitacao) {
   const vigencia = document.getElementById('ad-vigencia').value;
   if (!vigencia) { document.getElementById('ad-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Informe a vigência.</div>'; return; }
   const temValor = document.getElementById('ad-temvalor').value==='Sim';
+  const novoVenc = document.getElementById('ad-novovenc').value; // AAAA-MM-DD ou ''
   const campos = {
     'CNPJ': cnpj, 'CLIENTE': cliente, 'VIGENCIA': vigencia,
     'MULTA': document.getElementById('ad-multa').value,
+    'ALTERA_VALOR': temValor ? 'Sim' : 'Não',
+    'PERCENTUAL': temValor ? document.getElementById('ad-perc').value : '',
     'VALOR_NOVO': temValor ? document.getElementById('ad-valor').value : '',
+    'NOVO_VENCIMENTO': novoVenc,
     'OBS': document.getElementById('ad-obs').value,
     'SOLICITADO_POR': usuarioAtual.nome,
     'STATUS': ehSolicitacao ? 'Solicitado' : 'Registrado',
@@ -1254,6 +1271,16 @@ async function salvarAditivo(cnpj, cliente, ehSolicitacao) {
     const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({ acao:'novoRegistro', token: sessaoToken, dados:{ aba:'Aditivos', campos } })});
     const r = await resp.json();
     if (!r.ok) { document.getElementById('ad-msg').innerHTML=`<div class="sem-acesso">${r.erro||'verifique se o Apps Script foi republicado.'}</div>`; return; }
+    // se é um aditivo registrado (não solicitação) e informou novo vencimento, atualiza o contrato
+    // pra vigência refletir o aditivo (evita o contrato constar como vencido)
+    if (!ehSolicitacao && novoVenc) {
+      try {
+        await fetch(API_URL, { method:'POST', body: JSON.stringify({
+          acao:'salvar', token: sessaoToken, aba:'Contratos',
+          dados:{ 'CNPJ': cnpj, 'VENC. ADITIVO': novoVenc, 'VIGENCIA_ATUALIZADA': novoVenc }
+        })});
+      } catch(e) {}
+    }
     document.getElementById('form-adit-overlay').remove();
     const corpo = document.getElementById('ficha-corpo'); if (corpo) renderAbaAditivos(corpo);
   } catch(e) { document.getElementById('ad-msg').innerHTML='<div class="sem-acesso">Erro de conexão.</div>'; }
@@ -1389,9 +1416,11 @@ async function imprimirFichaCliente(cnpj) {
       dados:{ cnpj: cnpj, cliente: c['CLIENTE']||'', tipo:'Impressão de ficha', titulo:'Ficha impressa', descricao:'', dataAgendada:'', registradoPor: usuarioAtual.nome }
     })});
   } catch(e) {}
-  // buscar contratos, reajustes, faturamento, equipamentos
+  // buscar contratos, reajustes, faturamento, equipamentos — JÁ FILTRADOS por CNPJ no servidor
+  // (em vez de baixar a aba inteira e filtrar aqui). Reduz muito o tráfego e a lentidão.
   const [rc, rr, rf, re] = await Promise.all([
-    buscarDados('Contratos'), buscarDados('Reajustes'), buscarDados('Faturamento'), buscarDados('Valores_Equipamento')
+    buscarDados('Contratos', false, cnpj), buscarDados('Reajustes', false, cnpj),
+    buscarDados('Faturamento', false, cnpj), buscarDados('Valores_Equipamento', false, cnpj)
   ]);
   const contratos = (rc.ok?rc.linhas:[]).filter(x=>cnpjLimpo(x['CNPJ'])===alvo);
   const reajustes = (rr.ok?rr.linhas:[]).filter(x=>cnpjLimpo(x['CNPJ'])===alvo);
@@ -1400,7 +1429,12 @@ async function imprimirFichaCliente(cnpj) {
 
   const tab = (titulo, linhas) => `<h2 style="color:#2d5a3d;font-size:15px;border-bottom:2px solid #8bc34a;padding-bottom:4px;margin:18px 0 8px;">${titulo}</h2>${linhas}`;
   let contratosHtml = contratos.length ? contratos.map(ct=>`<table class="t"><tr><td>Nº Contrato</td><td>${ct['Nº CTO']||'—'}</td></tr><tr><td>Assinatura</td><td>${fmtDataBR(ct['ASS. CTO'])}</td></tr><tr><td>Vencimento</td><td>${fmtDataBR(ct['VENC.'])}</td></tr><tr><td>Período</td><td>${ct['PERÍODO']||'—'}</td></tr><tr><td>Aditivo (ass/venc)</td><td>${fmtDataBR(ct['ASS. ADITIVO'])} / ${fmtDataBR(ct['VENC. ADITIVO'])}</td></tr><tr><td>Índice</td><td>${ct['ÍNDICE']||'—'}</td></tr><tr><td>Multa</td><td>${ct['MULTA']||'—'}</td></tr></table>`).join('') : '<p style="color:#999;">Sem contratos.</p>';
-  let reajHtml = reajustes.length ? `<table class="t"><tr style="background:#f0f7ec;"><th>Serviço</th><th>Anterior</th><th>Reajustado</th><th>Índice</th><th>Data</th></tr>${reajustes.map(r=>`<tr><td>${r['TP DE SERVIÇO']||'—'}</td><td>${fmtMoeda(r['PREÇO ANTERIOR'])}</td><td>${fmtMoeda(r['VALOR REAJUSTADO'])}</td><td>${r['ÍNDICE']||'—'}</td><td>${fmtDataBR(r['DATA ÚLTIMO REAJUSTE ']||r['DATA ÚLTIMO REAJUSTE'])}</td></tr>`).join('')}</table>` : '<p style="color:#999;">Sem reajustes.</p>';
+  let reajHtml = reajustes.length ? `<table class="t"><tr style="background:#f0f7ec;"><th>Serviço</th><th>Anterior</th><th>Reajustado</th><th>%</th><th>Índice</th><th>Data</th></tr>${reajustes.map(r=>{
+      const ant=parseMoedaReaj(r['PREÇO ANTERIOR']); const novo=parseMoedaReaj(r['VALOR REAJUSTADO']);
+      let pct=null; if(r['ALIQUOTA']!=null&&r['ALIQUOTA']!=='')pct=parseFloat(r['ALIQUOTA'])*100; else if(ant!=null&&ant!==0&&novo!=null)pct=(novo-ant)/ant*100;
+      const pctTxt=pct!=null?`${pct.toFixed(1).replace('.',',')}%`:'—';
+      return `<tr><td>${r['TP DE SERVIÇO']||'—'}</td><td>${fmtMoeda(r['PREÇO ANTERIOR'])}</td><td>${fmtMoeda(r['VALOR REAJUSTADO'])}</td><td>${pctTxt}</td><td>${r['ÍNDICE']||'—'}</td><td>${fmtDataBR(r['DATA ÚLTIMO REAJUSTE ']||r['DATA ÚLTIMO REAJUSTE'])}</td></tr>`;
+    }).join('')}</table>` : '<p style="color:#999;">Sem reajustes.</p>';
   let equipHtml = equip.length ? `<table class="t"><tr style="background:#f0f7ec;"><th>Equipamento</th><th>Valor</th></tr>${equip.map(e=>`<tr><td>${e['EQUIPAMENTO']||e['DESCRIÇÃO']||e['TIPO']||'—'}</td><td>${fmtMoeda(e['VALOR']||e['VALOR_UNIT']||e['PREÇO'])}</td></tr>`).join('')}</table>` : '<p style="color:#999;">Sem equipamentos cadastrados.</p>';
   // formata valor: colunas de COLETAS/quantidade ficam como número; resto como R$
   const ehColeta = k => /COLETA|QTD|QUANT|QUANTIDADE/i.test(String(k));
