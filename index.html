@@ -14,6 +14,8 @@
 <style>
   :root {
     --verde-escuro: #2d5a3d;
+    --branco: #ffffff;
+    --roxo: #6B5B95;
     --verde-medio: #4a8c5c;
     --verde-claro: #8bc34a;
     --verde-claro-bg: #f0f7ec;
@@ -435,12 +437,7 @@ const MODULOS = [
       { id: 'cart-visao',       nome: 'Visão Geral',       icone: 'ti-layout-dashboard' },
       { id: 'cart-clientes',    nome: 'Clientes',          icone: 'ti-building' },
       { id: 'cart-contratos',   nome: 'Contratos',         icone: 'ti-file-text' },
-      { id: 'cart-reajustes',   nome: 'Reajustes',         icone: 'ti-trending-up' },
-      { id: 'cart-aprovacoes',  nome: 'Aprovações',        icone: 'ti-checkup-list' },
-      { id: 'cart-faturamento', nome: 'Faturamento',       icone: 'ti-cash' },
       { id: 'cart-cancelados',  nome: 'Cancelamentos',     icone: 'ti-circle-x' },
-      { id: 'cart-inadimplencia', nome: 'Inadimplência',   icone: 'ti-alert-triangle' },
-      { id: 'cart-graficos',    nome: 'Gráficos',          icone: 'ti-chart-line' },
       { id: 'cart-buscar',      nome: 'Buscar Cliente',    icone: 'ti-search' },
       { id: 'cart-quematende',  nome: 'Quem atende quem',  icone: 'ti-users' },
     ]
@@ -465,12 +462,16 @@ const MODULOS = [
   {
     id: 'financeiro', nome: 'Financeiro', icone: 'ti-report-money',
     subs: [
-      { id: 'fin-relatorios',  nome: 'Relatórios (upload)', icone: 'ti-upload' },
-      { id: 'fin-saude',       nome: 'Saúde Financeira',    icone: 'ti-heart-rate-monitor' },
-      { id: 'fin-pagar',       nome: 'Contas a Pagar',      icone: 'ti-arrow-up-right' },
-      { id: 'fin-receber',     nome: 'Contas a Receber',    icone: 'ti-arrow-down-left' },
-      { id: 'fin-coletas',     nome: 'Coletas (semanal)',   icone: 'ti-recycle' },
-      { id: 'fin-faturamento', nome: 'Faturamento',         icone: 'ti-chart-line' },
+      { id: 'fin-relatorios',   nome: 'Relatórios (upload)', icone: 'ti-upload' },
+      { id: 'fin-saude',        nome: 'Saúde Financeira',    icone: 'ti-heart-rate-monitor' },
+      { id: 'fin-pagar',        nome: 'Contas a Pagar',      icone: 'ti-arrow-up-right' },
+      { id: 'fin-receber',      nome: 'Contas a Receber',    icone: 'ti-arrow-down-left' },
+      { id: 'fin-coletas',      nome: 'Coletas (semanal)',   icone: 'ti-recycle' },
+      { id: 'cart-faturamento', nome: 'Faturamento',         icone: 'ti-cash' },
+      { id: 'cart-reajustes',   nome: 'Reajustes',           icone: 'ti-trending-up' },
+      { id: 'cart-aprovacoes',  nome: 'Aprovações',          icone: 'ti-checkup-list' },
+      { id: 'cart-inadimplencia', nome: 'Inadimplência',     icone: 'ti-alert-triangle' },
+      { id: 'cart-graficos',    nome: 'Gráficos',            icone: 'ti-chart-line' },
     ]
   },
 ];
@@ -883,17 +884,23 @@ async function carregarClientes() {
   // na Carteira: vendedoras + Danielly + Rogério só veem os próprios clientes
   if (veSomenteProprios_Carteira()) linhas = linhas.filter(c => ehMeuRegistro(c['CONSULTOR']));
   cacheClientes = linhas;
-  // carregar faturamento pra cruzar — detecta a coluna do mês por exclusão (o nome pode chegar como data)
+  return cacheClientes;
+}
+
+// Faturamento é carregado SEPARADAMENTE e só quando a tela precisa (era carregado junto
+// com os clientes em toda tela, o que pesava à toa). Telas que cruzam faturamento chamam esta.
+async function carregarFaturamento() {
+  if (cacheFaturamento) return cacheFaturamento;
   const rf = await buscarDados('Faturamento');
   cacheFaturamento = {};
   if (rf.ok && rf.linhas.length) {
     const cols = rf.colunas || Object.keys(rf.linhas[0]);
     const colsMes = cols.filter(c => { const s=String(c).trim(); return s!=='CNPJ'&&s!=='CLIENTE'&&!s.toUpperCase().startsWith('COLETAS')&&!s.toUpperCase().startsWith('COB'); });
-    const ultimoMes = colsMes[colsMes.length-1]; // mês mais recente
+    const ultimoMes = colsMes[colsMes.length-1];
     function num(v){ if(v==null||v==='')return 0; if(typeof v==='number')return v; let s=String(v).replace(/[^\d,.-]/g,''); if(s.includes(',')&&s.lastIndexOf(',')>s.lastIndexOf('.'))s=s.replace(/\./g,'').replace(',','.'); const n=parseFloat(s); return isNaN(n)?0:n; }
     rf.linhas.forEach(l => { cacheFaturamento[String(l['CNPJ'])] = ultimoMes ? num(l[ultimoMes]) : 0; });
   }
-  return cacheClientes;
+  return cacheFaturamento;
 }
 
 function iniciais(nome) {
@@ -1006,6 +1013,11 @@ async function renderClientes(area) {
 
   document.getElementById('busca-cli').addEventListener('input', e => { termoBusca = e.target.value; aplicarFiltrosCli(); });
   aplicarFiltrosCli();
+
+  // carrega o faturamento em segundo plano e re-renderiza quando chegar (não trava a tela)
+  if (!cacheFaturamento) {
+    carregarFaturamento().then(() => { aplicarFiltrosCli(); }).catch(()=>{});
+  }
 }
 
 function setFiltroTipo(t) { filtroTipo = t; renderClientes(document.getElementById('area-conteudo')); }
@@ -1036,7 +1048,7 @@ function cardsClientes(lista) {
   let html = '<div class="grid-cards">';
   lista.slice(0, 150).forEach(c => {
     const cnpj = String(c['CNPJ']||'');
-    const fat = cacheFaturamento[cnpj];
+    const fat = cacheFaturamento ? cacheFaturamento[cnpj] : undefined;
     const tipo = c['TIPO'] || '';
     const grupo = c['GRUPO'] || '';
     html += `<div class="card-cli ativo-status" onclick="abrirFicha('${cnpj.replace(/'/g,'')}')">
@@ -1069,7 +1081,7 @@ function listaClientes(lista) {
     html += `<div class="lista-cli-item" onclick="abrirFicha('${cnpj.replace(/'/g,'')}','${nome}')">
       <div><b style="color:var(--cinza-900);">${c['CLIENTE']||'—'}</b><br><span style="color:var(--cinza-500);font-size:12px;">${cnpj||'sem CNPJ'}</span></div>
       <span style="color:var(--cinza-600);">${c['CONSULTOR']||'—'}</span>
-      <span style="color:var(--verde-escuro);font-weight:600;">${fmtMoeda(cacheFaturamento[cnpj])}</span>
+      <span style="color:var(--verde-escuro);font-weight:600;">${fmtMoeda(cacheFaturamento ? cacheFaturamento[cnpj] : '')}</span>
     </div>`;
   });
   html += '</div>';
@@ -3513,9 +3525,15 @@ let cacheFat = null, cacheFatCols = null;
 async function renderFaturamento(area) {
   area.innerHTML = `<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando faturamento...</h2></div>`;
   await carregarClientes(); // pra saber tipo (Contrato/Eventual)
-  const r = await buscarDados('Faturamento_Variacao');
-  cacheFat = r.ok ? r.linhas : [];
-  cacheFatCols = r.ok ? r.colunas : [];
+  // carrega o faturamento do módulo Financeiro (upload único, aba Fin_Faturamento)
+  if (typeof FIN_garantirSheetJS==='function') { await new Promise(r=>FIN_garantirSheetJS(r)); }
+  if (typeof finCarregarDoSheets==='function') { try { await finCarregarDoSheets(); } catch(e){} }
+  const fatNovo = (typeof FINdados!=='undefined' && FINdados.faturamento) ? FINdados.faturamento : [];
+  // converte {cliente, valores:{mes:v}} para o formato de linha que a tela usa (CLIENTE + colunas de mês)
+  cacheFat = fatNovo.map(x => ({ CLIENTE: x.cliente, ...x.valores }));
+  const mesesSet = new Set();
+  fatNovo.forEach(x => Object.keys(x.valores||{}).forEach(m => mesesSet.add(m)));
+  cacheFatCols = ['CLIENTE', ...[...mesesSet]];
   // meses = colunas que não são CLIENTE/CNPJ/VARIACAO_%
   const meses = cacheFatCols.filter(c => {
     const s = String(c).trim().toUpperCase();
@@ -3529,9 +3547,11 @@ async function renderFaturamento(area) {
   const idxMes = meses.indexOf(mesAtual);
   const mesAnterior = idxMes > 0 ? meses[idxMes-1] : null;
 
-  // mapa de tipo por CNPJ (limpo, só dígitos — a Variação guarda CNPJ sem pontuação)
-  const tipoPorCnpj = {};
-  cacheClientes.forEach(c => { tipoPorCnpj[cnpjLimpo(c['CNPJ'])] = (c['TIPO']==='Eventual'?'Eventual':'Contrato'); });
+  // mapa de tipo por NOME do cliente (a fonte de variação não traz CNPJ; casar por nome é mais confiável,
+  // e clientes multi-unidade são agrupados por nome mesmo).
+  const norm = s => String(s||'').trim().toUpperCase().replace(/\s+/g,' ');
+  const tipoPorNome = {};
+  cacheClientes.forEach(c => { tipoPorNome[norm(c['CLIENTE'])] = (c['TIPO']==='Eventual'?'Eventual':'Contrato'); });
 
   // valor do mês de uma linha, tolerante a espaço/variação na chave e formato BR
   function valMes(linha, mes) {
@@ -3549,7 +3569,7 @@ async function renderFaturamento(area) {
   // somatórios
   function somaTipo(mes, tipo) {
     return cacheFat.reduce((s,l) => {
-      const t = tipoPorCnpj[cnpjLimpo(l['CNPJ'])] || 'Contrato';
+      const t = tipoPorNome[norm(l['CLIENTE'])] || 'Contrato';
       if (tipo && t !== tipo) return s;
       return s + valMes(l, mes);
     }, 0);
@@ -3574,7 +3594,7 @@ async function renderFaturamento(area) {
       <select class="filtro-sel" id="fat-mes" onchange="renderFaturamento(document.getElementById('area-conteudo'))" style="min-width:140px;">
         ${meses.map(m=>`<option value="${m}" ${m===mesAtual?'selected':''}>${rotuloMes(m)}</option>`).join('')}
       </select>
-      <button class="btn-importar" onclick="abrirImportarFat()"><i class="ti ti-upload"></i> Importar faturamento do mês</button>
+      <span style="font-size:12px;color:var(--cinza-500);display:inline-flex;align-items:center;gap:6px;"><i class="ti ti-info-circle"></i> Para atualizar, suba o relatório em <b>Financeiro › Relatórios</b></span>
     </div>
 
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:20px;">
@@ -3624,7 +3644,8 @@ async function renderFaturamento(area) {
   window._fatMes = mesAtual;
   window._fatMesAnt = mesAnterior;
   window._fatRotulo = rotuloMes;
-  window._tipoPorCnpj = tipoPorCnpj;
+  window._tipoPorNome = tipoPorNome;
+  window._normNomeFat = norm;
   window._valMes = valMes;
   window._filtroFatTipo = 'todos';
   filtraTabelaFat();
@@ -3640,7 +3661,8 @@ function setFiltroFat(t, el) {
 function filtraTabelaFat() {
   const termo = ((document.getElementById('fat-busca')||{}).value||'').toLowerCase();
   const meses = window._fatMeses || [];
-  const mes = window._fatMes, mesAnt = window._fatMesAnt, tipos = window._tipoPorCnpj;
+  const mes = window._fatMes, mesAnt = window._fatMesAnt, tipos = window._tipoPorNome;
+  const normF = window._normNomeFat || (s=>String(s||'').trim().toUpperCase());
   const vm = window._valMes || ((l,m)=>parseFloat(l[m])||0);
   const rot = window._fatRotulo || (m=>m);
   const filtroTipo = window._filtroFatTipo || 'todos';
@@ -3651,7 +3673,7 @@ function filtraTabelaFat() {
 
   let lista = cacheFat.slice();
   if (termo) lista = lista.filter(l => String(l['CLIENTE']||'').toLowerCase().includes(termo));
-  if (filtroTipo !== 'todos') lista = lista.filter(l => (tipos[cnpjLimpo(l['CNPJ'])]||'Contrato') === filtroTipo);
+  if (filtroTipo !== 'todos') lista = lista.filter(l => (tipos[normF(l['CLIENTE'])]||'Contrato') === filtroTipo);
 
   // funções de valor conforme a visão
   const media3 = l => { const vs=ultimos3.map(m=>vm(l,m)); return vs.reduce((a,b)=>a+b,0)/(vs.length||1); };
@@ -3673,11 +3695,11 @@ function filtraTabelaFat() {
     // colunas: cliente, tipo, mês-2, mês-1, mês atual (esquerda->direita, antigo->recente), variação do último par
     html = `<table class="fat-tabela"><thead><tr><th>Cliente</th><th>Tipo</th>${ultimos3.map(m=>`<th class="num">${rot(m)}</th>`).join('')}<th class="num">Variação</th></tr></thead><tbody>`;
     lista.slice(0,200).forEach(l => {
-      const tipo = tipos[cnpjLimpo(l['CNPJ'])] || 'Contrato';
+      const tipo = tipos[normF(l['CLIENTE'])] || 'Contrato';
       const vs = ultimos3.map(m=>vm(l,m));
       const p = (vs.length>=2 && vs[vs.length-2]!==0) ? ((vs[vs.length-1]-vs[vs.length-2])/vs[vs.length-2]*100) : null;
       const varCol = p===null ? '<td class="num fat-var-zero">—</td>' : `<td class="num ${p>0.05?'fat-var-pos':p<-0.05?'fat-var-neg':'fat-var-zero'}">${p>0?'+':''}${p.toFixed(1)}%</td>`;
-      html += `<tr onclick="abrirFicha('${String(l['CNPJ']).replace(/'/g,'')}','${String(l['CLIENTE']||'').replace(/'/g,"\\'")}')">
+      html += `<tr onclick="abrirFicha('${cnpjLimpo(l['CNPJ']||'')}','${String(l['CLIENTE']||'').replace(/'/g,"\\'")}')">
         <td><b style="color:var(--cinza-900);">${l['CLIENTE']||'—'}</b></td>
         <td><span class="tag ${tipo==='Eventual'?'tag-eventual':'tag-contrato'}">${tipo}</span></td>
         ${vs.map((v,i)=>`<td class="num" style="${i===vs.length-1?'font-weight:700;':'color:var(--cinza-600);'}">${fmtMoeda(v)}</td>`).join('')}
@@ -3688,10 +3710,10 @@ function filtraTabelaFat() {
   } else if (visao === 'media3') {
     html = `<table class="fat-tabela"><thead><tr><th>Cliente</th><th>Tipo</th><th class="num">Média 3 meses</th><th class="num" style="font-size:11px;">(${ultimos3.map(rot).join(', ')})</th></tr></thead><tbody>`;
     lista.slice(0,200).forEach(l => {
-      const tipo = tipos[cnpjLimpo(l['CNPJ'])] || 'Contrato';
+      const tipo = tipos[normF(l['CLIENTE'])] || 'Contrato';
       const m = media3(l);
       const detalhe = ultimos3.map(mm=>fmtMoeda(vm(l,mm))).join(' · ');
-      html += `<tr onclick="abrirFicha('${String(l['CNPJ']).replace(/'/g,'')}','${String(l['CLIENTE']||'').replace(/'/g,"\\'")}')">
+      html += `<tr onclick="abrirFicha('${cnpjLimpo(l['CNPJ']||'')}','${String(l['CLIENTE']||'').replace(/'/g,"\\'")}')">
         <td><b style="color:var(--cinza-900);">${l['CLIENTE']||'—'}</b></td>
         <td><span class="tag ${tipo==='Eventual'?'tag-eventual':'tag-contrato'}">${tipo}</span></td>
         <td class="num"><b>${fmtMoeda(m)}</b></td>
@@ -3705,13 +3727,13 @@ function filtraTabelaFat() {
     lista.slice(0,200).forEach(l => {
       const atual = vm(l, mes);
       const ant = mesAnt ? vm(l, mesAnt) : null;
-      const tipo = tipos[cnpjLimpo(l['CNPJ'])] || 'Contrato';
+      const tipo = tipos[normF(l['CLIENTE'])] || 'Contrato';
       let varCol = '';
       if (mesAnt) {
         if (ant === 0) varCol = `<td class="num fat-var-zero">novo</td>`;
         else { const p=((atual-ant)/ant*100); varCol = `<td class="num ${p>0.05?'fat-var-pos':p<-0.05?'fat-var-neg':'fat-var-zero'}">${p>0?'+':''}${p.toFixed(1)}%</td>`; }
       }
-      html += `<tr onclick="abrirFicha('${String(l['CNPJ']).replace(/'/g,'')}','${String(l['CLIENTE']||'').replace(/'/g,"\\'")}')">
+      html += `<tr onclick="abrirFicha('${cnpjLimpo(l['CNPJ']||'')}','${String(l['CLIENTE']||'').replace(/'/g,"\\'")}')">
         <td><b style="color:var(--cinza-900);">${l['CLIENTE']||'—'}</b></td>
         <td><span class="tag ${tipo==='Eventual'?'tag-eventual':'tag-contrato'}">${tipo}</span></td>
         ${mesAnt?`<td class="num" style="color:var(--cinza-600);">${fmtMoeda(ant)}</td>`:''}
@@ -3729,7 +3751,8 @@ function filtraTabelaFat() {
 function exportarFaturamento() {
   const lista = window._fatListaExport || [];
   const meses = window._fatMeses || [];
-  const mes = window._fatMes, mesAnt = window._fatMesAnt, tipos = window._tipoPorCnpj || {};
+  const mes = window._fatMes, mesAnt = window._fatMesAnt, tipos = window._tipoPorNome || {};
+  const normF = window._normNomeFat || (s=>String(s||'').trim().toUpperCase());
   const vm = window._valMes || ((l,m)=>parseFloat(l[m])||0);
   const rot = window._fatRotulo || (m=>m);
   const visao = (document.getElementById('fat-visao')||{}).value || 'mes';
@@ -3739,15 +3762,15 @@ function exportarFaturamento() {
   if (visao === '3meses') {
     cabTab = `<th>Cliente</th><th>Tipo</th>${ultimos3.map(m=>`<th>${rot(m)}</th>`).join('')}<th>Variação</th>`;
     linhas = lista.map(l=>{ const vs=ultimos3.map(m=>vm(l,m)); const p=(vs.length>=2&&vs[vs.length-2]!==0)?((vs[vs.length-1]-vs[vs.length-2])/vs[vs.length-2]*100):null;
-      return `<tr><td>${l['CLIENTE']||'—'}</td><td>${tipos[cnpjLimpo(l['CNPJ'])]||'Contrato'}</td>${vs.map(v=>`<td>${fmtMoeda(v)}</td>`).join('')}<td>${p===null?'—':(p>0?'+':'')+p.toFixed(1)+'%'}</td></tr>`; }).join('');
+      return `<tr><td>${l['CLIENTE']||'—'}</td><td>${tipos[normF(l['CLIENTE'])]||'Contrato'}</td>${vs.map(v=>`<td>${fmtMoeda(v)}</td>`).join('')}<td>${p===null?'—':(p>0?'+':'')+p.toFixed(1)+'%'}</td></tr>`; }).join('');
   } else if (visao === 'media3') {
     cabTab = `<th>Cliente</th><th>Tipo</th><th>Média 3 meses (${ultimos3.map(rot).join(', ')})</th>`;
     linhas = lista.map(l=>{ const vs=ultimos3.map(m=>vm(l,m)); const md=vs.reduce((a,b)=>a+b,0)/(vs.length||1);
-      return `<tr><td>${l['CLIENTE']||'—'}</td><td>${tipos[cnpjLimpo(l['CNPJ'])]||'Contrato'}</td><td>${fmtMoeda(md)}</td></tr>`; }).join('');
+      return `<tr><td>${l['CLIENTE']||'—'}</td><td>${tipos[normF(l['CLIENTE'])]||'Contrato'}</td><td>${fmtMoeda(md)}</td></tr>`; }).join('');
   } else {
     cabTab = `<th>Cliente</th><th>Tipo</th>${mesAnt?`<th>${rot(mesAnt)}</th>`:''}<th>${rot(mes)}</th>${mesAnt?'<th>Variação</th>':''}`;
     linhas = lista.map(l=>{ const a=vm(l,mes), b=mesAnt?vm(l,mesAnt):null; const p=(mesAnt&&b!==0)?((a-b)/b*100):null;
-      return `<tr><td>${l['CLIENTE']||'—'}</td><td>${tipos[cnpjLimpo(l['CNPJ'])]||'Contrato'}</td>${mesAnt?`<td>${fmtMoeda(b)}</td>`:''}<td>${fmtMoeda(a)}</td>${mesAnt?`<td>${p===null?'novo':(p>0?'+':'')+p.toFixed(1)+'%'}</td>`:''}</tr>`; }).join('');
+      return `<tr><td>${l['CLIENTE']||'—'}</td><td>${tipos[normF(l['CLIENTE'])]||'Contrato'}</td>${mesAnt?`<td>${fmtMoeda(b)}</td>`:''}<td>${fmtMoeda(a)}</td>${mesAnt?`<td>${p===null?'novo':(p>0?'+':'')+p.toFixed(1)+'%'}</td>`:''}</tr>`; }).join('');
   }
   const win = window.open('', '_blank');
   win.document.write(`<html><head><title>Faturamento — ${rot(mes)}</title>
@@ -7027,19 +7050,22 @@ function finAtualizarTudo(){
 
 // ============ SAÚDE FINANCEIRA ============
 function finYmDeData(s){ const m=finLc(s).match(/(\d{2})\/(\d{2})\/(\d{2,4})/); if(!m) return ''; let ano=m[3].length===2?'20'+m[3]:m[3]; return `${ano}-${m[2]}`; }
+// mês de pagamento robusto: usa o campo pré-calculado se existir (sobrevive ao Sheets), senão parseia a data
+function finMesPag(x){ return x._mesPagamento || finMesPag(x); }
 function FIN_renderSaude(){
   const p=document.getElementById('p-saude');
   if(!FINdados.pagar.length && !FINdados.receber.length){ p.innerHTML='<div class="card"><div class="vazio">Suba os relatórios de Pagar e Receber primeiro.</div></div>'; return; }
   const baseData = (window._saudeBase||'emissao');
   const receita={}, despesa={};
-  // receita = emitidos, agrupados por emissão (alinha com o cartão "Emitido no mês")
+  // mês da receita: usa o campo pré-calculado _mesEmissao (sobrevive ao ir/voltar do Sheets);
+  // se não houver, cai no parse da data de emissão.
   FINdados.receber.filter(r=>!String(r.situacao||'').toLowerCase().includes('cancel')).forEach(r=>{
-    const ym = baseData==='competencia' ? finCompYM(r.competencia) : finYmDeData(r.emissao);
+    const ym = baseData==='competencia' ? finCompYM(r.competencia) : (r._mesEmissao || finYmDeData(r.emissao));
     if(ym){ receita[ym]=(receita[ym]||0)+r.valor; }
   });
-  // despesa = contas a pagar, agrupadas por pagamento (alinha com o cartão de pagar)
+  // despesa = contas a pagar, por _mesPagamento (pré-calculado) ou parse da data de pagamento
   FINdados.pagar.filter(r=>!String(r.situacao||'').toLowerCase().includes('cancel')).forEach(r=>{
-    const ym = baseData==='competencia' ? finCompYM(r.competencia) : finYmDeData(r.pagamento);
+    const ym = baseData==='competencia' ? finCompYM(r.competencia) : (r._mesPagamento || finYmDeData(r.pagamento));
     if(ym){ despesa[ym]=(despesa[ym]||0)+r.valor; }
   });
   const meses=[...new Set([...Object.keys(receita),...Object.keys(despesa)])].filter(Boolean).sort();
@@ -7094,24 +7120,24 @@ function FIN_renderPagar(){
   // exclui cancelados
   const base = FINdados.pagar.filter(x=>!String(x.situacao||'').toLowerCase().includes('cancel'));
   // meses disponíveis (por data de pagamento)
-  const meses=[...new Set(base.map(x=>finYmDeData(x.pagamento)).filter(Boolean))].sort();
+  const meses=[...new Set(base.map(x=>finMesPag(x)).filter(Boolean))].sort();
   const mesSel = window._pagMes || 'todos';
   const centroSel = window._pagCentro || 'todos';
   // lista de centros (pra o filtro)
   const centrosLista=[...new Set(base.map(x=>x.centro))].sort();
   // aplica filtros
   let lista = base.slice();
-  if(mesSel!=='todos') lista = lista.filter(x=>finYmDeData(x.pagamento)===mesSel);
+  if(mesSel!=='todos') lista = lista.filter(x=>finMesPag(x)===mesSel);
   if(centroSel!=='todos') lista = lista.filter(x=>x.centro===centroSel);
   // total por centro (da lista filtrada)
   const porCentro={}; lista.forEach(x=>porCentro[x.centro]=(porCentro[x.centro]||0)+x.valor);
   const centros=Object.entries(porCentro).sort((a,b)=>b[1]-a[1]);
   const totalP=centros.reduce((s,c)=>s+c[1],0);
   // análise mensal por centro (usa a base toda, por pagamento)
-  const mesesAll=[...new Set(base.map(x=>finYmDeData(x.pagamento)).filter(Boolean))].sort();
+  const mesesAll=[...new Set(base.map(x=>finMesPag(x)).filter(Boolean))].sort();
   let analise='';
   if(mesesAll.length>=2){
-    const piv={}; base.forEach(x=>{ const ym=finYmDeData(x.pagamento); if(!ym)return; if(centroSel!=='todos'&&x.centro!==centroSel)return; piv[x.centro]=piv[x.centro]||{}; piv[x.centro][ym]=(piv[x.centro][ym]||0)+x.valor; });
+    const piv={}; base.forEach(x=>{ const ym=finMesPag(x); if(!ym)return; if(centroSel!=='todos'&&x.centro!==centroSel)return; piv[x.centro]=piv[x.centro]||{}; piv[x.centro][ym]=(piv[x.centro][ym]||0)+x.valor; });
     let head='<tr><th>Centro de custo</th>'+mesesAll.map(m=>`<th>${finRotMes(m)}</th><th>Δ%</th>`).join('')+'</tr>';
     let body=Object.entries(piv).sort((a,b)=>{const sa=Object.values(a[1]).reduce((x,y)=>x+y,0);const sb=Object.values(b[1]).reduce((x,y)=>x+y,0);return sb-sa;}).map(([c,mv])=>{
       let ant=null; let tds=mesesAll.map(m=>{ const v=mv[m]||0; let d=''; if(ant!=null&&ant!==0) d=((v-ant)/ant*100); ant=v; return `<td>${v?finFmtM(v):'—'}</td><td class="${d===''?'':(d>=0?'neg':'pos')}">${d===''?'—':(d>=0?'+':'')+d.toFixed(0)+'%'}</td>`; }).join('');
@@ -7530,7 +7556,6 @@ function renderFinanceiro(area, subId){
       'fin-pagar':      { id:'p-pagar',      fn: FIN_renderPagar },
       'fin-receber':    { id:'p-receber',    fn: FIN_renderReceber },
       'fin-coletas':    { id:'p-coletas',    fn: FIN_renderColetas },
-      'fin-faturamento':{ id:'p-faturamento',fn: FIN_renderFaturamentoVar },
     };
     const alvo = mapa[subId];
     if (!alvo){ area.innerHTML = '<div class="sem-acesso">Tela não encontrada.</div>'; return; }
