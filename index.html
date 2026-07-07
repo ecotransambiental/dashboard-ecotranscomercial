@@ -3568,7 +3568,7 @@ async function renderFaturamento(area) {
   await carregarClientes(); // pra saber tipo (Contrato/Eventual)
   // carrega o faturamento do módulo Financeiro (upload único, aba Fin_Faturamento)
   if (typeof FIN_garantirSheetJS==='function') { await new Promise(r=>FIN_garantirSheetJS(r)); }
-  if (typeof finCarregarDoSheets==='function') { try { await finCarregarDoSheets(); } catch(e){} }
+  if (typeof finCarregarDoSheets==='function') { try { await finCarregarDoSheets(['faturamento']); } catch(e){} }
   const fatNovo = (typeof FINdados!=='undefined' && FINdados.faturamento) ? FINdados.faturamento : [];
   // converte {cliente, valores:{mes:v}} para o formato de linha que a tela usa (CLIENTE + colunas de mês)
   cacheFat = fatNovo.map(x => ({ CLIENTE: x.cliente, ...x.valores }));
@@ -6635,6 +6635,7 @@ async function finSincronizarAposUpload(tipoDados, st){
       for (const p of periodos){ await finEnviarSheets(tipoDados, p, st); }
     }
     if (st) { st.textContent = 'Salvo! Todos da equipe já veem estes dados.'; st.style.color='var(--verde-medio)'; }
+    if (typeof finInvalidarCache==='function') finInvalidarCache(); // força releitura do que acabou de subir
   } catch(e){
     if (st) { st.innerHTML = 'Processado, mas <b>falhou ao salvar no sistema</b>. Verifique a conexão e o Apps Script.<br><span style="font-size:11px;">'+e.message+'</span>'; st.style.color='var(--vermelho)'; }
   }
@@ -6683,9 +6684,19 @@ async function finEnviarSheets(tipo, valorPeriodo, statusEl){
 }
 
 // carrega todos os tipos do Sheets para o FINdados (chamado ao abrir o módulo)
-async function finCarregarDoSheets(){
-  for (const tipo in FIN_MAPA_SHEETS){
+// carrega tipos do Sheets para o FINdados. Otimizado:
+// - só os tipos pedidos (cada tela pede o que precisa), não as 6 abas sempre
+// - em PARALELO (Promise.all), não uma requisição após a outra
+// - com cache de 90s (não refaz se carregou há pouco), salvo se forcar=true
+let _finCarregadoEm = {}; // tipo -> timestamp
+async function finCarregarDoSheets(tipos, forcar){
+  const alvos = (tipos && tipos.length) ? tipos : Object.keys(FIN_MAPA_SHEETS);
+  const agora = Date.now();
+  const aBuscar = alvos.filter(t => forcar || !_finCarregadoEm[t] || (agora - _finCarregadoEm[t] > 90000));
+  if (!aBuscar.length) return; // tudo fresco no cache, não busca nada
+  await Promise.all(aBuscar.map(async (tipo) => {
     const cfg = FIN_MAPA_SHEETS[tipo];
+    if (!cfg) return;
     try {
       const resp = await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'dados',token:sessaoToken,aba:cfg.aba})});
       const r = await resp.json();
@@ -6693,7 +6704,6 @@ async function finCarregarDoSheets(){
         if (tipo==='faturamento'){
           FINdados[tipo] = r.linhas.map(l=>({ cliente:l.cliente, valores: (()=>{try{return JSON.parse(l.valoresJSON||'{}')}catch(e){return {}}})() }));
         } else {
-          // converte valores numéricos que voltam como texto
           FINdados[tipo] = r.linhas.map(l=>{
             const o = {...l};
             ['valor','pago','saldo','recebido','qtdeServ','pesoTon'].forEach(k=>{ if(o[k]!==undefined&&o[k]!=='') o[k]=parseFloat(o[k])||0; });
@@ -6702,10 +6712,13 @@ async function finCarregarDoSheets(){
           });
         }
       }
+      _finCarregadoEm[tipo] = Date.now();
     } catch(e){ /* aba pode não existir ainda */ }
-  }
-  finSalvar(); // cacheia local também
+  }));
+  finSalvar();
 }
+// invalida o cache de leitura do financeiro (chamar após enviar dados novos)
+function finInvalidarCache(){ _finCarregadoEm = {}; }
 
 function finFmtM(v){ const n=parseFloat(v)||0; return 'R$ '+n.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 // converte valor que pode vir como número (já certo) ou texto BR ("1.234,56")
@@ -7559,13 +7572,20 @@ function renderFinanceiro(area, subId){
   area.innerHTML = '<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando dados financeiros...</h2></div>';
   FIN_garantirSheetJS(async function(){
     finCarregar();                 // cache local primeiro (rápido)
-    try { await finCarregarDoSheets(); } catch(e){ /* segue com o cache local */ }
+    // cada tela carrega só os tipos que precisa (em paralelo, com cache) — evita baixar tudo à toa
+    const TIPOS_POR_TELA = {
+      'fin-relatorios':  ['pagar','receber','recebeReceb','fechamentos','coletas','faturamento'],
+      'fin-saude':       ['pagar','receber'],
+      'fin-pagar':       ['pagar'],
+      'fin-receber':     ['receber','recebeReceb'],
+      'fin-coletas':     ['coletas'],
+    };
+    try { await finCarregarDoSheets(TIPOS_POR_TELA[subId] || []); } catch(e){ /* segue com o cache local */ }
     if (subId === 'fin-relatorios'){
       area.innerHTML = '<div id="fin-wrap">' + FIN_HTML_RELATORIOS + '</div>';
       finAtualizarTudo();
       return;
     }
-    // demais telas: cria um painel-alvo com o id que a render espera, e chama a render
     const mapa = {
       'fin-saude':      { id:'p-saude',      fn: FIN_renderSaude },
       'fin-pagar':      { id:'p-pagar',      fn: FIN_renderPagar },
