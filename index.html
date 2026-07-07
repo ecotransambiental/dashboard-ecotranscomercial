@@ -311,6 +311,46 @@
   .kpi-fat .tit { font-size: 12px; color: var(--cinza-600); display: flex; align-items: center; gap: 6px; }
   .kpi-fat .val { font-family: var(--fonte-display); font-size: 26px; font-weight: 700; color: var(--cinza-900); margin: 6px 0 2px; }
   .kpi-fat .var { font-size: 12px; }
+
+/* ===== estilos do módulo Financeiro (escopados em #fin-wrap) ===== */
+#fin-wrap{color:var(--cinza-800);}
+#fin-wrap .card{background:var(--branco);border:1px solid var(--cinza-200);border-radius:14px;padding:20px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,0.03);}
+#fin-wrap .card h2{font-family:var(--fonte-display);font-size:16px;color:var(--verde-escuro);margin:0 0 14px;}
+#fin-wrap .upload-box{border:2px dashed var(--cinza-300);border-radius:12px;padding:22px;text-align:center;background:var(--branco);margin-bottom:12px;transition:border-color .15s,background .15s;}
+#fin-wrap .upload-box:hover{border-color:var(--verde-medio);}
+#fin-wrap .upload-box.ok{border-color:var(--verde-medio);background:var(--verde-claro-bg);}
+#fin-wrap .upload-box label{cursor:pointer;color:var(--verde-escuro);font-weight:600;font-size:14px;}
+#fin-wrap .upload-box input{display:none;}
+/* KPIs — mesmo padrão visual das telas de Carteira, para consistência */
+#fin-wrap .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:18px;}
+#fin-wrap .kpi{background:var(--branco);border:1px solid var(--cinza-200);border-radius:14px;padding:18px 20px;border-top:3px solid var(--verde-medio);box-shadow:0 1px 3px rgba(0,0,0,0.03);}
+#fin-wrap .kpi .num{font-family:var(--fonte-display);font-size:28px;font-weight:700;line-height:1.1;color:var(--verde-escuro);}
+#fin-wrap .kpi .lbl{font-size:12px;color:var(--cinza-600);margin-top:6px;}
+#fin-wrap .kpi.verm{border-top-color:var(--vermelho);}
+#fin-wrap .kpi.verm .num{color:var(--vermelho);}
+#fin-wrap .kpi.roxo{border-top-color:var(--roxo);}
+#fin-wrap .kpi.roxo .num{color:var(--roxo);}
+/* tabelas */
+#fin-wrap table{width:100%;border-collapse:collapse;font-size:13px;margin-top:4px;}
+#fin-wrap th{background:var(--verde-escuro);color:#fff;text-align:left;padding:10px 12px;font-size:12px;font-weight:600;}
+#fin-wrap td{padding:9px 12px;border-bottom:1px solid var(--cinza-100);}
+#fin-wrap tbody tr:hover{background:var(--verde-claro-bg);}
+#fin-wrap .pos{color:var(--verde-medio);font-weight:600;}
+#fin-wrap .neg{color:var(--vermelho);font-weight:600;}
+/* filtros e controles */
+#fin-wrap .filtros{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px;}
+#fin-wrap select,#fin-wrap button.btn{font-family:var(--fonte-corpo);font-size:13px;padding:9px 13px;border:1.5px solid var(--cinza-300);border-radius:9px;background:#fff;cursor:pointer;}
+#fin-wrap select:focus{outline:2px solid var(--verde-medio);outline-offset:1px;}
+#fin-wrap button.btn{background:var(--verde-medio);color:#fff;border:none;font-weight:600;}
+#fin-wrap button.btn:hover{background:var(--verde-escuro);}
+#fin-wrap button.btn.sec{background:#fff;color:var(--verde-escuro);border:1.5px solid var(--verde-medio);}
+#fin-wrap .clicavel{cursor:pointer;}
+#fin-wrap .clicavel:hover{text-decoration:underline;}
+#fin-wrap .vazio{text-align:center;color:var(--cinza-500);padding:34px;font-size:14px;}
+#fin-wrap .barra{height:8px;background:var(--cinza-100);border-radius:4px;overflow:hidden;margin-top:4px;}
+#fin-wrap .barra > div{height:100%;background:var(--verde-medio);}
+#fin-wrap .aviso{background:var(--amarelo-bg);border-radius:8px;padding:11px 13px;font-size:13px;color:#8a6d00;margin-bottom:14px;}
+#fin-wrap .badge{display:inline-block;font-size:10px;padding:2px 8px;border-radius:5px;font-weight:600;}
 </style>
 </head>
 <body>
@@ -6075,45 +6115,6 @@ async function gerarRelatorioPDF() {
   const win = window.open('', '_blank');
   win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Relatório Ecotrans</title>
     <style>body{font-family:Arial,sans-serif;color:#222;padding:30px;} h1{color:#2d5a3d;font-size:20px;margin:0;} .sub{color:#666;font-size:13px;margin:4px 0 20px;} table{width:100%;border-collapse:collapse;} th{background:#2d5a3d;color:white;text-align:left;padding:8px 10px;font-size:12px;}
-/* ===== estilos do módulo Financeiro (escopados em #fin-wrap) ===== */
-#fin-wrap{color:var(--cinza-800);}
-#fin-wrap .card{background:var(--branco);border:1px solid var(--cinza-200);border-radius:14px;padding:20px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,0.03);}
-#fin-wrap .card h2{font-family:var(--fonte-display);font-size:16px;color:var(--verde-escuro);margin:0 0 14px;}
-#fin-wrap .upload-box{border:2px dashed var(--cinza-300);border-radius:12px;padding:22px;text-align:center;background:var(--branco);margin-bottom:12px;transition:border-color .15s,background .15s;}
-#fin-wrap .upload-box:hover{border-color:var(--verde-medio);}
-#fin-wrap .upload-box.ok{border-color:var(--verde-medio);background:var(--verde-claro-bg);}
-#fin-wrap .upload-box label{cursor:pointer;color:var(--verde-escuro);font-weight:600;font-size:14px;}
-#fin-wrap .upload-box input{display:none;}
-/* KPIs — mesmo padrão visual das telas de Carteira, para consistência */
-#fin-wrap .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:18px;}
-#fin-wrap .kpi{background:var(--branco);border:1px solid var(--cinza-200);border-radius:14px;padding:18px 20px;border-top:3px solid var(--verde-medio);box-shadow:0 1px 3px rgba(0,0,0,0.03);}
-#fin-wrap .kpi .num{font-family:var(--fonte-display);font-size:28px;font-weight:700;line-height:1.1;color:var(--verde-escuro);}
-#fin-wrap .kpi .lbl{font-size:12px;color:var(--cinza-600);margin-top:6px;}
-#fin-wrap .kpi.verm{border-top-color:var(--vermelho);}
-#fin-wrap .kpi.verm .num{color:var(--vermelho);}
-#fin-wrap .kpi.roxo{border-top-color:var(--roxo);}
-#fin-wrap .kpi.roxo .num{color:var(--roxo);}
-/* tabelas */
-#fin-wrap table{width:100%;border-collapse:collapse;font-size:13px;margin-top:4px;}
-#fin-wrap th{background:var(--verde-escuro);color:#fff;text-align:left;padding:10px 12px;font-size:12px;font-weight:600;}
-#fin-wrap td{padding:9px 12px;border-bottom:1px solid var(--cinza-100);}
-#fin-wrap tbody tr:hover{background:var(--verde-claro-bg);}
-#fin-wrap .pos{color:var(--verde-medio);font-weight:600;}
-#fin-wrap .neg{color:var(--vermelho);font-weight:600;}
-/* filtros e controles */
-#fin-wrap .filtros{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px;}
-#fin-wrap select,#fin-wrap button.btn{font-family:var(--fonte-corpo);font-size:13px;padding:9px 13px;border:1.5px solid var(--cinza-300);border-radius:9px;background:#fff;cursor:pointer;}
-#fin-wrap select:focus{outline:2px solid var(--verde-medio);outline-offset:1px;}
-#fin-wrap button.btn{background:var(--verde-medio);color:#fff;border:none;font-weight:600;}
-#fin-wrap button.btn:hover{background:var(--verde-escuro);}
-#fin-wrap button.btn.sec{background:#fff;color:var(--verde-escuro);border:1.5px solid var(--verde-medio);}
-#fin-wrap .clicavel{cursor:pointer;}
-#fin-wrap .clicavel:hover{text-decoration:underline;}
-#fin-wrap .vazio{text-align:center;color:var(--cinza-500);padding:34px;font-size:14px;}
-#fin-wrap .barra{height:8px;background:var(--cinza-100);border-radius:4px;overflow:hidden;margin-top:4px;}
-#fin-wrap .barra > div{height:100%;background:var(--verde-medio);}
-#fin-wrap .aviso{background:var(--amarelo-bg);border-radius:8px;padding:11px 13px;font-size:13px;color:#8a6d00;margin-bottom:14px;}
-#fin-wrap .badge{display:inline-block;font-size:10px;padding:2px 8px;border-radius:5px;font-weight:600;}
 </style>
     </head><body>
     <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #8bc34a;padding-bottom:12px;margin-bottom:16px;">
@@ -7065,7 +7066,7 @@ function finAtualizarTudo(){
 // ============ SAÚDE FINANCEIRA ============
 function finYmDeData(s){ const m=finLc(s).match(/(\d{2})\/(\d{2})\/(\d{2,4})/); if(!m) return ''; let ano=m[3].length===2?'20'+m[3]:m[3]; return `${ano}-${m[2]}`; }
 // mês de pagamento robusto: usa o campo pré-calculado se existir (sobrevive ao Sheets), senão parseia a data
-function finMesPag(x){ return x._mesPagamento || finMesPag(x); }
+function finMesPag(x){ return x._mesPagamento || finYmDeData(x.pagamento); }
 function FIN_renderSaude(){
   const p=document.getElementById('p-saude');
   if(!FINdados.pagar.length && !FINdados.receber.length){ p.innerHTML='<div class="card"><div class="vazio">Suba os relatórios de Pagar e Receber primeiro.</div></div>'; return; }
