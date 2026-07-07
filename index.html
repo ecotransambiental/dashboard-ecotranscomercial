@@ -2285,6 +2285,7 @@ function aplicarKanban() {
       html += `<div class="kanban-card${ehNovo?' card-novo':''}" draggable="true" ondragstart="pegarCard(event,'${String(l['ID_LEAD']||'').replace(/'/g,'')}')" onclick="abrirLead('${String(l['ID_LEAD']||'').replace(/'/g,'')}')" style="border-left-color:${col.cor};${ehNovo?'background:#FFFBEA;box-shadow:0 0 0 1.5px #F0C808;':temFU?'background:#F3F0FA;box-shadow:0 0 0 1.5px #6B5B95;':''}">
         <div class="cli">${ehNovo?'<span style="display:inline-block;background:#F0C808;color:#5a4a00;font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:5px;vertical-align:1px;">NOVO</span>':''}${tagSt}${temFU?'<span style="display:inline-block;background:#6B5B95;color:white;font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:5px;vertical-align:1px;">FOLLOW-UP</span>':''}${l['CLIENTE']||'—'}</div>
         <div class="meta">${l['CONSULTOR']||'—'}${l['FONTE']?' · '+l['FONTE']:''}</div>
+        ${l['DATA_CONTATO']?`<div class="meta" style="margin-top:3px;"><i class="ti ti-calendar-plus" style="font-size:12px;vertical-align:-1px;"></i> Entrada: ${fmtDataBR(l['DATA_CONTATO'])}</div>`:''}
         ${temFU?`<div class="meta" style="margin-top:3px;color:#6B5B95;"><i class="ti ti-calendar-clock" style="font-size:12px;vertical-align:-1px;"></i> Follow-up: ${fmtDataBR(l['FOLLOWUP'])}</div>`:''}
         ${l['CLIENTE_PROX']?`<div class="meta" style="margin-top:3px;color:var(--verde-medio);"><i class="ti ti-map-pin" style="font-size:12px;vertical-align:-1px;"></i> ${l['CLIENTE_PROX']} (${l['DIST_KM']||'?'} km${l['TEMPO_ROTA']?' · '+l['TEMPO_ROTA']:''})</div>`:''}
         ${l['EMPRESA_COLETA_ATUAL']?`<div class="meta" style="margin-top:3px;"><i class="ti ti-truck" style="font-size:12px;vertical-align:-1px;"></i> ${l['EMPRESA_COLETA_ATUAL']}</div>`:''}
@@ -6075,36 +6076,44 @@ async function gerarRelatorioPDF() {
   win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Relatório Ecotrans</title>
     <style>body{font-family:Arial,sans-serif;color:#222;padding:30px;} h1{color:#2d5a3d;font-size:20px;margin:0;} .sub{color:#666;font-size:13px;margin:4px 0 20px;} table{width:100%;border-collapse:collapse;} th{background:#2d5a3d;color:white;text-align:left;padding:8px 10px;font-size:12px;}
 /* ===== estilos do módulo Financeiro (escopados em #fin-wrap) ===== */
-#fin-wrap .card{background:var(--branco);border:1px solid var(--cinza-200);border-radius:12px;padding:18px;margin-bottom:16px;}
-#fin-wrap .card h2{font-family:var(--fonte-display);font-size:16px;color:var(--verde-escuro);margin-bottom:12px;}
-#fin-wrap .upload-box{border:2px dashed var(--cinza-300);border-radius:12px;padding:20px;text-align:center;background:var(--branco);margin-bottom:12px;}
+#fin-wrap{color:var(--cinza-800);}
+#fin-wrap .card{background:var(--branco);border:1px solid var(--cinza-200);border-radius:14px;padding:20px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,0.03);}
+#fin-wrap .card h2{font-family:var(--fonte-display);font-size:16px;color:var(--verde-escuro);margin:0 0 14px;}
+#fin-wrap .upload-box{border:2px dashed var(--cinza-300);border-radius:12px;padding:22px;text-align:center;background:var(--branco);margin-bottom:12px;transition:border-color .15s,background .15s;}
+#fin-wrap .upload-box:hover{border-color:var(--verde-medio);}
 #fin-wrap .upload-box.ok{border-color:var(--verde-medio);background:var(--verde-claro-bg);}
-#fin-wrap .upload-box label{cursor:pointer;color:var(--verde-escuro);font-weight:500;}
+#fin-wrap .upload-box label{cursor:pointer;color:var(--verde-escuro);font-weight:600;font-size:14px;}
 #fin-wrap .upload-box input{display:none;}
-#fin-wrap .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px;}
-#fin-wrap .kpi{background:var(--branco);border:1px solid var(--cinza-200);border-radius:12px;padding:14px;border-top:3px solid var(--verde-medio);}
-#fin-wrap .kpi .num{font-family:var(--fonte-display);font-size:24px;font-weight:700;color:var(--verde-escuro);}
-#fin-wrap .kpi .lbl{font-size:12px;color:var(--cinza-600);margin-top:2px;}
-#fin-wrap .kpi.verm{border-top-color:var(--vermelho);} .kpi.verm .num{color:var(--vermelho);}
-#fin-wrap .kpi.roxo{border-top-color:var(--roxo);} .kpi.roxo .num{color:var(--roxo);}
-#fin-wrap table{width:100%;border-collapse:collapse;font-size:13px;}
-#fin-wrap th{background:var(--verde-escuro);color:#fff;padding:8px 10px;text-align:left;font-weight:600;font-size:12px;}
-#fin-wrap td{padding:7px 10px;border-bottom:1px solid var(--cinza-100);}
-#fin-wrap .pos{color:var(--verde-medio);font-weight:600;} .neg{color:var(--vermelho);font-weight:600;}
-#fin-wrap .filtros{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;}
-#fin-wrap select, #fin-wrap button.btn{font-family:var(--fonte-corpo);font-size:13px;padding:8px 12px;border:1.5px solid var(--cinza-300);border-radius:8px;background:#fff;cursor:pointer;}
-#fin-wrap button.btn{background:var(--verde-medio);color:#fff;border:none;font-weight:500;}
+/* KPIs — mesmo padrão visual das telas de Carteira, para consistência */
+#fin-wrap .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:18px;}
+#fin-wrap .kpi{background:var(--branco);border:1px solid var(--cinza-200);border-radius:14px;padding:18px 20px;border-top:3px solid var(--verde-medio);box-shadow:0 1px 3px rgba(0,0,0,0.03);}
+#fin-wrap .kpi .num{font-family:var(--fonte-display);font-size:28px;font-weight:700;line-height:1.1;color:var(--verde-escuro);}
+#fin-wrap .kpi .lbl{font-size:12px;color:var(--cinza-600);margin-top:6px;}
+#fin-wrap .kpi.verm{border-top-color:var(--vermelho);}
+#fin-wrap .kpi.verm .num{color:var(--vermelho);}
+#fin-wrap .kpi.roxo{border-top-color:var(--roxo);}
+#fin-wrap .kpi.roxo .num{color:var(--roxo);}
+/* tabelas */
+#fin-wrap table{width:100%;border-collapse:collapse;font-size:13px;margin-top:4px;}
+#fin-wrap th{background:var(--verde-escuro);color:#fff;text-align:left;padding:10px 12px;font-size:12px;font-weight:600;}
+#fin-wrap td{padding:9px 12px;border-bottom:1px solid var(--cinza-100);}
+#fin-wrap tbody tr:hover{background:var(--verde-claro-bg);}
+#fin-wrap .pos{color:var(--verde-medio);font-weight:600;}
+#fin-wrap .neg{color:var(--vermelho);font-weight:600;}
+/* filtros e controles */
+#fin-wrap .filtros{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px;}
+#fin-wrap select,#fin-wrap button.btn{font-family:var(--fonte-corpo);font-size:13px;padding:9px 13px;border:1.5px solid var(--cinza-300);border-radius:9px;background:#fff;cursor:pointer;}
+#fin-wrap select:focus{outline:2px solid var(--verde-medio);outline-offset:1px;}
+#fin-wrap button.btn{background:var(--verde-medio);color:#fff;border:none;font-weight:600;}
+#fin-wrap button.btn:hover{background:var(--verde-escuro);}
 #fin-wrap button.btn.sec{background:#fff;color:var(--verde-escuro);border:1.5px solid var(--verde-medio);}
-#fin-wrap .clicavel{cursor:pointer;} .clicavel:hover{text-decoration:underline;}
-#fin-wrap .vazio{text-align:center;color:var(--cinza-500);padding:30px;font-size:14px;}
+#fin-wrap .clicavel{cursor:pointer;}
+#fin-wrap .clicavel:hover{text-decoration:underline;}
+#fin-wrap .vazio{text-align:center;color:var(--cinza-500);padding:34px;font-size:14px;}
 #fin-wrap .barra{height:8px;background:var(--cinza-100);border-radius:4px;overflow:hidden;margin-top:4px;}
 #fin-wrap .barra > div{height:100%;background:var(--verde-medio);}
-#fin-wrap .aviso{background:var(--amarelo-bg);border-radius:8px;padding:10px 12px;font-size:13px;color:#8a6d00;margin-bottom:12px;}
-#fin-wrap .badge{display:inline-block;font-size:10px;padding:1px 7px;border-radius:4px;font-weight:600;}
-#fin-wrap table{width:100%;border-collapse:collapse;font-size:13px;}
-#fin-wrap th{background:var(--verde-escuro,#2d5a3d);color:#fff;text-align:left;padding:8px 10px;font-size:12px;}
-#fin-wrap td{border-bottom:1px solid #eee;padding:7px 10px;}
-#fin-wrap h2{font-size:16px;color:var(--verde-escuro,#2d5a3d);margin-bottom:10px;}
+#fin-wrap .aviso{background:var(--amarelo-bg);border-radius:8px;padding:11px 13px;font-size:13px;color:#8a6d00;margin-bottom:14px;}
+#fin-wrap .badge{display:inline-block;font-size:10px;padding:2px 8px;border-radius:5px;font-weight:600;}
 </style>
     </head><body>
     <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #8bc34a;padding-bottom:12px;margin-bottom:16px;">
@@ -6178,8 +6187,13 @@ function calcResultados() {
   const totalLeads = leadsPeriodo.length;
   const propostas = movs.filter(m=>m['ETAPA_NOVA']==='Proposta Enviada').length;
   const fechados = movs.filter(m=>m['ETAPA_NOVA']==='Fechado').length;
-  const prospParaProp = movs.filter(m=>{ const a=String(m['ETAPA_ANTERIOR']||'').toLowerCase(); return (a.includes('prospec')||a.includes('indica')) && m['ETAPA_NOVA']==='Proposta Enviada'; }).length;
-  const totalProspec = leadsPeriodo.filter(l=>{ const e=String(l['ETAPA']).toLowerCase(); return e.includes('prospec')||e.includes('indica'); }).length;
+
+  // "Prospecção → Proposta" pelo ESTADO ATUAL (não depende do histórico de arrastar cards):
+  // dos leads que entraram como prospecção (todos entram por lá, menos coberturas),
+  // quantos já chegaram em Proposta Enviada ou Fechado.
+  const leadsProspec = leadsPeriodo.filter(l=>l['ETAPA']!=='Cobertura');
+  const prospParaProp = leadsProspec.filter(l=> l['ETAPA']==='Proposta Enviada' || l['ETAPA']==='Fechado').length;
+  const totalProspec = leadsProspec.length;
 
   const pct = (a,b)=> b>0 ? (a/b*100) : 0;
   const taxaLeadProposta  = pct(propostas, totalLeads);
@@ -6200,7 +6214,7 @@ function calcResultados() {
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;">
       ${cardTaxa('Leads \u2192 Proposta enviada', propostas, totalLeads, taxaLeadProposta, 'var(--verde-escuro)', `${propostas} propostas de ${totalLeads} leads novos no período`)}
       ${cardTaxa('Propostas \u2192 Fechamento', fechados, propostas, taxaPropFechado, 'var(--verde-ok)', `${fechados} fechados de ${propostas} propostas no período`)}
-      ${cardTaxa('Pendente \u2192 Proposta', prospParaProp, totalProspec, taxaProspProposta, '#BA7517', `${prospParaProp} pendentes viraram proposta de ${totalProspec}`)}
+      ${cardTaxa('Prospecção \u2192 Proposta', prospParaProp, totalProspec, taxaProspProposta, '#BA7517', `${prospParaProp} de ${totalProspec} prospecções já chegaram em proposta`)}
     </div>
     ${blocoMetricasFunil(leadsPeriodo)}
     <div style="background:white;border:1px solid var(--cinza-200);border-radius:12px;padding:20px;margin-top:18px;">
