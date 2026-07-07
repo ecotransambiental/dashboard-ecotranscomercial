@@ -3576,11 +3576,26 @@ async function renderFaturamento(area) {
   fatNovo.forEach(x => Object.keys(x.valores||{}).forEach(m => mesesSet.add(m)));
   cacheFatCols = ['CLIENTE', ...[...mesesSet]];
   // meses = colunas que não são CLIENTE/CNPJ/VARIACAO_%
-  const meses = cacheFatCols.filter(c => {
+  const mesesOrig = cacheFatCols.filter(c => {
     const s = String(c).trim().toUpperCase();
     return s !== 'CNPJ' && s !== 'CLIENTE' && s !== 'VARIACAO_%' && s !== 'VARIACAO_PCT' && s !== 'STATUS_CNPJ' && s !== 'DIA_FATURAMENTO' && s !== 'DIA FATURAMENTO';
   }).map(c => String(c).trim());
-  function rotuloMes(col) { return String(col); } // na variação os meses já vêm como texto (Março, Abril...)
+
+  // DEFASAGEM FIXA DE 1 MÊS: o relatório traz o mês FATURADO, mas o valor é do serviço do MÊS ANTERIOR.
+  // Ex.: a coluna "Junho" do relatório = serviços de MAIO. Exibimos pelo mês do SERVIÇO.
+  const MESES_ORDEM = ['janeiro','fevereiro','março','marco','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+  const MESES_NOME = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  function mesServicoDoFaturado(nomeMesFaturado){
+    const base = String(nomeMesFaturado).trim().toLowerCase().replace('marco','março');
+    let idx = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'].indexOf(base);
+    if (idx === -1) return nomeMesFaturado + ' (serviço)'; // não reconheceu, mostra como veio
+    const idxServico = (idx - 1 + 12) % 12; // mês anterior
+    return MESES_NOME[idxServico];
+  }
+  // "meses" = os rótulos de SERVIÇO (o que o usuário vê e escolhe); cada um aponta pra coluna original do relatório
+  const colDoServico = {}; // rótulo de serviço -> coluna original no relatório
+  const meses = mesesOrig.map(mOrig => { const svc = mesServicoDoFaturado(mOrig); colDoServico[svc] = mOrig; return svc; });
+  function rotuloMes(col) { return String(col); } // já é o nome do mês de serviço
   // mês escolhido: usa o que já estava selecionado, senão o último disponível
   const selRaw = (document.getElementById('fat-mes')||{}).value;
   const selAnterior = selRaw ? String(selRaw).trim() : '';
@@ -3594,11 +3609,12 @@ async function renderFaturamento(area) {
   const tipoPorNome = {};
   cacheClientes.forEach(c => { tipoPorNome[norm(c['CLIENTE'])] = (c['TIPO']==='Eventual'?'Eventual':'Contrato'); });
 
-  // valor do mês de uma linha, tolerante a espaço/variação na chave e formato BR
+  // valor do mês de uma linha. 'mes' é o mês de SERVIÇO; traduz pra coluna original (mês faturado).
   function valMes(linha, mes) {
-    let v = linha[mes];
+    const colReal = colDoServico[mes] || mes; // coluna original no relatório (mês faturado)
+    let v = linha[colReal];
     if (v == null) {
-      const k = Object.keys(linha).find(kk => String(kk).trim() === String(mes).trim());
+      const k = Object.keys(linha).find(kk => String(kk).trim() === String(colReal).trim());
       v = k ? linha[k] : null;
     }
     if (v == null || v === '') return 0;
@@ -3631,10 +3647,16 @@ async function renderFaturamento(area) {
   }
 
   area.innerHTML = `
+    <div style="background:var(--verde-claro-bg);color:var(--verde-escuro);border-radius:8px;padding:10px 13px;font-size:12.5px;margin-bottom:14px;display:flex;align-items:center;gap:8px;">
+      <i class="ti ti-calendar-stats"></i> Os meses aqui são o <b>mês do serviço</b>. O relatório fatura no mês seguinte (serviço de maio → faturado em junho), e o dashboard já ajusta essa defasagem de 1 mês pra você.
+    </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
-      <select class="filtro-sel" id="fat-mes" onchange="renderFaturamento(document.getElementById('area-conteudo'))" style="min-width:140px;">
-        ${meses.map(m=>`<option value="${m}" ${m===mesAtual?'selected':''}>${rotuloMes(m)}</option>`).join('')}
-      </select>
+      <div style="display:inline-flex;align-items:center;gap:8px;">
+        <span style="font-size:13px;color:var(--cinza-600);">Mês do serviço:</span>
+        <select class="filtro-sel" id="fat-mes" onchange="renderFaturamento(document.getElementById('area-conteudo'))" style="min-width:140px;">
+          ${meses.map(m=>`<option value="${m}" ${m===mesAtual?'selected':''}>${rotuloMes(m)}</option>`).join('')}
+        </select>
+      </div>
       <span style="font-size:12px;color:var(--cinza-500);display:inline-flex;align-items:center;gap:6px;"><i class="ti ti-info-circle"></i> Para atualizar, suba o relatório em <b>Financeiro › Relatórios</b></span>
     </div>
 
@@ -6877,6 +6899,12 @@ function FIN_processarPagar(wb, st){
   if(!rows.length){ st.textContent='Planilha vazia.'; return; }
   const cols = Object.keys(rows[0]);
   const cTit=finAchaCol(cols,'Título')||finAchaCol(cols,'Titulo');
+  const cPag=finAchaCol(cols,'Pagamento');
+  // cada arquivo é o retrato completo de UM mês. Substitui só os meses presentes no arquivo
+  // (mantém os outros meses já carregados). Assim dá pra acumular maio, junho... sem duplicar.
+  const mesesNoArquivo = new Set();
+  rows.forEach(r=>{ const ym=finYmDeData(finLc(r[cPag])); if(ym) mesesNoArquivo.add(ym); });
+  if (mesesNoArquivo.size) FINdados.pagar = FINdados.pagar.filter(x=>!mesesNoArquivo.has(x._mesPagamento||finYmDeData(x.pagamento)));
   const jaTem = new Set(FINdados.pagar.map(x=>String(x.titulo)));
   let novos=0;
   rows.forEach(r=>{
@@ -6904,7 +6932,6 @@ function FIN_processarPagar(wb, st){
 
 function FIN_processarReceber(wb, st, destino){
   destino = destino || 'receber';
-  const alvo = FINdados[destino];
   let ws=null;
   for(const nome of wb.SheetNames){
     const test=XLSX.utils.sheet_to_json(wb.Sheets[nome],{defval:''});
@@ -6915,14 +6942,21 @@ function FIN_processarReceber(wb, st, destino){
   if(!rows.length){ st.textContent='Planilha vazia.'; return; }
   const cols=Object.keys(rows[0]);
   const cTit=finAchaCol(cols,'Título')||finAchaCol(cols,'Titulo');
-  const jaTem=new Set(alvo.map(x=>String(x.titulo)));
+  const cEmi=finAchaCol(cols,'Emissão')||finAchaCol(cols,'Emissao');
+  // cada arquivo é o retrato completo de UM mês. Substitui só os meses presentes (por emissão),
+  // mantendo os outros meses já carregados.
+  const mesesNoArquivo = new Set();
+  rows.forEach(r=>{ const ym=finYmDeData(finLc(r[cEmi])); if(ym) mesesNoArquivo.add(ym); });
+  if (mesesNoArquivo.size) FINdados[destino] = FINdados[destino].filter(x=>!mesesNoArquivo.has(x._mesEmissao||finYmDeData(x.emissao)));
+  const alvo2 = FINdados[destino];
+  const jaTem=new Set(alvo2.map(x=>String(x.titulo)));
   let novos=0;
   rows.forEach(r=>{
     const tit=String(r[cTit]||'').trim();
     if(!tit || jaTem.has(tit)) return;
     const cliRaw=finLc(r[finAchaCol(cols,'Cliente')]);
     const cnpjM=cliRaw.match(/(\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2})/);
-    alvo.push({
+    alvo2.push({
       titulo:tit,
       cnpj:cnpjM?cnpjM[1]:'',
       cliente:cliRaw.replace(/\(?(CNPJ|CPF)[:\s]*[\d.\/-]+\)?/gi,'').trim(),
@@ -6937,7 +6971,7 @@ function FIN_processarReceber(wb, st, destino){
     });
     jaTem.add(tit); novos++;
   });
-  st.textContent=`${novos} títulos novos adicionados (${alvo.length} no total).`; st.style.color='var(--verde-medio)';
+  st.textContent=`${novos} títulos carregados (substituiu o anterior).`; st.style.color='var(--verde-medio)';
 }
 
 // extrai o mês/ano (YYYY-MM) do nome do arquivo de comissão.
@@ -7208,19 +7242,22 @@ function FIN_renderReceber(){
   const temEmit = FINdados.receber.length, temReceb = FINdados.recebeReceb.length;
   if(!temEmit && !temReceb){ p.innerHTML='<div class="card"><div class="vazio">Suba os relatórios de Contas a Receber (Emitidos e/ou Recebidos).</div></div>'; return; }
   const semCancel = x=>!String(x.situacao||'').toLowerCase().includes('cancel');
+  // mês de emissão robusto: usa o campo pré-calculado (sobrevive ao Sheets); senão parseia a data
+  const mesEmiss = x => x._mesEmissao || finYmDeData(x.emissao);
   // EMITIDOS: base por emissão
   const baseEmit = FINdados.receber.filter(semCancel);
-  // RECEBIDOS: base por data de recebimento (usa vencimento/competência como referência do mês do caixa)
+  // RECEBIDOS: base do relatório de recebidos
   const baseReceb = FINdados.recebeReceb.filter(semCancel);
-  // meses disponíveis (junta emissão dos emitidos)
-  const meses=[...new Set(baseEmit.map(x=>finYmDeData(x.emissao)).filter(Boolean))].sort();
+  // meses disponíveis (emissão dos emitidos)
+  const meses=[...new Set(baseEmit.map(mesEmiss).filter(Boolean))].sort();
   const mesSel = window._recMes || 'todos';
   // filtra emitidos por emissão
-  const listaEmit = mesSel==='todos' ? baseEmit : baseEmit.filter(x=>finYmDeData(x.emissao)===mesSel);
+  const listaEmit = mesSel==='todos' ? baseEmit : baseEmit.filter(x=>mesEmiss(x)===mesSel);
   const emitido = listaEmit.reduce((s,x)=>s+x.valor,0);
   const aberto = listaEmit.reduce((s,x)=>s+x.saldo,0);
-  // recebido: do relatório de recebidos (o que entrou no caixa). soma o Vlr. Recebido.
-  const recebidoTotal = baseReceb.reduce((s,x)=>s+(x.recebido||x.valor),0);
+  // recebido: filtra também pelo mês selecionado (por emissão do recebido)
+  const listaReceb = mesSel==='todos' ? baseReceb : baseReceb.filter(x=>mesEmiss(x)===mesSel);
+  const recebidoTotal = listaReceb.reduce((s,x)=>s+(x.recebido||x.valor),0);
   const porSit={}; listaEmit.forEach(x=>porSit[x.situacao||'—']=(porSit[x.situacao||'—']||0)+x.valor);
   p.innerHTML=`
     <div class="filtros">
