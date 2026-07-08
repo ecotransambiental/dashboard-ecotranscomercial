@@ -6684,26 +6684,44 @@ function finCarregar(){
   if(!Array.isArray(FINdados.coletas)) FINdados.coletas=[];
   if(!Array.isArray(FINdados.faturamento)) FINdados.faturamento=[];
 }
-// após processar um upload, envia os dados novos pro Sheets (substituindo por período).
-// Descobre os períodos presentes no que foi carregado e substitui cada um.
+// após processar um upload, REESCREVE aquela aba inteira no Sheets com o conteúdo atual da memória.
+// A memória já acumula os meses corretamente (o processamento substitui só o mês do arquivo).
+// Reescrever a aba inteira elimina a duplicação que vinha de "remendar período por período".
 async function finSincronizarAposUpload(tipoDados, st){
   const cfg = FIN_MAPA_SHEETS[tipoDados];
   if (!cfg) return;
   try {
     if (st) { st.textContent = 'Salvando no sistema (compartilhado)...'; st.style.color='var(--cinza-500)'; }
-    if (!cfg.campoPeriodo){
-      // faturamento: substitui tudo de uma vez
-      await finEnviarSheets(tipoDados, null, st);
-    } else {
-      // descobre os períodos presentes e envia cada um (substituindo)
-      let linhas = FINdados[tipoDados]||[];
-      const periodos = [...new Set(linhas.map(l=>String(l[cfg.campoPeriodo]||'')).filter(Boolean))];
-      for (const p of periodos){ await finEnviarSheets(tipoDados, p, st); }
-    }
+    // sempre modo 'tudo': reescreve a aba inteira do tipo com o que está na memória (fonte da verdade)
+    await finEnviarSheetsCompleto(tipoDados, st);
     if (st) { st.textContent = 'Salvo! Todos da equipe já veem estes dados.'; st.style.color='var(--verde-medio)'; }
-    if (typeof finInvalidarCache==='function') finInvalidarCache(); // força releitura do que acabou de subir
+    if (typeof finInvalidarCache==='function') finInvalidarCache();
   } catch(e){
     if (st) { st.innerHTML = 'Processado, mas <b>falhou ao salvar no sistema</b>. Verifique a conexão e o Apps Script.<br><span style="font-size:11px;">'+e.message+'</span>'; st.style.color='var(--vermelho)'; }
+  }
+}
+
+// reescreve a aba inteira do tipo no Sheets (modo 'tudo'), em lotes. Fonte = memória (FINdados[tipo]).
+async function finEnviarSheetsCompleto(tipo, statusEl){
+  const cfg = FIN_MAPA_SHEETS[tipo];
+  if (!cfg) return;
+  let linhas = (FINdados[tipo]||[]).slice();
+  if (tipo==='faturamento') linhas = linhas.map(x=>({ cliente:x.cliente, valoresJSON: JSON.stringify(x.valores||{}) }));
+  const colunas = linhas.length ? Object.keys(linhas[0]) : ['vazio'];
+  const LOTE = 300;
+  // se não há nada, manda um lote vazio em modo 'tudo' pra limpar a aba
+  if (!linhas.length){
+    await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'salvarFinanceiro',token:sessaoToken,
+      dados:{ aba:cfg.aba, colunas, linhas:[], modo:'tudo', primeiroLote:true }})});
+    return;
+  }
+  let primeiro = true;
+  for (let i=0;i<linhas.length;i+=LOTE){
+    const lote = linhas.slice(i,i+LOTE);
+    if (statusEl) statusEl.textContent = `Enviando ${Math.min(i+LOTE,linhas.length)} de ${linhas.length}...`;
+    await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'salvarFinanceiro',token:sessaoToken,
+      dados:{ aba:cfg.aba, colunas, linhas:lote, modo:'tudo', primeiroLote:primeiro }})});
+    primeiro = false;
   }
 }
 
@@ -6840,6 +6858,7 @@ function FIN_lerArquivo(input, tipo){
     const reader = new FileReader();
     reader.onload = async e => {
       try {
+        try { await finCarregarDoSheets(['coletas'], true); } catch(e){}
         FIN_processarServicos(e.target.result, st);
         finSalvar(); finAtualizarTudo();
         document.getElementById('ub-servicos').classList.add('ok');
@@ -6859,6 +6878,10 @@ function FIN_lerArquivo(input, tipo){
       } catch(err1) {
         wb = await FIN_lerViaRecompactacaoNativa(arr);
       }
+      // garante que a memória tem TODOS os meses já salvos antes de processar o novo arquivo
+      // (senão, ao reescrever a aba, perderíamos meses que estavam só no Sheets)
+      const tipoBase = (tipo==='comissao') ? 'fechamentos' : tipo;
+      try { await finCarregarDoSheets([tipoBase], true); } catch(e){}
       if(tipo==='pagar') FIN_processarPagar(wb, st);
       else if(tipo==='receber') FIN_processarReceber(wb, st, 'receber');
       else if(tipo==='recebeReceb') FIN_processarReceber(wb, st, 'recebeReceb');
@@ -6867,7 +6890,7 @@ function FIN_lerArquivo(input, tipo){
       finSalvar(); finAtualizarTudo();
       document.getElementById('ub-'+tipo).classList.add('ok');
       // envia pro Sheets (compartilhado). 'comissao' guarda em FINdados.fechamentos.
-      const tipoDados = (tipo==='comissao') ? 'fechamentos' : tipo;
+      const tipoDados = tipoBase;
       await finSincronizarAposUpload(tipoDados, st);
     }catch(err){
       st.innerHTML='Não consegui ler o arquivo. <b>Dica:</b> abra no Excel/Google Sheets e use "Salvar como" → .xlsx, depois suba de novo.<br><span style="font-size:11px;">Detalhe: '+err.message+'</span>';
@@ -7663,23 +7686,30 @@ function FIN_garantirSheetJS(cb){
 }
 const FIN_HTML_RELATORIOS = '\n    <div class="card" style="background:#fff;border:1px solid var(--cinza-200);border-radius:14px;padding:20px;margin-bottom:16px;">\n      <h2 style="color:var(--verde-escuro);font-size:16px;margin:0 0 10px;">Suba os relatórios</h2>\n      <div style="background:#eef4fb;color:#2c5282;border-radius:8px;padding:10px;font-size:12.5px;margin-bottom:14px;"><i class="ti ti-info-circle"></i> Os dados ficam só neste navegador. O sistema soma só o que veio a mais (não conta título repetido).</div>\n      <div class="upload-box" id="ub-pagar"><label for="f-pagar"><i class="ti ti-file-spreadsheet" style="font-size:22px;display:block;margin-bottom:6px;"></i> Contas a Pagar (.xlsx)</label><input type="file" id="f-pagar" accept=".xlsx" onchange="FIN_lerArquivo(this,\'pagar\')"><div id="st-pagar" style="font-size:12px;color:var(--cinza-500);margin-top:6px;"></div></div>\n      <div class="upload-box" id="ub-receber"><label for="f-receber"><i class="ti ti-file-spreadsheet" style="font-size:22px;display:block;margin-bottom:6px;"></i> Contas a Receber — <b>EMITIDOS no mês</b> (filtro Emissão)</label><input type="file" id="f-receber" accept=".xlsx" onchange="FIN_lerArquivo(this,\'receber\')"><div id="st-receber" style="font-size:12px;color:var(--cinza-500);margin-top:6px;"></div></div>\n      <div class="upload-box" id="ub-recebeReceb"><label for="f-recebeReceb"><i class="ti ti-cash" style="font-size:22px;display:block;margin-bottom:6px;"></i> Contas a Receber — <b>RECEBIDOS no mês</b> (filtro Recebimento)</label><input type="file" id="f-recebeReceb" accept=".xlsx" onchange="FIN_lerArquivo(this,\'recebeReceb\')"><div id="st-recebeReceb" style="font-size:12px;color:var(--cinza-500);margin-top:6px;"></div></div>\n      <div class="upload-box" id="ub-comissao"><label for="f-comissao"><i class="ti ti-file-spreadsheet" style="font-size:22px;display:block;margin-bottom:6px;"></i> Planilha de Comissões (uma aba por consultor)</label><input type="file" id="f-comissao" accept=".xlsx" onchange="FIN_lerArquivo(this,\'comissao\')"><div id="st-comissao" style="font-size:12px;color:var(--cinza-500);margin-top:6px;"></div></div>\n      <div class="upload-box" id="ub-servicos"><label for="f-servicos"><i class="ti ti-recycle" style="font-size:22px;display:block;margin-bottom:6px;"></i> Relatório de Serviços (coletas — .csv)</label><input type="file" id="f-servicos" accept=".csv" onchange="FIN_lerArquivo(this,\'servicos\')"><div id="st-servicos" style="font-size:12px;color:var(--cinza-500);margin-top:6px;"></div></div>\n      <div class="upload-box" id="ub-faturamento"><label for="f-faturamento"><i class="ti ti-chart-line" style="font-size:22px;display:block;margin-bottom:6px;"></i> Variação de Faturamento (todos os clientes — .xlsx)</label><input type="file" id="f-faturamento" accept=".xlsx" onchange="FIN_lerArquivo(this,\'faturamento\')"><div id="st-faturamento" style="font-size:12px;color:var(--cinza-500);margin-top:6px;"></div></div>\n      <div style="margin-top:12px;"><button class="ficha-btn-secundario" onclick="FIN_limparTudo()"><i class="ti ti-trash"></i> Limpar tudo</button></div>\n    </div>\n    <div class="card" style="background:#fff;border:1px solid var(--cinza-200);border-radius:14px;padding:20px;"><h2 style="color:var(--verde-escuro);font-size:16px;margin:0 0 10px;">O que já está acumulado</h2><div id="resumo-acumulado">Nenhum relatório carregado ainda.</div></div>\n';
 function renderFinanceiro(area, subId){
-  area.innerHTML = '<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando dados financeiros...</h2></div>';
+  area.innerHTML = '<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando...</h2></div>';
   FIN_garantirSheetJS(async function(){
-    finCarregar();                 // cache local primeiro (rápido)
-    // cada tela carrega só os tipos que precisa (em paralelo, com cache) — evita baixar tudo à toa
+    finCarregar(); // cache local (instantâneo)
+
+    // A tela de RELATÓRIOS é só upload — abre na hora, sem esperar o Sheets.
+    // O resumo "o que já está acumulado" é preenchido em segundo plano.
+    if (subId === 'fin-relatorios'){
+      area.innerHTML = '<div id="fin-wrap">' + FIN_HTML_RELATORIOS + '</div>';
+      finAtualizarTudo(); // mostra o que já tem no cache local, na hora
+      // atualiza o resumo com os dados do Sheets quando chegarem (não trava a tela)
+      finCarregarDoSheets(['pagar','receber','recebeReceb','fechamentos','coletas','faturamento'])
+        .then(()=>{ if (document.getElementById('resumo-acumulado')) finAtualizarTudo(); })
+        .catch(()=>{});
+      return;
+    }
+
+    // demais telas: carrega só os tipos que precisa (em paralelo, com cache)
     const TIPOS_POR_TELA = {
-      'fin-relatorios':  ['pagar','receber','recebeReceb','fechamentos','coletas','faturamento'],
       'fin-saude':       ['pagar','receber'],
       'fin-pagar':       ['pagar'],
       'fin-receber':     ['receber','recebeReceb'],
       'fin-coletas':     ['coletas'],
     };
     try { await finCarregarDoSheets(TIPOS_POR_TELA[subId] || []); } catch(e){ /* segue com o cache local */ }
-    if (subId === 'fin-relatorios'){
-      area.innerHTML = '<div id="fin-wrap">' + FIN_HTML_RELATORIOS + '</div>';
-      finAtualizarTudo();
-      return;
-    }
     const mapa = {
       'fin-saude':      { id:'p-saude',      fn: FIN_renderSaude },
       'fin-pagar':      { id:'p-pagar',      fn: FIN_renderPagar },
