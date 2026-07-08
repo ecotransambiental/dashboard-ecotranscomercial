@@ -3640,12 +3640,15 @@ async function renderFaturamento(area) {
   const colDoServico = {}; // rótulo de serviço -> coluna original no relatório
   const meses = mesesOrig.map(mOrig => { const svc = mesServicoDoFaturado(mOrig); colDoServico[svc] = mOrig; return svc; });
   function rotuloMes(col) { return String(col); } // já é o nome do mês de serviço
-  // mês escolhido: usa o que já estava selecionado, senão o último disponível
-  const selRaw = (document.getElementById('fat-mes')||{}).value;
+  // mês escolhido: usa o estado global (setado no onchange, sobrevive ao "Carregando..."),
+  // senão o que estiver no select, senão o último disponível
+  const selRaw = window._fatMesSel || (document.getElementById('fat-mes')||{}).value;
   const selAnterior = selRaw ? String(selRaw).trim() : '';
   const mesAtual = (selAnterior && meses.includes(selAnterior)) ? selAnterior : (meses[meses.length-1] || meses[0]);
   const idxMes = meses.indexOf(mesAtual);
-  const mesAnterior = idxMes > 0 ? meses[idxMes-1] : null;
+  // mês de comparação: se o usuário escolheu um, usa ele; senão, o mês imediatamente anterior
+  const compSel = window._fatMesComp && meses.includes(window._fatMesComp) && window._fatMesComp!==mesAtual ? window._fatMesComp : null;
+  const mesAnterior = compSel || (idxMes > 0 ? meses[idxMes-1] : null);
 
   // mapa de tipo por NOME do cliente (a fonte de variação não traz CNPJ; casar por nome é mais confiável,
   // e clientes multi-unidade são agrupados por nome mesmo).
@@ -3695,10 +3698,15 @@ async function renderFaturamento(area) {
       <i class="ti ti-calendar-stats"></i> Os meses aqui são o <b>mês do serviço</b>. O relatório fatura no mês seguinte (serviço de maio → faturado em junho), e o dashboard já ajusta essa defasagem de 1 mês pra você.
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
-      <div style="display:inline-flex;align-items:center;gap:8px;">
+      <div style="display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <span style="font-size:13px;color:var(--cinza-600);">Mês do serviço:</span>
-        <select class="filtro-sel" id="fat-mes" onchange="renderFaturamento(document.getElementById('area-conteudo'))" style="min-width:140px;">
+        <select class="filtro-sel" id="fat-mes" onchange="window._fatMesSel=this.value;renderFaturamento(document.getElementById('area-conteudo'))" style="min-width:140px;">
           ${meses.map(m=>`<option value="${m}" ${m===mesAtual?'selected':''}>${rotuloMes(m)}</option>`).join('')}
+        </select>
+        <span style="font-size:13px;color:var(--cinza-600);">comparar com:</span>
+        <select class="filtro-sel" id="fat-mes-comp" onchange="window._fatMesComp=this.value;renderFaturamento(document.getElementById('area-conteudo'))" style="min-width:140px;">
+          <option value="">Mês anterior (automático)</option>
+          ${meses.filter(m=>m!==mesAtual).map(m=>`<option value="${m}" ${m===mesAnterior&&compSel?'selected':''}>${rotuloMes(m)}</option>`).join('')}
         </select>
       </div>
       <span style="font-size:12px;color:var(--cinza-500);display:inline-flex;align-items:center;gap:6px;"><i class="ti ti-info-circle"></i> Para atualizar, suba o relatório em <b>Financeiro › Relatórios</b></span>
@@ -4709,20 +4717,37 @@ function abrirModalRenovar(id) {
             <button class="ficha-btn-secundario" onclick="fecharFicha()">Cancelar</button>
           </div>
           <div id="ren-msg"></div>
-          <div style="font-size:11px;color:var(--cinza-500);margin-top:8px;">A gravação no Sheets será ativada quando o Apps Script tiver a função de renovação (avisaremos). Por ora registra na tela.</div>
         </div>
       </div>
     </div>`;
 }
-function salvarRenovacao(id) {
+async function salvarRenovacao(id) {
   const validade = document.getElementById('ren-validade').value;
   const assessoria = document.getElementById('ren-assessoria').value;
   const valor = document.getElementById('ren-valor') ? document.getElementById('ren-valor').value : '';
   if (!validade) { document.getElementById('ren-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Informe a nova validade.</div>'; return; }
   const d = cacheRGG.find(x=>String(x['ID'])===String(id));
-  if (d) { d['DATA_VALIDADE'] = validade; d['STATUS'] = 'Vigente'; }
-  document.getElementById('ren-msg').innerHTML = '<div style="background:var(--verde-ok-bg);border-radius:8px;padding:10px;margin-top:10px;color:var(--verde-ok);font-size:13px;"><i class="ti ti-circle-check"></i> Renovação registrada na tela. (Persistência no Sheets em breve.)</div>';
-  setTimeout(()=>{ fecharFicha(); renderRegula(document.getElementById('area-conteudo'),'rgg'); }, 1800);
+  const msg = document.getElementById('ren-msg');
+  msg.innerHTML = '<div style="font-size:13px;color:var(--cinza-500);margin-top:10px;"><i class="ti ti-loader"></i> Salvando no sistema...</div>';
+  // converte data yyyy-mm-dd (input) para dd/mm/aaaa (padrão da planilha)
+  const partes = String(validade).split('-');
+  const validadeBR = partes.length===3 ? `${partes[2]}/${partes[1]}/${partes[0]}` : validade;
+  try {
+    const resp = await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'salvarRenovacaoSP',token:sessaoToken,
+      dados:{ id:String(id), validade:validadeBR, assessoria, valor,
+        cliente: d?d['CLIENTE']:'', cnpj: d?(d['CNPJ']||''):'', consultor: d?(d['CONSULTOR']||''):'' }})});
+    const r = await resp.json();
+    if (r.ok) {
+      if (d) { d['DATA_VALIDADE'] = validadeBR; d['STATUS'] = 'Vigente'; }
+      cacheRenov = null; // força recarregar o histórico
+      msg.innerHTML = '<div style="background:var(--verde-ok-bg);border-radius:8px;padding:10px;margin-top:10px;color:var(--verde-ok);font-size:13px;"><i class="ti ti-circle-check"></i> Renovação salva no sistema! Todos já veem a nova validade.</div>';
+      setTimeout(()=>{ fecharFicha(); renderRegula(document.getElementById('area-conteudo'),'rgg'); }, 1500);
+    } else {
+      msg.innerHTML = '<div class="sem-acesso" style="margin-top:10px;">Falhou ao salvar: '+(r.erro||'verifique o Apps Script.')+'</div>';
+    }
+  } catch(e) {
+    msg.innerHTML = '<div class="sem-acesso" style="margin-top:10px;">Erro de conexão: '+e.message+'</div>';
+  }
 }
 
 // ============================================================
@@ -5683,7 +5708,12 @@ function setFiltroContrato(f, el) { window._filtroContrato=f; document.querySele
 function filtraContratos() {
   const termo = ((document.getElementById('ctr-busca')||{}).value||'').toLowerCase();
   const f = window._filtroContrato || 'todos';
-  function diasVenc(c) { const d = parseDataReaj(c['VENC.']); return d ? Math.round((d-Date.now())/(1000*60*60*24)) : null; }
+  // vencimento EFETIVO: se há aditivo com novo vencimento, ele manda; senão o vencimento original.
+  // (antes olhava só o 'VENC.' e por isso o contrato seguia vencido mesmo com aditivo)
+  function vencEfetivo(c) {
+    return c['VIGENCIA_ATUALIZADA'] || c['VENC. ADITIVO'] || c['VENC.'] || '';
+  }
+  function diasVenc(c) { const d = parseDataReaj(vencEfetivo(c)); return d ? Math.round((d-Date.now())/(1000*60*60*24)) : null; }
   function semAuto(c) { const r = String(c['RENOVAÇÃO AUTOMÁTICA']||'').toLowerCase(); return !r.includes('sim') && !r.includes('aut'); }
   let lista = cacheContratos.filter(c => !termo || String(c['CLIENTE']||'').toLowerCase().includes(termo));
   if (f==='vencer') lista = lista.filter(c => { const d=diasVenc(c); return d!=null && d>=0 && d<=90; });
@@ -5695,7 +5725,8 @@ function filtraContratos() {
   let html = '<div class="grid-cards">';
   lista.slice(0,150).forEach(c => {
     const d = diasVenc(c);
-    const urgente = semAuto(c) && d!=null && d<=90; // sem renovação automática e perto de vencer = urgência
+    const temAditivo = !!(c['VIGENCIA_ATUALIZADA'] || c['VENC. ADITIVO']);
+    const urgente = semAuto(c) && d!=null && d<=90;
     const venceLogo = d!=null && d>=0 && d<=90;
     const vencido = d!=null && d<0;
     const cardCls = vencido?'cancelado':urgente?'':'ativo-status';
@@ -5707,10 +5738,11 @@ function filtraContratos() {
       <div class="card-cli-tags">
         ${urgente?`<span class="tag" style="background:var(--laranja-bg);color:var(--laranja);"><i class="ti ti-alert-triangle"></i> Urgência</span>`:''}
         ${vencido?`<span class="tag" style="background:var(--vermelho-bg);color:var(--vermelho);">Vencido</span>`:venceLogo?`<span class="tag" style="background:var(--amarelo-bg);color:var(--amarelo);">Vence em ${d}d</span>`:''}
+        ${temAditivo?`<span class="tag" style="background:var(--verde-claro-bg);color:var(--verde-escuro);"><i class="ti ti-file-plus"></i> Com aditivo</span>`:''}
         ${semAuto(c)?`<span class="tag tag-eventual">Sem renov. auto</span>`:`<span class="tag tag-contrato">Renov. automática</span>`}
         ${c['ÍNDICE']?`<span class="tag tag-grupo">${c['ÍNDICE']}</span>`:''}
       </div>
-      <div class="card-cli-linha borda"><span>Vencimento</span><b>${fmtDataBR(c['VENC.'])}</b></div>
+      <div class="card-cli-linha borda"><span>Vencimento${temAditivo?' (aditivo)':''}</span><b>${fmtDataBR(vencEfetivo(c))}</b></div>
       <div class="card-cli-linha"><span>Consultor</span><span>${c['CONSULTOR']||'—'}</span></div>
     </div>`;
   });
@@ -6247,11 +6279,13 @@ function calcResultados() {
         <div class="kpi-card" style="border-top:3px solid var(--verde-ok);"><div class="kpi-num" style="color:var(--verde-ok);">${emFechado}</div><div class="kpi-lbl">Fechado</div></div>
         <div class="kpi-card" style="border-top:3px solid var(--vermelho);"><div class="kpi-num" style="color:var(--vermelho);">${emDeclinado}</div><div class="kpi-lbl">Declinado</div></div>
       </div>
+      ${blocoDeclinadosCoberturas(leadsPeriodo)}
       ${blocoFechamentosComissao()}`;
     return;
   }
 
-  const totalLeads = leadsPeriodo.length;
+  // total de leads: inclui declinados, EXCLUI coberturas (regra da Mafe)
+  const totalLeads = leadsPeriodo.filter(l=>l['ETAPA']!=='Cobertura').length;
   const propostas = movs.filter(m=>m['ETAPA_NOVA']==='Proposta Enviada').length;
   const fechados = movs.filter(m=>m['ETAPA_NOVA']==='Fechado').length;
 
@@ -6293,7 +6327,49 @@ function calcResultados() {
         <tr><td style="padding:8px 0;color:var(--cinza-700);">Prospecções no período</td><td style="text-align:right;font-weight:600;">${totalProspec}</td></tr>
       </table>
     </div>
+    ${blocoDeclinadosCoberturas(leadsPeriodo)}
     ${blocoFechamentosComissao()}`;
+}
+
+// blocos de Declinados (com motivos) e Coberturas (com empresas), do período
+function blocoDeclinadosCoberturas(leadsPeriodo) {
+  const declinados = leadsPeriodo.filter(l=>l['ETAPA']==='Declinado');
+  const coberturas = leadsPeriodo.filter(l=>l['ETAPA']==='Cobertura');
+  // agrupa declinados por motivo
+  const porMotivo = {};
+  declinados.forEach(l=>{ const m=l['MOTIVO_PERDA']||'Sem motivo informado'; porMotivo[m]=(porMotivo[m]||0)+1; });
+  const motivosOrd = Object.entries(porMotivo).sort((a,b)=>b[1]-a[1]);
+
+  let html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-top:18px;">';
+  // Declinados
+  html += `<div style="background:white;border:1px solid var(--cinza-200);border-radius:12px;padding:20px;border-top:3px solid var(--vermelho);">
+    <h3 style="font-family:var(--fonte-display);font-size:15px;margin:0 0 4px;color:var(--vermelho);">Declinados no período</h3>
+    <div style="font-size:28px;font-weight:700;font-family:var(--fonte-display);color:var(--vermelho);margin-bottom:12px;">${declinados.length}</div>`;
+  if (motivosOrd.length) {
+    html += '<div style="font-size:12px;color:var(--cinza-600);margin-bottom:8px;">Por motivo:</div>';
+    motivosOrd.forEach(([m,n])=>{
+      const pct = Math.round(n/declinados.length*100);
+      html += `<div style="margin-bottom:8px;">
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;"><span>${m}</span><b>${n} (${pct}%)</b></div>
+        <div style="height:6px;background:var(--cinza-100);border-radius:3px;overflow:hidden;"><div style="height:100%;width:${pct}%;background:var(--vermelho);"></div></div>
+      </div>`;
+    });
+  } else { html += '<div style="font-size:13px;color:var(--cinza-500);">Nenhum declinado no período.</div>'; }
+  html += '</div>';
+  // Coberturas
+  html += `<div style="background:white;border:1px solid var(--cinza-200);border-radius:12px;padding:20px;border-top:3px solid var(--roxo);">
+    <h3 style="font-family:var(--fonte-display);font-size:15px;margin:0 0 4px;color:var(--roxo);">Coberturas no período</h3>
+    <div style="font-size:28px;font-weight:700;font-family:var(--fonte-display);color:var(--roxo);margin-bottom:12px;">${coberturas.length}</div>
+    <div style="font-size:11px;color:var(--cinza-500);margin-bottom:8px;">Não entram nas conversões (cliente já atendido por outra empresa).</div>`;
+  if (coberturas.length) {
+    html += '<table style="width:100%;font-size:12px;border-collapse:collapse;"><tr style="border-bottom:1px solid var(--cinza-200);"><th style="text-align:left;padding:5px 0;color:var(--cinza-600);">Cliente</th><th style="text-align:left;padding:5px 0;color:var(--cinza-600);">Atendido por</th></tr>';
+    coberturas.forEach(l=>{
+      html += `<tr style="border-bottom:1px solid var(--cinza-100);"><td style="padding:6px 0;">${l['CLIENTE']||l['NOME']||'—'}</td><td style="padding:6px 0;color:var(--cinza-600);">${l['EMPRESA_COLETA_ATUAL']||'—'}</td></tr>`;
+    });
+    html += '</table>';
+  } else { html += '<div style="font-size:13px;color:var(--cinza-500);">Nenhuma cobertura no período.</div>'; }
+  html += '</div></div>';
+  return html;
 }
 
 // métricas financeiras do funil (ticket médio, valor em jogo, conversão em fechamentos)
@@ -6334,22 +6410,47 @@ function blocoFechamentosComissao() {
       <div style="background:var(--amarelo-bg);border-radius:8px;padding:12px;font-size:13px;color:#8a6d00;">Para ver os fechamentos aqui, suba a planilha de comissões no módulo <b>Financeiro › Relatórios</b>.</div>
     </div>`;
   }
-  const contam = fech.filter(f=>!f.foraDoTotal);
-  const fora = fech.filter(f=>f.foraDoTotal);
+  // filtro de mês (mesRef)
+  const meses = [...new Set(fech.map(f=>f.mesRef).filter(m=>m&&!String(m).endsWith('-00')))].sort();
+  const mesSel = window._fechMesSel || 'todos';
+  const fechMes = mesSel==='todos' ? fech : fech.filter(f=>f.mesRef===mesSel);
+  const rotMes = (m)=> (typeof finRotMes==='function' && m) ? finRotMes(m) : m;
+
+  const contam = fechMes.filter(f=>!f.foraDoTotal);
+  const fora = fechMes.filter(f=>f.foraDoTotal);
   const totVal = contam.reduce((s,x)=>s+(x.valor||0),0);
   const porCons = {};
-  contam.forEach(f=>{ porCons[f.consultor]=porCons[f.consultor]||{n:0,v:0}; porCons[f.consultor].n++; porCons[f.consultor].v+=(f.valor||0); });
-  const linhasCons = Object.entries(porCons).sort((a,b)=>b[1].v-a[1].v)
-    .map(([c,o])=>`<tr style="border-bottom:1px solid var(--cinza-100);"><td style="padding:8px 0;">${c}</td><td style="text-align:right;">${o.n}</td><td style="text-align:right;font-weight:600;">${fmtMoeda(o.v)}</td></tr>`).join('');
+  contam.forEach(f=>{ porCons[f.consultor]=porCons[f.consultor]||{n:0,v:0,itens:[]}; porCons[f.consultor].n++; porCons[f.consultor].v+=(f.valor||0); porCons[f.consultor].itens.push(f); });
+
+  // cada consultor vira uma linha clicável que expande o detalhe (os fechamentos dele)
+  const linhasCons = Object.entries(porCons).sort((a,b)=>b[1].v-a[1].v).map(([c,o],idx)=>{
+    const detId = 'fech-det-'+idx;
+    const detalhe = o.itens.sort((a,b)=>(b.valor||0)-(a.valor||0)).map(f=>
+      `<tr style="border-bottom:1px solid var(--cinza-100);background:var(--cinza-50);"><td style="padding:6px 0 6px 20px;">${f.cliente}</td><td><span class="badge" style="background:var(--verde-claro-bg);color:var(--verde-escuro);font-size:10px;padding:2px 6px;border-radius:4px;">${f.tipo}</span></td><td style="text-align:right;">${f.data||'—'}</td><td style="text-align:right;">${fmtMoeda(f.valor)}</td></tr>`
+    ).join('');
+    return `<tr style="border-bottom:1px solid var(--cinza-100);cursor:pointer;" onclick="var e=document.getElementById('${detId}');e.style.display=e.style.display==='table-row-group'?'none':'table-row-group';">
+        <td style="padding:8px 0;"><i class="ti ti-chevron-right" style="font-size:12px;"></i> ${c}</td><td style="text-align:right;">${o.n}</td><td style="text-align:right;font-weight:600;">${fmtMoeda(o.v)}</td></tr>
+      <tbody id="${detId}" style="display:none;"><tr style="font-size:11px;color:var(--cinza-500);"><td style="padding:4px 0 4px 20px;">Cliente</td><td>Tipo</td><td style="text-align:right;">Data</td><td style="text-align:right;">Valor</td></tr>${detalhe}</tbody>`;
+  }).join('');
+
   const foraTxt = fora.length ? `<div style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--cinza-300);">
       <div style="font-size:13px;color:var(--roxo);font-weight:600;margin-bottom:6px;">Aditivos e Eventuais Recicláveis (${fora.length}) — não somam ao total</div>
       <div style="font-size:12px;color:var(--cinza-600);">Total à parte: ${fmtMoeda(fora.reduce((s,x)=>s+(x.valor||0),0))}</div>
     </div>` : '';
+
+  const selMes = `<select onchange="window._fechMesSel=this.value;renderResultadosCRM(document.getElementById('area-conteudo'))" style="padding:6px 10px;border:1.5px solid var(--cinza-300);border-radius:8px;font-size:12px;">
+      <option value="todos" ${mesSel==='todos'?'selected':''}>Todos os meses</option>
+      ${meses.map(m=>`<option value="${m}" ${m===mesSel?'selected':''}>${rotMes(m)}</option>`).join('')}
+    </select>`;
+
   return `<div style="background:white;border:1px solid var(--cinza-200);border-radius:12px;padding:20px;margin-top:18px;">
-    <h3 style="font-family:var(--fonte-display);font-size:15px;margin:0 0 4px;">Fechamentos (planilha de comissões)</h3>
-    <div style="font-size:12px;color:var(--cinza-500);margin-bottom:12px;">${contam.length} fechamentos · ${fmtMoeda(totVal)}</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:4px;">
+      <h3 style="font-family:var(--fonte-display);font-size:15px;margin:0;">Fechamentos (planilha de comissões)</h3>
+      ${selMes}
+    </div>
+    <div style="font-size:12px;color:var(--cinza-500);margin-bottom:12px;">${contam.length} fechamentos · ${fmtMoeda(totVal)} · <i class="ti ti-info-circle"></i> clique num consultor para ver o detalhe</div>
     <table style="width:100%;font-size:13px;border-collapse:collapse;">
-      <tr style="border-bottom:2px solid var(--cinza-200);"><th style="text-align:left;padding:8px 0;">Consultor</th><th style="text-align:right;">Fechamentos</th><th style="text-align:right;">Valor</th></tr>
+      <thead><tr style="border-bottom:2px solid var(--cinza-200);"><th style="text-align:left;padding:8px 0;">Consultor</th><th style="text-align:right;">Fechamentos</th><th style="text-align:right;">Valor</th></tr></thead>
       ${linhasCons}
     </table>
     ${foraTxt}
@@ -6723,6 +6824,28 @@ async function finEnviarSheetsCompleto(tipo, statusEl){
       dados:{ aba:cfg.aba, colunas, linhas:lote, modo:'tudo', primeiroLote:primeiro }})});
     primeiro = false;
   }
+}
+
+// limpa SÓ um tipo de relatório (local + Sheets), sem tocar nos outros.
+// Ex: se só os títulos deram problema, limpa só 'receber' e resube só ele.
+async function FIN_limparTipo(tipo){
+  const cfg = FIN_MAPA_SHEETS[tipo];
+  if (!cfg) return;
+  const nomes = { pagar:'Contas a Pagar', receber:'Contas a Receber (Emitidos)', recebeReceb:'Contas a Receber (Recebidos)', fechamentos:'Comissões', coletas:'Coletas', faturamento:'Variação de Faturamento' };
+  if(!confirm(`Isso vai apagar SÓ os dados de "${nomes[tipo]||tipo}" (os outros relatórios continuam intactos). Continuar?`)) return;
+  const st = document.getElementById('st-'+ (tipo==='fechamentos'?'comissao': tipo==='coletas'?'servicos': tipo));
+  if (st){ st.textContent = 'Limpando...'; st.style.color='var(--cinza-500)'; }
+  // limpa local
+  FINdados[tipo] = []; finSalvar();
+  if (typeof finInvalidarCache==='function') finInvalidarCache();
+  // limpa a aba específica no Sheets
+  try {
+    const resp = await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'limparFinanceiro',token:sessaoToken,aba:cfg.aba})});
+    const r = await resp.json();
+    if(r.ok){ if(st){ st.textContent = 'Limpo! Agora suba este relatório de novo.'; st.style.color='var(--verde-medio)'; } }
+    else { if(st){ st.textContent = 'Falhou ao limpar no sistema: '+(r.erro||'republique o Apps Script.'); st.style.color='var(--vermelho)'; } }
+  } catch(e){ if(st){ st.textContent = 'Erro de conexão ao limpar: '+e.message; st.style.color='var(--vermelho)'; } }
+  finAtualizarTudo();
 }
 
 async function FIN_limparTudo(){
@@ -7684,7 +7807,7 @@ function FIN_garantirSheetJS(cb){
   s.onerror = () => { cb(); }; // se falhar, o parser nativo ainda tenta
   document.head.appendChild(s);
 }
-const FIN_HTML_RELATORIOS = '\n    <div class="card" style="background:#fff;border:1px solid var(--cinza-200);border-radius:14px;padding:20px;margin-bottom:16px;">\n      <h2 style="color:var(--verde-escuro);font-size:16px;margin:0 0 10px;">Suba os relatórios</h2>\n      <div style="background:#eef4fb;color:#2c5282;border-radius:8px;padding:10px;font-size:12.5px;margin-bottom:14px;"><i class="ti ti-info-circle"></i> Os dados ficam só neste navegador. O sistema soma só o que veio a mais (não conta título repetido).</div>\n      <div class="upload-box" id="ub-pagar"><label for="f-pagar"><i class="ti ti-file-spreadsheet" style="font-size:22px;display:block;margin-bottom:6px;"></i> Contas a Pagar (.xlsx)</label><input type="file" id="f-pagar" accept=".xlsx" onchange="FIN_lerArquivo(this,\'pagar\')"><div id="st-pagar" style="font-size:12px;color:var(--cinza-500);margin-top:6px;"></div></div>\n      <div class="upload-box" id="ub-receber"><label for="f-receber"><i class="ti ti-file-spreadsheet" style="font-size:22px;display:block;margin-bottom:6px;"></i> Contas a Receber — <b>EMITIDOS no mês</b> (filtro Emissão)</label><input type="file" id="f-receber" accept=".xlsx" onchange="FIN_lerArquivo(this,\'receber\')"><div id="st-receber" style="font-size:12px;color:var(--cinza-500);margin-top:6px;"></div></div>\n      <div class="upload-box" id="ub-recebeReceb"><label for="f-recebeReceb"><i class="ti ti-cash" style="font-size:22px;display:block;margin-bottom:6px;"></i> Contas a Receber — <b>RECEBIDOS no mês</b> (filtro Recebimento)</label><input type="file" id="f-recebeReceb" accept=".xlsx" onchange="FIN_lerArquivo(this,\'recebeReceb\')"><div id="st-recebeReceb" style="font-size:12px;color:var(--cinza-500);margin-top:6px;"></div></div>\n      <div class="upload-box" id="ub-comissao"><label for="f-comissao"><i class="ti ti-file-spreadsheet" style="font-size:22px;display:block;margin-bottom:6px;"></i> Planilha de Comissões (uma aba por consultor)</label><input type="file" id="f-comissao" accept=".xlsx" onchange="FIN_lerArquivo(this,\'comissao\')"><div id="st-comissao" style="font-size:12px;color:var(--cinza-500);margin-top:6px;"></div></div>\n      <div class="upload-box" id="ub-servicos"><label for="f-servicos"><i class="ti ti-recycle" style="font-size:22px;display:block;margin-bottom:6px;"></i> Relatório de Serviços (coletas — .csv)</label><input type="file" id="f-servicos" accept=".csv" onchange="FIN_lerArquivo(this,\'servicos\')"><div id="st-servicos" style="font-size:12px;color:var(--cinza-500);margin-top:6px;"></div></div>\n      <div class="upload-box" id="ub-faturamento"><label for="f-faturamento"><i class="ti ti-chart-line" style="font-size:22px;display:block;margin-bottom:6px;"></i> Variação de Faturamento (todos os clientes — .xlsx)</label><input type="file" id="f-faturamento" accept=".xlsx" onchange="FIN_lerArquivo(this,\'faturamento\')"><div id="st-faturamento" style="font-size:12px;color:var(--cinza-500);margin-top:6px;"></div></div>\n      <div style="margin-top:12px;"><button class="ficha-btn-secundario" onclick="FIN_limparTudo()"><i class="ti ti-trash"></i> Limpar tudo</button></div>\n    </div>\n    <div class="card" style="background:#fff;border:1px solid var(--cinza-200);border-radius:14px;padding:20px;"><h2 style="color:var(--verde-escuro);font-size:16px;margin:0 0 10px;">O que já está acumulado</h2><div id="resumo-acumulado">Nenhum relatório carregado ainda.</div></div>\n';
+const FIN_HTML_RELATORIOS = '\n    <div class="card" style="background:#fff;border:1px solid var(--cinza-200);border-radius:14px;padding:20px;margin-bottom:16px;">\n      <h2 style="color:var(--verde-escuro);font-size:16px;margin:0 0 10px;">Suba os relatórios</h2>\n      <div style="background:#eef4fb;color:#2c5282;border-radius:8px;padding:10px;font-size:12.5px;margin-bottom:14px;"><i class="ti ti-info-circle"></i> Os dados ficam só neste navegador. O sistema soma só o que veio a mais (não conta título repetido).</div>\n      <div class="upload-box" id="ub-pagar"><label for="f-pagar"><i class="ti ti-file-spreadsheet" style="font-size:22px;display:block;margin-bottom:6px;"></i> Contas a Pagar (.xlsx)</label><input type="file" id="f-pagar" accept=".xlsx" onchange="FIN_lerArquivo(this,\'pagar\')"><div id="st-pagar" style="font-size:12px;color:var(--cinza-500);margin-top:6px;"></div><div style="margin-top:8px;"><span onclick="FIN_limparTipo(\'pagar\')" style="font-size:11px;color:var(--vermelho);cursor:pointer;"><i class="ti ti-trash"></i> Limpar só este</span></div></div>\n      <div class="upload-box" id="ub-receber"><label for="f-receber"><i class="ti ti-file-spreadsheet" style="font-size:22px;display:block;margin-bottom:6px;"></i> Contas a Receber — <b>EMITIDOS no mês</b> (filtro Emissão)</label><input type="file" id="f-receber" accept=".xlsx" onchange="FIN_lerArquivo(this,\'receber\')"><div id="st-receber" style="font-size:12px;color:var(--cinza-500);margin-top:6px;"></div><div style="margin-top:8px;"><span onclick="FIN_limparTipo(\'receber\')" style="font-size:11px;color:var(--vermelho);cursor:pointer;"><i class="ti ti-trash"></i> Limpar só este</span></div></div>\n      <div class="upload-box" id="ub-recebeReceb"><label for="f-recebeReceb"><i class="ti ti-cash" style="font-size:22px;display:block;margin-bottom:6px;"></i> Contas a Receber — <b>RECEBIDOS no mês</b> (filtro Recebimento)</label><input type="file" id="f-recebeReceb" accept=".xlsx" onchange="FIN_lerArquivo(this,\'recebeReceb\')"><div id="st-recebeReceb" style="font-size:12px;color:var(--cinza-500);margin-top:6px;"></div><div style="margin-top:8px;"><span onclick="FIN_limparTipo(\'recebeReceb\')" style="font-size:11px;color:var(--vermelho);cursor:pointer;"><i class="ti ti-trash"></i> Limpar só este</span></div></div>\n      <div class="upload-box" id="ub-comissao"><label for="f-comissao"><i class="ti ti-file-spreadsheet" style="font-size:22px;display:block;margin-bottom:6px;"></i> Planilha de Comissões (uma aba por consultor)</label><input type="file" id="f-comissao" accept=".xlsx" onchange="FIN_lerArquivo(this,\'comissao\')"><div id="st-comissao" style="font-size:12px;color:var(--cinza-500);margin-top:6px;"></div><div style="margin-top:8px;"><span onclick="FIN_limparTipo(\'fechamentos\')" style="font-size:11px;color:var(--vermelho);cursor:pointer;"><i class="ti ti-trash"></i> Limpar só este</span></div></div>\n      <div class="upload-box" id="ub-servicos"><label for="f-servicos"><i class="ti ti-recycle" style="font-size:22px;display:block;margin-bottom:6px;"></i> Relatório de Serviços (coletas — .csv)</label><input type="file" id="f-servicos" accept=".csv" onchange="FIN_lerArquivo(this,\'servicos\')"><div id="st-servicos" style="font-size:12px;color:var(--cinza-500);margin-top:6px;"></div><div style="margin-top:8px;"><span onclick="FIN_limparTipo(\'coletas\')" style="font-size:11px;color:var(--vermelho);cursor:pointer;"><i class="ti ti-trash"></i> Limpar só este</span></div></div>\n      <div class="upload-box" id="ub-faturamento"><label for="f-faturamento"><i class="ti ti-chart-line" style="font-size:22px;display:block;margin-bottom:6px;"></i> Variação de Faturamento (todos os clientes — .xlsx)</label><input type="file" id="f-faturamento" accept=".xlsx" onchange="FIN_lerArquivo(this,\'faturamento\')"><div id="st-faturamento" style="font-size:12px;color:var(--cinza-500);margin-top:6px;"></div><div style="margin-top:8px;"><span onclick="FIN_limparTipo(\'faturamento\')" style="font-size:11px;color:var(--vermelho);cursor:pointer;"><i class="ti ti-trash"></i> Limpar só este</span></div></div>\n      <div style="margin-top:12px;"><button class="ficha-btn-secundario" onclick="FIN_limparTudo()"><i class="ti ti-trash"></i> Limpar tudo</button></div>\n    </div>\n    <div class="card" style="background:#fff;border:1px solid var(--cinza-200);border-radius:14px;padding:20px;"><h2 style="color:var(--verde-escuro);font-size:16px;margin:0 0 10px;">O que já está acumulado</h2><div id="resumo-acumulado">Nenhum relatório carregado ainda.</div></div>\n';
 function renderFinanceiro(area, subId){
   area.innerHTML = '<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando...</h2></div>';
   FIN_garantirSheetJS(async function(){
