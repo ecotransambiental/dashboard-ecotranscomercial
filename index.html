@@ -1238,6 +1238,7 @@ async function abrirFicha(cnpj, nome) {
           <div id="ficha-origem-lead" style="margin-top:12px;"></div>
           <div class="ficha-botoes">
             <button class="ficha-btn-primario" onclick="abrirFormAtividade('${cnpj.replace(/'/g,'')}','${(c['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-plus"></i> Registrar atividade</button>
+            <button class="ficha-btn-secundario" style="color:#6B5B95;border-color:#6B5B95;" onclick="abrirFollowUp('null','${(c['CLIENTE']||'').replace(/'/g,'')}','${cnpj.replace(/'/g,'')}')"><i class="ti ti-calendar-clock"></i> Agendar follow-up</button>
             <button class="ficha-btn-secundario" onclick="imprimirFichaCliente('${cnpj.replace(/'/g,'')}')"><i class="ti ti-printer"></i> Imprimir ficha</button>
             ${c['TIPO']==='Eventual'?`<button class="ficha-btn-secundario" style="color:var(--verde-escuro);border-color:var(--verde-medio);" onclick="virarContrato('${cnpj.replace(/'/g,'')}','${(c['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-file-text"></i> Mudar para Contrato</button>`:''}
             <button class="ficha-btn-secundario" onclick="abrirFormInadimplencia('${cnpj.replace(/'/g,'')}')"><i class="ti ti-alert-triangle"></i> Marcar inadimplente</button>
@@ -1659,22 +1660,24 @@ async function confirmarFollowUp(idLead, cliente, cnpj) {
   const data = document.getElementById('fu-data').value;
   const obs = document.getElementById('fu-obs').value;
   if (!data) { document.getElementById('fu-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Escolha a data.</div>'; return; }
+  const temLead = idLead && idLead!=='null' && idLead!=='undefined' && idLead!=='';
   try {
-    // grava a data de follow-up no lead
-    await fetch(API_URL, { method:'POST', body: JSON.stringify({
-      acao:'atualizarLeadCampos', token: sessaoToken, dados:{ idLead:String(idLead), campos:{ FOLLOWUP: fmtDataBR(data) } }
-    })});
-    // cria uma atividade agendada (aparece na Agenda)
+    // se é um lead do CRM, grava a data de follow-up no lead
+    if (temLead) {
+      await fetch(API_URL, { method:'POST', body: JSON.stringify({
+        acao:'atualizarLeadCampos', token: sessaoToken, dados:{ idLead:String(idLead), campos:{ FOLLOWUP: fmtDataBR(data) } }
+      })});
+    }
+    // cria uma atividade agendada (aparece na Agenda e no sininho) — vale pra lead E pra carteira
     await fetch(API_URL, { method:'POST', body: JSON.stringify({
       acao:'registrarAtividade', token: sessaoToken,
       dados:{ cnpj: cnpj||'', cliente, tipo:'Follow-up', titulo:'Follow-up agendado', descricao: obs, dataAgendada: data, registradoPor: usuarioAtual.nome }
     })});
-    const lead = (kanbanLeads||[]).find(l=>String(l['ID_LEAD'])===String(idLead));
-    if (lead) lead['FOLLOWUP'] = fmtDataBR(data);
+    if (temLead) { const lead = (kanbanLeads||[]).find(l=>String(l['ID_LEAD'])===String(idLead)); if (lead) lead['FOLLOWUP'] = fmtDataBR(data); }
     const ov = document.getElementById('modal-fu-overlay'); if (ov) ov.remove();
     fecharFicha();
-    aplicarKanban();
-    atualizarSino();
+    if (temLead && typeof aplicarKanban==='function') aplicarKanban();
+    if (typeof atualizarSino==='function') atualizarSino();
     const av = document.createElement('div');
     av.textContent = 'Follow-up agendado!';
     av.style.cssText = 'position:fixed;bottom:20px;right:20px;background:#6B5B95;color:white;padding:10px 18px;border-radius:8px;font-size:13px;z-index:9999;';
@@ -3281,12 +3284,21 @@ async function atualizarSino() {
     }
     const badge = document.getElementById('sino-badge');
     if (veFollowUps) {
-      // follow-ups com data nos próximos 7 dias — reusa os leads já carregados (não baixa de novo)
+      // follow-ups com data nos próximos 7 dias — de LEADS (campo FOLLOWUP) e de CARTEIRA (atividades tipo Follow-up)
       if (!kanbanLeads) await carregarLeads();
       const hoje = new Date(new Date().toDateString());
       const fim = new Date(hoje); fim.setDate(fim.getDate()+7);
-      const fus = (kanbanLeads||[]).filter(l=>{ const d=parseDataReaj(l['FOLLOWUP']); return d && d>=hoje && d<=fim; })
-        .map(l=>({id:'fu-'+(l['ID_LEAD']||'')+'-'+(l['FOLLOWUP']||''), idLead:l['ID_LEAD'], cliente:l['CLIENTE'], data:l['FOLLOWUP'], consultor:l['CONSULTOR']}))
+      const fusLead = (kanbanLeads||[]).filter(l=>{ const d=parseDataReaj(l['FOLLOWUP']); return d && d>=hoje && d<=fim; })
+        .map(l=>({id:'fu-'+(l['ID_LEAD']||'')+'-'+(l['FOLLOWUP']||''), idLead:l['ID_LEAD'], cliente:l['CLIENTE'], data:l['FOLLOWUP'], consultor:l['CONSULTOR'], origem:'Lead'}));
+      // follow-ups de carteira: atividades agendadas do tipo Follow-up
+      let fusCart = [];
+      try {
+        const ra = await buscarDados('Atividades_Cliente');
+        fusCart = (ra.ok?ra.linhas:[]).filter(a=>String(a['TIPO']||'')==='Follow-up' && a['DATA_AGENDADA'])
+          .filter(a=>{ const d=parseDataReaj(a['DATA_AGENDADA']); return d && d>=hoje && d<=fim; })
+          .map(a=>({id:'fuc-'+(a['CNPJ']||'')+'-'+(a['DATA_AGENDADA']||''), cnpj:a['CNPJ'], cliente:a['CLIENTE'], data:a['DATA_AGENDADA'], consultor:a['REGISTRADO_POR']||'', origem:'Carteira'}));
+      } catch(e){}
+      const fus = fusLead.concat(fusCart)
         .filter(a=>!avisoEstaLido(a.id))
         .sort((a,b)=>(parseDataReaj(a.data)||0)-(parseDataReaj(b.data)||0));
       window._avisosFU = fus;
