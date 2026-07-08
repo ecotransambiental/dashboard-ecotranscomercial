@@ -6938,7 +6938,7 @@ async function finCarregarDoSheets(tipos, forcar){
         } else {
           FINdados[tipo] = r.linhas.map(l=>{
             const o = {...l};
-            ['valor','pago','saldo','recebido','qtdeServ','pesoTon'].forEach(k=>{ if(o[k]!==undefined&&o[k]!=='') o[k]=parseFloat(o[k])||0; });
+            ['valor','pago','saldo','recebido','qtdeServ','pesoTon','iss','inss','pis','cofins','csll','ir','desconto','liquido'].forEach(k=>{ if(o[k]!==undefined&&o[k]!=='') o[k]=parseFloat(o[k])||0; });
             if(o.foraDoTotal!==undefined) o.foraDoTotal = (o.foraDoTotal===true||o.foraDoTotal==='true'||o.foraDoTotal==='Sim');
             return o;
           });
@@ -6963,6 +6963,8 @@ function finParseValorBR(v){
   return parseFloat(s)||0;
 }
 function finLc(s){ return String(s==null?'':s).replace(/\u00a0/g,' ').trim(); }
+// converte valor em texto (formato BR "1.234,56" ou número) para float
+function finN(v){ if(v==null||v==='')return 0; if(typeof v==='number')return v; let s=String(v).replace(/[^0-9,.-]/g,''); if(s.includes(',')&&s.lastIndexOf(',')>s.lastIndexOf('.'))s=s.replace(/\./g,'').replace(',','.'); const n=parseFloat(s); return isNaN(n)?0:n; }
 function finNormNome(s){ return finLc(s).toUpperCase().replace(/\([^)]*\)/g,'').replace(/[^A-Z0-9 ]/g,'').replace(/\b(LTDA|SA|EIRELI|ME|EPP|THE|NEW|DO BRASIL)\b/g,'').replace(/\s+/g,' ').trim().slice(0,18); }
 
 const FIN_MESES={'janeiro':'01','fevereiro':'02','março':'03','marco':'03','abril':'04','maio':'05','junho':'06','julho':'07','agosto':'08','setembro':'09','outubro':'10','novembro':'11','dezembro':'12'};
@@ -7182,6 +7184,15 @@ function FIN_processarReceber(wb, st, destino){
       valor:parseFloat(r[finAchaCol(cols,'Valor')])||0,
       recebido:parseFloat(r[finAchaCol(cols,'Vlr. Recebido')]||r[finAchaCol(cols,'Recebido')])||0,
       saldo:parseFloat(r[finAchaCol(cols,'Saldo')])||0,
+      // impostos e líquido (o relatório já traz cada um)
+      iss:finN(r[finAchaCol(cols,'ISS')]),
+      inss:finN(r[finAchaCol(cols,'INSS')]),
+      pis:finN(r[finAchaCol(cols,'Pis')]||r[finAchaCol(cols,'PIS')]),
+      cofins:finN(r[finAchaCol(cols,'Cofins')]||r[finAchaCol(cols,'COFINS')]),
+      csll:finN(r[finAchaCol(cols,'Csll')]||r[finAchaCol(cols,'CSLL')]),
+      ir:finN(r[finAchaCol(cols,'IR')]),
+      desconto:finN(r[finAchaCol(cols,'Desconto')]),
+      liquido:finN(r[finAchaCol(cols,'Vlr. Líquido')]||r[finAchaCol(cols,'Vlr. Liquido')]||r[finAchaCol(cols,'Líquido')]),
       _mesEmissao: finYmDeData(finLc(r[finAchaCol(cols,'Emissão')]||r[finAchaCol(cols,'Emissao')]))||''
     });
     jaTem.add(tit); novos++;
@@ -7338,7 +7349,9 @@ function FIN_renderSaude(){
   // se não houver, cai no parse da data de emissão.
   FINdados.receber.filter(r=>!String(r.situacao||'').toLowerCase().includes('cancel')).forEach(r=>{
     const ym = baseData==='competencia' ? finCompYM(r.competencia) : (r._mesEmissao || finYmDeData(r.emissao));
-    if(ym){ receita[ym]=(receita[ym]||0)+r.valor; }
+    // receita pelo LÍQUIDO (o que de fato entra, já sem impostos). Se o título não tiver líquido, cai no bruto.
+    const valLiq = (r.liquido!=null && r.liquido!=='' && r.liquido!==0) ? r.liquido : r.valor;
+    if(ym){ receita[ym]=(receita[ym]||0)+valLiq; }
   });
   // despesa = contas a pagar, por _mesPagamento (pré-calculado) ou parse da data de pagamento
   FINdados.pagar.filter(r=>!String(r.situacao||'').toLowerCase().includes('cancel')).forEach(r=>{
@@ -7369,7 +7382,7 @@ function FIN_renderSaude(){
       <button class="btn sec" onclick="window.print()" style="margin-left:auto;"><i class="ti ti-printer"></i> Exportar / Imprimir</button>
     </div>
     <div class="kpis">
-      <div class="kpi"><div class="num">${finFmtM(totR)}</div><div class="lbl">Receita total</div></div>
+      <div class="kpi"><div class="num">${finFmtM(totR)}</div><div class="lbl">Receita líquida (sem impostos)</div></div>
       <div class="kpi verm"><div class="num">${finFmtM(totD)}</div><div class="lbl">Despesa total</div></div>
       <div class="kpi ${totRes>=0?'':'verm'}"><div class="num">${finFmtM(totRes)}</div><div class="lbl">Resultado</div></div>
       <div class="kpi"><div class="num">${totR?(totRes/totR*100).toFixed(1):'0'}%</div><div class="lbl">Margem</div></div>
@@ -7382,7 +7395,7 @@ function FIN_renderSaude(){
     <div class="card">
       <h2>Leitura automática</h2>
       <p style="font-size:14px;line-height:1.7;color:var(--cinza-700);">
-        No período carregado, a receita somou <b>${finFmtM(totR)}</b> e a despesa <b>${finFmtM(totD)}</b>,
+        No período carregado, a receita <b>líquida</b> (já sem impostos) somou <b>${finFmtM(totR)}</b> e a despesa <b>${finFmtM(totD)}</b>,
         resultando em <b class="${totRes>=0?'pos':'neg'}">${totRes>=0?'superávit':'déficit'} de ${finFmtM(Math.abs(totRes))}</b>
         (margem de ${totR?(totRes/totR*100).toFixed(1):'0'}%).
         ${maiorCentro?`O centro de custo de maior peso foi <b>${maiorCentro[0]}</b> (${finFmtM(maiorCentro[1])}).`:''}
@@ -7470,10 +7483,21 @@ function FIN_renderReceber(){
   const listaEmit = mesSel==='todos' ? baseEmit : baseEmit.filter(x=>mesEmiss(x)===mesSel);
   const emitido = listaEmit.reduce((s,x)=>s+x.valor,0);
   const aberto = listaEmit.reduce((s,x)=>s+x.saldo,0);
+  // impostos e líquido (dos emitidos do período)
+  const tISS = listaEmit.reduce((s,x)=>s+(x.iss||0),0);
+  const tINSS = listaEmit.reduce((s,x)=>s+(x.inss||0),0);
+  const tPIS = listaEmit.reduce((s,x)=>s+(x.pis||0),0);
+  const tCOFINS = listaEmit.reduce((s,x)=>s+(x.cofins||0),0);
+  const tCSLL = listaEmit.reduce((s,x)=>s+(x.csll||0),0);
+  const tIR = listaEmit.reduce((s,x)=>s+(x.ir||0),0);
+  const totalImpostos = tISS+tINSS+tPIS+tCOFINS+tCSLL+tIR;
+  // líquido: usa a coluna "Vlr. Líquido" da planilha. Se algum título vier sem, cai pro bruto-impostos daquele título.
+  const liquido = listaEmit.reduce((s,x)=>s + (x.liquido || (x.valor - (x.iss||0)-(x.inss||0)-(x.pis||0)-(x.cofins||0)-(x.csll||0)-(x.ir||0)-(x.desconto||0))), 0);
   // recebido: filtra também pelo mês selecionado (por emissão do recebido)
   const listaReceb = mesSel==='todos' ? baseReceb : baseReceb.filter(x=>mesEmiss(x)===mesSel);
   const recebidoTotal = listaReceb.reduce((s,x)=>s+(x.recebido||x.valor),0);
   const porSit={}; listaEmit.forEach(x=>porSit[x.situacao||'—']=(porSit[x.situacao||'—']||0)+x.valor);
+  const cardImposto = (nome,val,pctBase)=>`<div class="kpi" style="border-top-color:var(--laranja);"><div class="num" style="font-size:20px;color:var(--laranja);">${finFmtM(val)}</div><div class="lbl">${nome}${pctBase&&emitido>0?` · ${(val/emitido*100).toFixed(1)}%`:''}</div></div>`;
   p.innerHTML=`
     <div class="filtros">
       <span style="font-size:13px;color:var(--cinza-600);">Mês (emissão):</span>
@@ -7484,13 +7508,27 @@ function FIN_renderReceber(){
       <button class="btn sec" onclick="window.print()" style="margin-left:auto;"><i class="ti ti-printer"></i> Exportar / Imprimir</button>
     </div>
     <div class="kpis">
-      <div class="kpi"><div class="num">${finFmtM(emitido)}</div><div class="lbl">Emitido no mês (faturado)</div></div>
-      <div class="kpi" style="border-top-color:var(--verde-claro);"><div class="num" style="color:var(--verde-medio);">${temReceb?finFmtM(recebidoTotal):'—'}</div><div class="lbl">Recebido no mês (caixa)</div></div>
-      <div class="kpi verm"><div class="num">${finFmtM(aberto)}</div><div class="lbl">Em aberto (dos emitidos)</div></div>
+      <div class="kpi" style="border-top-color:var(--verde-medio);"><div class="num" style="color:var(--verde-escuro);">${finFmtM(liquido)}</div><div class="lbl"><b>Líquido no mês</b> (o que de fato entra)</div></div>
+      <div class="kpi"><div class="num" style="font-size:22px;">${finFmtM(emitido)}</div><div class="lbl">Bruto emitido (faturado)</div></div>
+      <div class="kpi" style="border-top-color:var(--laranja);"><div class="num" style="font-size:22px;color:var(--laranja);">${finFmtM(totalImpostos)}</div><div class="lbl">Total de impostos${emitido>0?` · ${(totalImpostos/emitido*100).toFixed(1)}%`:''}</div></div>
+      <div class="kpi" style="border-top-color:var(--verde-claro);"><div class="num" style="font-size:22px;color:var(--verde-medio);">${temReceb?finFmtM(recebidoTotal):'—'}</div><div class="lbl">Recebido no mês (caixa)</div></div>
+      <div class="kpi verm"><div class="num" style="font-size:22px;">${finFmtM(aberto)}</div><div class="lbl">Em aberto (dos emitidos)</div></div>
+    </div>
+    <div class="card"><h2>Impostos detalhados${mesSel!=='todos'?' · '+finRotMes(mesSel):''}</h2>
+      <div class="kpis">
+        ${cardImposto('ISS',tISS,true)}
+        ${cardImposto('INSS',tINSS,true)}
+        ${cardImposto('PIS',tPIS,true)}
+        ${cardImposto('COFINS',tCOFINS,true)}
+        ${cardImposto('CSLL',tCSLL,true)}
+        ${cardImposto('IR',tIR,true)}
+      </div>
+      <div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--cinza-300);font-size:13px;color:var(--cinza-700);">
+        Bruto <b>${finFmtM(emitido)}</b> − impostos <b>${finFmtM(totalImpostos)}</b> = Líquido <b style="color:var(--verde-escuro);">${finFmtM(liquido)}</b>
+      </div>
     </div>
     <div class="aviso" style="background:var(--verde-claro-bg);color:var(--verde-escuro);"><i class="ti ti-info-circle"></i>
-      <b>Emitido</b> vem do relatório filtrado por Emissão (o que você faturou no mês).
-      <b>Recebido</b> vem do relatório filtrado por Recebimento (o que entrou no caixa no mês).
+      O <b>Líquido</b> vem da coluna "Vlr. Líquido" do relatório (o que de fato entra depois dos impostos).
       ${!temReceb?'<br><b>Falta subir o relatório de Recebidos</b> pra ver o valor recebido.':''}
       ${!temEmit?'<br><b>Falta subir o relatório de Emitidos.</b>':''}
     </div>
