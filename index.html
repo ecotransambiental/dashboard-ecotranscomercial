@@ -7639,6 +7639,12 @@ function FIN_renderReceber(){
   const p=document.getElementById('p-receber');
   const temEmit = FINdados.receber.length, temReceb = FINdados.recebeReceb.length;
   if(!temEmit && !temReceb){ p.innerHTML='<div class="card"><div class="vazio">Suba os relatórios de Contas a Receber (Emitidos e/ou Recebidos).</div></div>'; return; }
+  // DIAGNÓSTICO: detecta impostos corrompidos (imposto maior que o valor bruto do título é impossível)
+  const corrompidos = FINdados.receber.filter(x=>{
+    const b = x.valor||0; if(b<=0) return false;
+    return [x.iss,x.inss,x.pis,x.cofins,x.csll,x.ir].some(v=>(v||0) > b);
+  });
+  window._finImpostoDiag = corrompidos.length ? { total: corrompidos.length, exemplo: corrompidos[0] } : null;
   const semCancel = x=>!String(x.situacao||'').toLowerCase().includes('cancel');
   // mês de emissão robusto: usa o campo pré-calculado (sobrevive ao Sheets); senão parseia a data
   const mesEmiss = x => x._mesEmissao || finYmDeData(x.emissao);
@@ -7697,6 +7703,10 @@ function FIN_renderReceber(){
         Bruto <b>${finFmtM(emitido)}</b> − impostos <b>${finFmtM(totalImpostos)}</b> = Líquido <b style="color:var(--verde-escuro);">${finFmtM(liquido)}</b>
       </div>
     </div>
+    ${window._finImpostoDiag ? `<div class="aviso" style="background:var(--vermelho-bg);color:var(--vermelho);"><i class="ti ti-alert-triangle"></i>
+      <b>Atenção:</b> ${window._finImpostoDiag.total} título(s) estão com imposto maior que o próprio valor — sinal de que os dados no sistema vieram corrompidos de um upload antigo (ex.: "${window._finImpostoDiag.exemplo.cliente||'—'}" tem ISS de ${finFmtM(window._finImpostoDiag.exemplo.iss||0)} num título de ${finFmtM(window._finImpostoDiag.exemplo.valor||0)}).
+      <br><b>Solução:</b> clique em "Limpar só este" na caixa de <b>Contas a Receber Emitidos</b> (em Relatórios) e <b>resuba o arquivo</b>. Isso regrava os valores certos.
+    </div>` : ''}
     <div class="aviso" style="background:var(--verde-claro-bg);color:var(--verde-escuro);"><i class="ti ti-info-circle"></i>
       O <b>Líquido</b> vem da coluna "Vlr. Líquido" do relatório (o que de fato entra depois dos impostos).
       ${!temReceb?'<br><b>Falta subir o relatório de Recebidos</b> pra ver o valor recebido.':''}
