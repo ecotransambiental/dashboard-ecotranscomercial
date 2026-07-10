@@ -7092,7 +7092,7 @@ async function finCarregarDoSheets(tipos, forcar){
         } else {
           FINdados[tipo] = r.linhas.map(l=>{
             const o = {...l};
-            ['valor','pago','saldo','recebido','qtdeServ','pesoTon','iss','inss','pis','cofins','csll','ir','desconto','liquido'].forEach(k=>{ if(o[k]!==undefined&&o[k]!=='') o[k]=parseFloat(o[k])||0; });
+            ['valor','pago','saldo','recebido','qtdeServ','pesoTon','iss','inss','pis','cofins','csll','ir','desconto','liquido'].forEach(k=>{ if(o[k]!==undefined&&o[k]!=='') o[k]=finN(o[k]); });
             if(o.foraDoTotal!==undefined) o.foraDoTotal = (o.foraDoTotal===true||o.foraDoTotal==='true'||o.foraDoTotal==='Sim');
             return o;
           });
@@ -7117,8 +7117,23 @@ function finParseValorBR(v){
   return parseFloat(s)||0;
 }
 function finLc(s){ return String(s==null?'':s).replace(/\u00a0/g,' ').trim(); }
-// converte valor em texto (formato BR "1.234,56" ou número) para float
-function finN(v){ if(v==null||v==='')return 0; if(typeof v==='number')return v; let s=String(v).replace(/[^0-9,.-]/g,''); if(s.includes(',')&&s.lastIndexOf(',')>s.lastIndexOf('.'))s=s.replace(/\./g,'').replace(',','.'); const n=parseFloat(s); return isNaN(n)?0:n; }
+// converte valor (número, "1.234,56" BR, "1,234.56" US, "197.16") para float de forma robusta
+function finN(v){
+  if(v==null||v==='')return 0;
+  if(typeof v==='number')return v;
+  let s=String(v).replace(/[^0-9,.-]/g,'');
+  if(s==='')return 0;
+  const temV=s.includes(','), temP=s.includes('.');
+  if(temV&&temP){
+    // o separador decimal é o que aparece por último
+    if(s.lastIndexOf(',')>s.lastIndexOf('.')) s=s.replace(/\./g,'').replace(',','.'); // BR: 1.234,56
+    else s=s.replace(/,/g,''); // US: 1,234.56
+  } else if(temV){
+    s=s.replace(',','.'); // só vírgula = decimal BR
+  }
+  // só ponto: já é decimal válido (197.16) — não mexe
+  const n=parseFloat(s); return isNaN(n)?0:n;
+}
 function finNormNome(s){ return finLc(s).toUpperCase().replace(/\([^)]*\)/g,'').replace(/[^A-Z0-9 ]/g,'').replace(/\b(LTDA|SA|EIRELI|ME|EPP|THE|NEW|DO BRASIL)\b/g,'').replace(/\s+/g,' ').trim().slice(0,18); }
 
 const FIN_MESES={'janeiro':'01','fevereiro':'02','março':'03','marco':'03','abril':'04','maio':'05','junho':'06','julho':'07','agosto':'08','setembro':'09','outubro':'10','novembro':'11','dezembro':'12'};
