@@ -7494,14 +7494,14 @@ function FIN_renderSaude(){
   const p=document.getElementById('p-saude');
   if(!FINdados.pagar.length && !FINdados.receber.length){ p.innerHTML='<div class="card"><div class="vazio">Suba os relatórios de Pagar e Receber primeiro.</div></div>'; return; }
   const baseData = (window._saudeBase||'emissao');
-  const receita={}, despesa={};
+  const receita={}, receitaBruta={}, despesa={};
   // mês da receita: usa o campo pré-calculado _mesEmissao (sobrevive ao ir/voltar do Sheets);
   // se não houver, cai no parse da data de emissão.
   FINdados.receber.filter(r=>!String(r.situacao||'').toLowerCase().includes('cancel')).forEach(r=>{
     const ym = baseData==='competencia' ? finCompYM(r.competencia) : (r._mesEmissao || finYmDeData(r.emissao));
     // receita pelo LÍQUIDO (o que de fato entra, já sem impostos). Se o título não tiver líquido, cai no bruto.
     const valLiq = (r.liquido!=null && r.liquido!=='' && r.liquido!==0) ? r.liquido : r.valor;
-    if(ym){ receita[ym]=(receita[ym]||0)+valLiq; }
+    if(ym){ receita[ym]=(receita[ym]||0)+valLiq; receitaBruta[ym]=(receitaBruta[ym]||0)+(r.valor||0); }
   });
   // despesa = contas a pagar, por _mesPagamento (pré-calculado) ou parse da data de pagamento
   FINdados.pagar.filter(r=>!String(r.situacao||'').toLowerCase().includes('cancel')).forEach(r=>{
@@ -7511,8 +7511,8 @@ function FIN_renderSaude(){
   const meses=[...new Set([...Object.keys(receita),...Object.keys(despesa)])].filter(Boolean).sort();
   const mesSel = window._saudeMes || 'todos';
   const mesesMostrar = mesSel==='todos' ? meses : meses.filter(m=>m===mesSel);
-  let totR=0,totD=0;
-  let linhas=mesesMostrar.map(m=>{ const rv=receita[m]||0, dv=despesa[m]||0, res=rv-dv; totR+=rv; totD+=dv;
+  let totR=0,totD=0,totBruto=0;
+  let linhas=mesesMostrar.map(m=>{ const rv=receita[m]||0, dv=despesa[m]||0, res=rv-dv; totR+=rv; totD+=dv; totBruto+=(receitaBruta[m]||0);
     return `<tr><td>${finRotMes(m)}</td><td>${finFmtM(rv)}</td><td>${finFmtM(dv)}</td><td class="${res>=0?'pos':'neg'}">${finFmtM(res)}</td><td class="${res>=0?'pos':'neg'}">${rv?(res/rv*100).toFixed(1):'0'}%</td></tr>`;
   }).join('');
   const totRes=totR-totD;
@@ -7532,10 +7532,11 @@ function FIN_renderSaude(){
       <button class="btn sec" onclick="window.print()" style="margin-left:auto;"><i class="ti ti-printer"></i> Exportar / Imprimir</button>
     </div>
     <div class="kpis">
-      <div class="kpi"><div class="num">${finFmtM(totR)}</div><div class="lbl">Receita líquida (sem impostos)</div></div>
+      <div class="kpi"><div class="num">${finFmtM(totBruto)}</div><div class="lbl">Receita bruta</div></div>
+      <div class="kpi" style="border-top-color:var(--verde-medio);"><div class="num" style="color:var(--verde-escuro);">${finFmtM(totR)}</div><div class="lbl">Receita líquida (sem impostos)</div></div>
       <div class="kpi verm"><div class="num">${finFmtM(totD)}</div><div class="lbl">Despesa total</div></div>
-      <div class="kpi ${totRes>=0?'':'verm'}"><div class="num">${finFmtM(totRes)}</div><div class="lbl">Resultado</div></div>
-      <div class="kpi"><div class="num">${totR?(totRes/totR*100).toFixed(1):'0'}%</div><div class="lbl">Margem</div></div>
+      <div class="kpi ${totRes>=0?'':'verm'}"><div class="num">${finFmtM(totRes)}</div><div class="lbl">Resultado (sobre o líquido)</div></div>
+      <div class="kpi"><div class="num">${totR?(totRes/totR*100).toFixed(1):'0'}%</div><div class="lbl">Margem (sobre o líquido)</div></div>
     </div>
     <div class="card">
       <h2>Receita vs Despesa por mês</h2>
