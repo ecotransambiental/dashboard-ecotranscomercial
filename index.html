@@ -2465,14 +2465,14 @@ async function confirmarDeclinio(idLead) {
   const ehCobertura = document.getElementById('mp-cobertura').checked;
   const quemAtende = (document.getElementById('mp-quematende')||{}).value || '';
   if (ehCobertura && !quemAtende) { document.getElementById('mp-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Informe quem atende o cliente hoje.</div>'; return; }
-  const motivo = obs ? `${motivoSel} — ${obs}` : motivoSel;
+  // motivo padronizado fica limpo (pra consolidar certo); a observação vai separada
+  const motivo = motivoSel;
   const overlay = document.getElementById('modal-motivo-overlay');
   if (overlay) overlay.remove();
   if (ehCobertura) {
-    // vai para Cobertura, registrando o motivo e quem atende
-    await mudarEtapaLead(idLead, 'Cobertura', motivo, { _cobertura:true, quemAtende });
+    await mudarEtapaLead(idLead, 'Cobertura', motivo, { _cobertura:true, quemAtende, obsPerda: obs });
   } else {
-    await mudarEtapaLead(idLead, 'Declinado', motivo);
+    await mudarEtapaLead(idLead, 'Declinado', motivo, { obsPerda: obs });
   }
   fecharFicha();
 }
@@ -2516,6 +2516,7 @@ async function mudarEtapaLead(idLead, novaEtapa, motivoPerda, dadosProposta) {
   lead['ETAPA'] = novaEtapa;
   lead['NOVO'] = ''; // deixou de ser intocado
   if (motivoPerda) lead['MOTIVO_PERDA'] = motivoPerda;
+  if (dadosProposta && dadosProposta.obsPerda) lead['OBS_PERDA'] = dadosProposta.obsPerda;
   if (dadosProposta && dadosProposta._cobertura) {
     lead['EMPRESA_COLETA_ATUAL'] = dadosProposta.quemAtende;
     lead['CONTA_INDICADORES'] = 'Não'; // cobertura não entra nos números
@@ -6343,8 +6344,9 @@ function calcResultados() {
     return;
   }
 
-  // total de leads: inclui declinados, EXCLUI coberturas (regra da Mafe)
-  const totalLeads = leadsPeriodo.filter(l=>l['ETAPA']!=='Cobertura').length;
+  // total de leads: só fontes PASSIVAS — exclui coberturas E prospecção ativa (regra da Mafe)
+  const ehProspFonte = l => String(l['FONTE']||'').toLowerCase().includes('prospec');
+  const totalLeads = leadsPeriodo.filter(l=>l['ETAPA']!=='Cobertura' && !ehProspFonte(l)).length;
   const propostas = movs.filter(m=>m['ETAPA_NOVA']==='Proposta Enviada').length;
   const fechados = movs.filter(m=>m['ETAPA_NOVA']==='Fechado').length;
 
@@ -6395,9 +6397,11 @@ function calcResultados() {
 function blocoDeclinadosCoberturas(leadsPeriodo) {
   const declinados = leadsPeriodo.filter(l=>l['ETAPA']==='Declinado');
   const coberturas = leadsPeriodo.filter(l=>l['ETAPA']==='Cobertura');
-  // agrupa declinados por motivo
+  // agrupa declinados só pelo MOTIVO padronizado (ignora a observação livre).
+  // dados antigos guardam "Motivo — observação" num campo só, então pega só a parte antes do "—".
+  const soMotivo = l => String(l['MOTIVO_PERDA']||'Sem motivo informado').split('—')[0].split(' - ')[0].trim() || 'Sem motivo informado';
   const porMotivo = {};
-  declinados.forEach(l=>{ const m=l['MOTIVO_PERDA']||'Sem motivo informado'; porMotivo[m]=(porMotivo[m]||0)+1; });
+  declinados.forEach(l=>{ const m=soMotivo(l); porMotivo[m]=(porMotivo[m]||0)+1; });
   const motivosOrd = Object.entries(porMotivo).sort((a,b)=>b[1]-a[1]);
 
   let html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-top:18px;">';
@@ -6439,12 +6443,15 @@ function blocoDeclinadosCoberturas(leadsPeriodo) {
   return html;
 }
 
-// desempenho por consultor: tabela resumo + detalhe expansível de cada um
+// desempenho por consultor: tabela resumo + detalhe expansível de cada um.
+// "Leads" conta só fontes PASSIVAS (exclui prospecção e cobertura). Prospecção tem bloco próprio.
 function blocoPorConsultor(leadsPeriodo) {
   const val = l => { const v=l['VALOR_R$']; if(v==null||v==='')return 0; if(typeof v==='number')return v; let s=String(v).replace(/[^\d,.-]/g,''); if(s.includes(',')&&s.lastIndexOf(',')>s.lastIndexOf('.'))s=s.replace(/\./g,'').replace(',','.'); return parseFloat(s)||0; };
-  const semCob = leadsPeriodo.filter(l=>l['ETAPA']!=='Cobertura');
+  const ehProspec = l => String(l['FONTE']||'').toLowerCase().includes('prospec');
+  // leads passivos = tudo menos cobertura e menos prospecção
+  const passivos = leadsPeriodo.filter(l=>l['ETAPA']!=='Cobertura' && !ehProspec(l));
   const porCons = {};
-  semCob.forEach(l=>{
+  passivos.forEach(l=>{
     const c = l['CONSULTOR']||'Sem consultor';
     porCons[c] = porCons[c] || {leads:0, proposta:0, fechado:0, declinado:0, contato:0, prospec:0, valor:0, itens:[]};
     const o = porCons[c]; o.leads++;
@@ -6459,8 +6466,8 @@ function blocoPorConsultor(leadsPeriodo) {
   const linhas = Object.entries(porCons).sort((a,b)=>b[1].fechado-a[1].fechado || b[1].leads-a[1].leads);
   if (!linhas.length) return '';
   let html = `<div style="background:white;border:1px solid var(--cinza-200);border-radius:12px;padding:20px;margin-top:18px;">
-    <h3 style="font-family:var(--fonte-display);font-size:15px;margin:0 0 4px;">Desempenho por consultor</h3>
-    <div style="font-size:12px;color:var(--cinza-500);margin-bottom:12px;"><i class="ti ti-info-circle"></i> clique num consultor para ver os leads dele</div>
+    <h3 style="font-family:var(--fonte-display);font-size:15px;margin:0 0 4px;">Desempenho por consultor (leads recebidos)</h3>
+    <div style="font-size:12px;color:var(--cinza-500);margin-bottom:12px;"><i class="ti ti-info-circle"></i> Só leads que chegaram (Google, indicação, cliente, licitação, SP Regula). Prospecção ativa está no bloco abaixo. Clique num consultor para ver os leads.</div>
     <table style="width:100%;font-size:13px;border-collapse:collapse;">
       <thead><tr style="border-bottom:2px solid var(--cinza-200);">
         <th style="text-align:left;padding:8px 0;">Consultor</th><th style="text-align:right;">Leads</th>
@@ -6470,7 +6477,7 @@ function blocoPorConsultor(leadsPeriodo) {
   linhas.forEach(([c,o],idx)=>{
     const detId = 'cons-det-'+idx;
     const detalhe = o.itens.sort((a,b)=>{ const oa={'Fechado':0,'Proposta Enviada':1,'Em Contato':2,'Declinado':4}[a['ETAPA']]??3; const ob={'Fechado':0,'Proposta Enviada':1,'Em Contato':2,'Declinado':4}[b['ETAPA']]??3; return oa-ob; })
-      .map(l=>`<tr style="background:var(--cinza-50);border-bottom:1px solid var(--cinza-100);font-size:12px;"><td style="padding:5px 0 5px 20px;">${l['CLIENTE']||'—'}</td><td colspan="3" style="color:var(--cinza-600);">${rotEtapa(l['ETAPA'])}${l['ETAPA']==='Declinado'&&l['MOTIVO_PERDA']?' · '+l['MOTIVO_PERDA']:''}</td><td colspan="2" style="text-align:right;color:var(--cinza-600);">${val(l)?fmtMoeda(val(l)):'—'}</td></tr>`).join('');
+      .map(l=>`<tr style="background:var(--cinza-50);border-bottom:1px solid var(--cinza-100);font-size:12px;"><td style="padding:5px 0 5px 20px;">${l['CLIENTE']||'—'}</td><td colspan="2" style="color:var(--cinza-600);">${rotEtapa(l['ETAPA'])}${l['ETAPA']==='Declinado'&&l['MOTIVO_PERDA']?' · '+l['MOTIVO_PERDA']:''}</td><td colspan="1" style="color:var(--cinza-600);font-size:11px;">${l['FONTE']||''}</td><td colspan="2" style="text-align:right;color:var(--cinza-600);">${val(l)?fmtMoeda(val(l)):'—'}</td></tr>`).join('');
     html += `<tr style="border-bottom:1px solid var(--cinza-100);cursor:pointer;" onclick="var e=document.getElementById('${detId}');e.style.display=e.style.display==='table-row-group'?'none':'table-row-group';">
         <td style="padding:8px 0;"><i class="ti ti-chevron-right" style="font-size:12px;"></i> ${c}</td>
         <td style="text-align:right;">${o.leads}</td><td style="text-align:right;">${o.proposta}</td>
@@ -6480,7 +6487,51 @@ function blocoPorConsultor(leadsPeriodo) {
       <tbody id="${detId}" style="display:none;">${detalhe}</tbody>`;
   });
   html += '</tbody></table></div>';
+  html += blocoProspeccaoPorConsultor(leadsPeriodo);
   return html;
+}
+
+// prospecção ATIVA por consultor: quanto prospectou, quantas viraram Proposta Enviada (com %) e quantas fecharam
+function blocoProspeccaoPorConsultor(leadsPeriodo) {
+  const ehProspec = l => String(l['FONTE']||'').toLowerCase().includes('prospec');
+  const prospec = leadsPeriodo.filter(l=>l['ETAPA']!=='Cobertura' && ehProspec(l));
+  const porCons = {};
+  prospec.forEach(l=>{
+    const c = l['CONSULTOR']||'Sem consultor';
+    porCons[c] = porCons[c] || {total:0, proposta:0, fechado:0, itens:[]};
+    const o = porCons[c]; o.total++;
+    if (l['ETAPA']==='Proposta Enviada' || l['ETAPA']==='Fechado') o.proposta++; // chegou (ou passou) por proposta
+    if (l['ETAPA']==='Fechado') o.fechado++;
+    o.itens.push(l);
+  });
+  const linhas = Object.entries(porCons).sort((a,b)=>b[1].total-a[1].total);
+  let corpo;
+  if (!linhas.length) {
+    corpo = '<div style="font-size:13px;color:var(--cinza-500);padding:8px 0;">Nenhuma prospecção ativa no período.</div>';
+  } else {
+    corpo = `<table style="width:100%;font-size:13px;border-collapse:collapse;">
+      <thead><tr style="border-bottom:2px solid var(--cinza-200);">
+        <th style="text-align:left;padding:8px 0;">Consultor</th><th style="text-align:right;">Prospectou</th>
+        <th style="text-align:right;">Virou proposta</th><th style="text-align:right;">% p/ proposta</th><th style="text-align:right;">Fechou</th>
+      </tr></thead><tbody>` +
+      linhas.map(([c,o],idx)=>{
+        const detId = 'prosp-det-'+idx;
+        const pct = o.total ? Math.round(o.proposta/o.total*100) : 0;
+        const detalhe = o.itens.map(l=>`<tr style="background:var(--cinza-50);border-bottom:1px solid var(--cinza-100);font-size:12px;"><td style="padding:5px 0 5px 20px;">${l['CLIENTE']||'—'}</td><td colspan="4" style="color:var(--cinza-600);">${rotEtapa(l['ETAPA'])}</td></tr>`).join('');
+        return `<tr style="border-bottom:1px solid var(--cinza-100);cursor:pointer;" onclick="var e=document.getElementById('${detId}');e.style.display=e.style.display==='table-row-group'?'none':'table-row-group';">
+            <td style="padding:8px 0;"><i class="ti ti-chevron-right" style="font-size:12px;"></i> ${c}</td>
+            <td style="text-align:right;font-weight:600;">${o.total}</td>
+            <td style="text-align:right;">${o.proposta}</td>
+            <td style="text-align:right;font-weight:600;color:${pct>=50?'var(--verde-medio)':'var(--cinza-700)'};">${pct}%</td>
+            <td style="text-align:right;color:var(--verde-medio);">${o.fechado}</td></tr>
+          <tbody id="${detId}" style="display:none;">${detalhe}</tbody>`;
+      }).join('') + '</tbody></table>';
+  }
+  return `<div style="background:white;border:1px solid var(--cinza-200);border-radius:12px;padding:20px;margin-top:18px;border-top:3px solid var(--verde-claro);">
+    <h3 style="font-family:var(--fonte-display);font-size:15px;margin:0 0 4px;color:var(--verde-escuro);">Prospecção ativa por consultor</h3>
+    <div style="font-size:12px;color:var(--cinza-500);margin-bottom:12px;"><i class="ti ti-target-arrow"></i> Leads de fonte "Prospecção" (o consultor foi atrás). "Virou proposta" = chegou em Proposta Enviada ou além.</div>
+    ${corpo}
+  </div>`;
 }
 
 // métricas financeiras do funil (ticket médio, valor em jogo, conversão em fechamentos)
