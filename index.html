@@ -7329,17 +7329,30 @@ function FIN_processarReceber(wb, st, destino){
   const cols=Object.keys(rows[0]);
   const cTit=finAchaCol(cols,'Título')||finAchaCol(cols,'Titulo');
   const cEmi=finAchaCol(cols,'Emissão')||finAchaCol(cols,'Emissao');
-  // cada arquivo é o retrato completo de UM mês. Substitui só os meses presentes (por emissão),
-  // mantendo os outros meses já carregados.
+  // cada arquivo é o retrato completo de UM mês. Antes de adicionar, remove da memória
+  // TODOS os títulos que estão neste arquivo (por número) — assim nunca duplica, mesmo que
+  // a data/mês tenha voltado do Sheets num formato diferente.
   const mesesNoArquivo = new Set();
-  rows.forEach(r=>{ const ym=finYmDeData(finLc(r[cEmi])); if(ym) mesesNoArquivo.add(ym); });
-  if (mesesNoArquivo.size) FINdados[destino] = FINdados[destino].filter(x=>!mesesNoArquivo.has(x._mesEmissao||finYmDeData(x.emissao)));
+  const titulosNoArquivo = new Set();
+  rows.forEach(r=>{
+    const ym=finYmDeData(finLc(r[cEmi])); if(ym) mesesNoArquivo.add(ym);
+    const t=String(r[cTit]||'').trim().replace(/\.0+$/,''); if(t) titulosNoArquivo.add(t);
+  });
+  const norTit = x => String(x==null?'':x).trim().replace(/\.0+$/,'');
+  // remove: (a) títulos dos meses presentes no arquivo, E (b) qualquer título que esteja no arquivo
+  FINdados[destino] = FINdados[destino].filter(x=>{
+    const mesX = x._mesEmissao||finYmDeData(x.emissao);
+    if (mesesNoArquivo.size && mesesNoArquivo.has(mesX)) return false; // mesmo mês -> será resubstituído
+    if (titulosNoArquivo.has(norTit(x.titulo))) return false; // mesmo título -> evita duplicata
+    return true;
+  });
   const alvo2 = FINdados[destino];
-  const jaTem=new Set(alvo2.map(x=>String(x.titulo)));
+  const jaTem=new Set(alvo2.map(x=>norTit(x.titulo)));
   let novos=0;
   rows.forEach(r=>{
     const tit=String(r[cTit]||'').trim();
-    if(!tit || jaTem.has(tit)) return;
+    const titN=norTit(tit);
+    if(!tit || jaTem.has(titN)) return;
     const cliRaw=finLc(r[finAchaCol(cols,'Cliente')]);
     const cnpjM=cliRaw.match(/(\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2})/);
     alvo2.push({
@@ -7364,8 +7377,11 @@ function FIN_processarReceber(wb, st, destino){
       liquido:finN(r[finAchaCol(cols,'Vlr. Líquido')]||r[finAchaCol(cols,'Vlr. Liquido')]||r[finAchaCol(cols,'Líquido')]),
       _mesEmissao: finYmDeData(finLc(r[finAchaCol(cols,'Emissão')]||r[finAchaCol(cols,'Emissao')]))||''
     });
-    jaTem.add(tit); novos++;
+    jaTem.add(titN); novos++;
   });
+  // dedup final de segurança: garante um único registro por título (elimina qualquer duplicata remanescente)
+  const vistos = new Set();
+  FINdados[destino] = FINdados[destino].filter(x=>{ const t=norTit(x.titulo); if(vistos.has(t)) return false; vistos.add(t); return true; });
   st.textContent=`${novos} títulos carregados (substituiu o anterior).`; st.style.color='var(--verde-medio)';
 }
 
