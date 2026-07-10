@@ -5624,14 +5624,18 @@ async function salvarLead() {
   // checagem de duplicidade: carregar todos os leads (sem filtro de dono, pois prospecção é compartilhada)
   let todos = [];
   try { const rt = await buscarDados('CRM_Leads'); todos = rt.ok ? rt.linhas : []; } catch(e) {}
+  const ehRecompraCliente = document.getElementById('nl-fonte').value === 'Cliente';
   // 1) CNPJ igual -> BLOQUEIA (não deixa prospectar o mesmo cliente)
-  if (cnpjL) {
+  //    EXCEÇÃO: fonte "Cliente" é recompra de um cliente que já existe — aí é permitido.
+  if (cnpjL && !ehRecompraCliente) {
     const jaExiste = todos.find(l => String(l['CNPJ']||'').replace(/\D/g,'') === cnpjL);
     if (jaExiste) {
       document.getElementById('nl-msg').innerHTML = `<div class="sem-acesso" style="margin-top:10px;"><i class="ti ti-ban"></i> Já existe um lead com este CNPJ: <b>${jaExiste['CLIENTE']}</b> (consultor: ${jaExiste['CONSULTOR']||'—'}). Não é possível prospectar o mesmo cliente.</div>`;
       return;
     }
   }
+  // se é recompra, também não avisa sobre nome parecido (é esperado que exista)
+  if (!ehRecompraCliente) {
   // 2) nome parecido (de outro consultor) -> AVISA mas deixa criar
   const norm = s => String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9 ]/g,'').trim();
   const nc = norm(cliente);
@@ -5642,6 +5646,7 @@ async function salvarLead() {
     return;
   }
   window._avisouParecido = false;
+  } // fim do if (!ehRecompraCliente)
 
   const ehCobertura = document.getElementById('nl-cobertura').value==='sim';
   const campos = {
@@ -5665,6 +5670,17 @@ async function salvarLead() {
     const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({ acao:'novoLead', token: sessaoToken, dados:{ campos } })});
     const r = await resp.json();
     if (!r.ok) { document.getElementById('nl-msg').innerHTML=`<div class="sem-acesso">${r.erro}</div>`; return; }
+    // se é recompra (fonte Cliente), registra no histórico do cliente (aparece nas tratativas da ficha)
+    if (ehRecompraCliente) {
+      try {
+        await fetch(API_URL, { method:'POST', body: JSON.stringify({
+          acao:'registrarAtividade', token: sessaoToken,
+          dados:{ cnpj: cnpj||'', cliente, tipo:'Recompra', titulo:'Novo lead de recompra (fonte: Cliente)',
+            descricao: `Lead de recompra criado. Etapa: ${campos['ETAPA']}. Consultor: ${campos['CONSULTOR']}.` + (campos['OBSERVACOES']?(' Obs: '+campos['OBSERVACOES']):''),
+            registradoPor: usuarioAtual.nome }
+        })});
+      } catch(e) { /* não bloqueia a criação do lead se o registro falhar */ }
+    }
     const etapaEscolhida = campos['ETAPA'];
     kanbanLeads = null; // forçar recarga
     document.getElementById('nl-msg').innerHTML = '<div style="background:var(--verde-ok-bg);border-radius:8px;padding:10px;margin-top:10px;color:var(--verde-ok);font-size:13px;"><i class="ti ti-circle-check"></i> Lead criado!</div>';
@@ -6258,9 +6274,39 @@ async function renderResultadosCRM(area) {
       <div><label style="font-size:12px;color:var(--cinza-600);display:block;margin-bottom:3px;">Até</label>
         <input type="date" id="rt-fim" value="${hoje.toISOString().slice(0,10)}" class="filtro-sel"></div>
       <button class="btn-importar" onclick="calcResultados()"><i class="ti ti-refresh"></i> Atualizar</button>
+      <button class="btn-importar" style="background:var(--verde-escuro);" onclick="exportarResultadosHTML()"><i class="ti ti-file-export"></i> Exportar HTML</button>
     </div>
     <div id="rt-corpo"></div>`;
   calcResultados();
+}
+
+// exporta os resultados do período numa janela HTML pronta pra imprimir/salvar
+function exportarResultadosHTML() {
+  const corpo = document.getElementById('rt-corpo');
+  if (!corpo) return;
+  const ini = (document.getElementById('rt-ini')||{}).value;
+  const fim = (document.getElementById('rt-fim')||{}).value;
+  const periodo = (ini&&fim) ? `${fmtDataBR(ini)} a ${fmtDataBR(fim)}` : 'período selecionado';
+  const hoje = new Date().toLocaleDateString('pt-BR');
+  const w = window.open('', '_blank');
+  w.document.write(`<html><head><meta charset="utf-8"><title>Resultados Comerciais — Ecotrans</title>
+    <style>
+      :root{--vermelho:#c53030;--roxo:#6B5B95;--verde-escuro:#2d5a3d;--verde-medio:#4a8c5c;--verde-claro:#8bc34a;
+        --cinza-100:#f0f0ec;--cinza-200:#e2e2dc;--cinza-500:#8a8a80;--cinza-600:#6a6a60;--cinza-700:#4a4a42;--cinza-50:#f8f8f5;
+        --verde-claro-bg:#eef5ea;--amarelo-bg:#fdf6e3;--fonte-display:Arial,sans-serif;}
+      body{font-family:Arial,Helvetica,sans-serif;color:#222;padding:30px;max-width:1100px;margin:0 auto;}
+      h1{color:var(--verde-escuro);font-size:22px;margin:0;}
+      .sub{color:#666;font-size:13px;margin:4px 0 24px;}
+      table{width:100%;border-collapse:collapse;}
+      tbody[style*="none"]{display:table-row-group !important;} /* no export, mostra todos os detalhes */
+      @media print{ button{display:none;} }
+    </style></head><body>
+    <h1>Resultados Comerciais — Ecotrans</h1>
+    <div class="sub">Período: ${periodo} · Emitido em ${hoje}</div>
+    ${corpo.innerHTML}
+    <button onclick="window.print()" style="margin-top:24px;padding:10px 18px;background:var(--verde-medio);color:#fff;border:none;border-radius:8px;cursor:pointer;">Imprimir / Salvar PDF</button>
+  </body></html>`);
+  w.document.close();
 }
 
 function calcResultados() {
@@ -6291,6 +6337,7 @@ function calcResultados() {
         <div class="kpi-card" style="border-top:3px solid var(--verde-ok);"><div class="kpi-num" style="color:var(--verde-ok);">${emFechado}</div><div class="kpi-lbl">Fechado</div></div>
         <div class="kpi-card" style="border-top:3px solid var(--vermelho);"><div class="kpi-num" style="color:var(--vermelho);">${emDeclinado}</div><div class="kpi-lbl">Declinado</div></div>
       </div>
+      ${blocoPorConsultor(leadsPeriodo)}
       ${blocoDeclinadosCoberturas(leadsPeriodo)}
       ${blocoFechamentosComissao()}`;
     return;
@@ -6339,6 +6386,7 @@ function calcResultados() {
         <tr><td style="padding:8px 0;color:var(--cinza-700);">Prospecções no período</td><td style="text-align:right;font-weight:600;">${totalProspec}</td></tr>
       </table>
     </div>
+    ${blocoPorConsultor(leadsPeriodo)}
     ${blocoDeclinadosCoberturas(leadsPeriodo)}
     ${blocoFechamentosComissao()}`;
 }
@@ -6374,13 +6422,64 @@ function blocoDeclinadosCoberturas(leadsPeriodo) {
     <div style="font-size:28px;font-weight:700;font-family:var(--fonte-display);color:var(--roxo);margin-bottom:12px;">${coberturas.length}</div>
     <div style="font-size:11px;color:var(--cinza-500);margin-bottom:8px;">Não entram nas conversões (cliente já atendido por outra empresa).</div>`;
   if (coberturas.length) {
-    html += '<table style="width:100%;font-size:12px;border-collapse:collapse;"><tr style="border-bottom:1px solid var(--cinza-200);"><th style="text-align:left;padding:5px 0;color:var(--cinza-600);">Cliente</th><th style="text-align:left;padding:5px 0;color:var(--cinza-600);">Atendido por</th></tr>';
-    coberturas.forEach(l=>{
-      html += `<tr style="border-bottom:1px solid var(--cinza-100);"><td style="padding:6px 0;">${l['CLIENTE']||l['NOME']||'—'}</td><td style="padding:6px 0;color:var(--cinza-600);">${l['EMPRESA_COLETA_ATUAL']||'—'}</td></tr>`;
+    // consolida por transportadora (empresa que atende), com %
+    const porTransp = {};
+    coberturas.forEach(l=>{ const t=l['EMPRESA_COLETA_ATUAL']||'Não informado'; porTransp[t]=(porTransp[t]||0)+1; });
+    const transpOrd = Object.entries(porTransp).sort((a,b)=>b[1]-a[1]);
+    html += '<div style="font-size:12px;color:var(--cinza-600);margin-bottom:8px;">Por transportadora atual:</div>';
+    transpOrd.forEach(([t,n])=>{
+      const pct = Math.round(n/coberturas.length*100);
+      html += `<div style="margin-bottom:8px;">
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;"><span>${t}</span><b>${n} (${pct}%)</b></div>
+        <div style="height:6px;background:var(--cinza-100);border-radius:3px;overflow:hidden;"><div style="height:100%;width:${pct}%;background:var(--roxo);"></div></div>
+      </div>`;
     });
-    html += '</table>';
   } else { html += '<div style="font-size:13px;color:var(--cinza-500);">Nenhuma cobertura no período.</div>'; }
   html += '</div></div>';
+  return html;
+}
+
+// desempenho por consultor: tabela resumo + detalhe expansível de cada um
+function blocoPorConsultor(leadsPeriodo) {
+  const val = l => { const v=l['VALOR_R$']; if(v==null||v==='')return 0; if(typeof v==='number')return v; let s=String(v).replace(/[^\d,.-]/g,''); if(s.includes(',')&&s.lastIndexOf(',')>s.lastIndexOf('.'))s=s.replace(/\./g,'').replace(',','.'); return parseFloat(s)||0; };
+  const semCob = leadsPeriodo.filter(l=>l['ETAPA']!=='Cobertura');
+  const porCons = {};
+  semCob.forEach(l=>{
+    const c = l['CONSULTOR']||'Sem consultor';
+    porCons[c] = porCons[c] || {leads:0, proposta:0, fechado:0, declinado:0, contato:0, prospec:0, valor:0, itens:[]};
+    const o = porCons[c]; o.leads++;
+    const e = l['ETAPA'];
+    if (e==='Proposta Enviada') o.proposta++;
+    else if (e==='Fechado') { o.fechado++; o.valor+=val(l); }
+    else if (e==='Declinado') o.declinado++;
+    else if (e==='Em Contato') o.contato++;
+    else o.prospec++;
+    o.itens.push(l);
+  });
+  const linhas = Object.entries(porCons).sort((a,b)=>b[1].fechado-a[1].fechado || b[1].leads-a[1].leads);
+  if (!linhas.length) return '';
+  let html = `<div style="background:white;border:1px solid var(--cinza-200);border-radius:12px;padding:20px;margin-top:18px;">
+    <h3 style="font-family:var(--fonte-display);font-size:15px;margin:0 0 4px;">Desempenho por consultor</h3>
+    <div style="font-size:12px;color:var(--cinza-500);margin-bottom:12px;"><i class="ti ti-info-circle"></i> clique num consultor para ver os leads dele</div>
+    <table style="width:100%;font-size:13px;border-collapse:collapse;">
+      <thead><tr style="border-bottom:2px solid var(--cinza-200);">
+        <th style="text-align:left;padding:8px 0;">Consultor</th><th style="text-align:right;">Leads</th>
+        <th style="text-align:right;">Proposta</th><th style="text-align:right;">Fechado</th>
+        <th style="text-align:right;">Declinado</th><th style="text-align:right;">Valor fechado</th>
+      </tr></thead><tbody>`;
+  linhas.forEach(([c,o],idx)=>{
+    const detId = 'cons-det-'+idx;
+    const detalhe = o.itens.sort((a,b)=>{ const oa={'Fechado':0,'Proposta Enviada':1,'Em Contato':2,'Declinado':4}[a['ETAPA']]??3; const ob={'Fechado':0,'Proposta Enviada':1,'Em Contato':2,'Declinado':4}[b['ETAPA']]??3; return oa-ob; })
+      .map(l=>`<tr style="background:var(--cinza-50);border-bottom:1px solid var(--cinza-100);font-size:12px;"><td style="padding:5px 0 5px 20px;">${l['CLIENTE']||'—'}</td><td colspan="3" style="color:var(--cinza-600);">${rotEtapa(l['ETAPA'])}${l['ETAPA']==='Declinado'&&l['MOTIVO_PERDA']?' · '+l['MOTIVO_PERDA']:''}</td><td colspan="2" style="text-align:right;color:var(--cinza-600);">${val(l)?fmtMoeda(val(l)):'—'}</td></tr>`).join('');
+    html += `<tr style="border-bottom:1px solid var(--cinza-100);cursor:pointer;" onclick="var e=document.getElementById('${detId}');e.style.display=e.style.display==='table-row-group'?'none':'table-row-group';">
+        <td style="padding:8px 0;"><i class="ti ti-chevron-right" style="font-size:12px;"></i> ${c}</td>
+        <td style="text-align:right;">${o.leads}</td><td style="text-align:right;">${o.proposta}</td>
+        <td style="text-align:right;font-weight:600;color:var(--verde-medio);">${o.fechado}</td>
+        <td style="text-align:right;color:var(--vermelho);">${o.declinado}</td>
+        <td style="text-align:right;font-weight:600;">${o.valor?fmtMoeda(o.valor):'—'}</td></tr>
+      <tbody id="${detId}" style="display:none;">${detalhe}</tbody>`;
+  });
+  html += '</tbody></table></div>';
   return html;
 }
 
