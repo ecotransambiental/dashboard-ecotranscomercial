@@ -6970,7 +6970,11 @@ async function finEnviarSheetsCompleto(tipo, statusEl){
   if (!cfg) return;
   let linhas = (FINdados[tipo]||[]).slice();
   if (tipo==='faturamento') linhas = linhas.map(x=>({ cliente:x.cliente, valoresJSON: JSON.stringify(x.valores||{}) }));
-  const colunas = linhas.length ? Object.keys(linhas[0]) : ['vazio'];
+  // colunas = UNIÃO de todas as chaves de todos os registros (não só do primeiro).
+  // Assim campos como ISS/INSS que possam faltar no 1º título ainda são enviados.
+  const setCols = new Set();
+  linhas.forEach(l=>Object.keys(l).forEach(k=>setCols.add(k)));
+  const colunas = setCols.size ? [...setCols] : ['vazio'];
   const LOTE = 300;
   // se não há nada, manda um lote vazio em modo 'tudo' pra limpar a aba
   if (!linhas.length){
