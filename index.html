@@ -7674,6 +7674,45 @@ function FIN_renderPagar(){
     analise=`<div class="card"><h2>Análise mensal por centro de custo</h2><div style="overflow-x:auto;"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>
       <p style="font-size:12px;color:var(--cinza-500);margin-top:8px;">Δ% = variação vs o mês anterior. Verde = caiu, vermelho = subiu.</p></div>`;
   }
+  // ===== Evolução ao longo dos meses de um CENTRO ou DESPESA específico =====
+  const despesasLista=[...new Set(base.map(x=>x.despesa).filter(Boolean))].sort();
+  const evoTipo = window._pagEvoTipo || 'centro'; // 'centro' ou 'despesa'
+  const evoItem = window._pagEvoItem || (evoTipo==='centro' ? (centrosLista[0]||'') : (despesasLista[0]||''));
+  const evoPorMes={};
+  base.forEach(x=>{ const ym=finMesPag(x); if(!ym) return; const chave = evoTipo==='centro'?x.centro:x.despesa; if(chave===evoItem) evoPorMes[ym]=(evoPorMes[ym]||0)+x.valor; });
+  const evoMeses=mesesAll;
+  const evoValores=evoMeses.map(m=>evoPorMes[m]||0);
+  const evoMax=Math.max(1,...evoValores);
+  const evoTotal=evoValores.reduce((s,v)=>s+v,0);
+  const gW=Math.max(320, evoMeses.length*70), gH=200, pad=30, bw=40;
+  const barras=evoMeses.map((m,i)=>{
+    const x=pad+i*((gW-pad*2)/Math.max(1,evoMeses.length));
+    const h=(evoValores[i]/evoMax)*(gH-pad-20);
+    const y=gH-pad-h;
+    return `<rect x="${x}" y="${y}" width="${bw}" height="${h}" rx="4" fill="var(--verde-medio)"></rect>
+      <text x="${x+bw/2}" y="${gH-pad+14}" font-size="10" text-anchor="middle" fill="var(--cinza-600)">${finRotMes(m).slice(0,3)}</text>
+      <text x="${x+bw/2}" y="${y-4}" font-size="9" text-anchor="middle" fill="var(--cinza-700)">${evoValores[i]?finFmtM(evoValores[i]).replace('R$ ','').replace(',00',''):''}</text>`;
+  }).join('');
+  const evoGrafico = evoMeses.length ? `<svg viewBox="0 0 ${gW} ${gH}" style="width:100%;max-width:${gW}px;height:auto;"><line x1="${pad}" y1="${gH-pad}" x2="${gW-pad}" y2="${gH-pad}" stroke="var(--cinza-200)"></line>${barras}</svg>` : '<div class="vazio">Sem dados.</div>';
+  let evoAnt=null;
+  const evoLinhas=evoMeses.map(m=>{ const v=evoPorMes[m]||0; let d=''; if(evoAnt!=null&&evoAnt!==0) d=((v-evoAnt)/evoAnt*100); evoAnt=v;
+    return `<tr><td>${finRotMes(m)}</td><td>${v?finFmtM(v):'—'}</td><td class="${d===''?'':(d>=0?'neg':'pos')}">${d===''?'—':(d>=0?'+':'')+d.toFixed(0)+'%'}</td></tr>`; }).join('');
+  const evolucao=`<div class="card">
+    <h2>Evolução ao longo dos meses</h2>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+      <select onchange="window._pagEvoTipo=this.value;window._pagEvoItem='';FIN_renderPagar()" style="padding:6px 10px;border:1.5px solid var(--cinza-300);border-radius:8px;font-size:13px;">
+        <option value="centro" ${evoTipo==='centro'?'selected':''}>Centro de custo</option>
+        <option value="despesa" ${evoTipo==='despesa'?'selected':''}>Despesa</option>
+      </select>
+      <select onchange="window._pagEvoItem=this.value;FIN_renderPagar()" style="padding:6px 10px;border:1.5px solid var(--cinza-300);border-radius:8px;font-size:13px;min-width:220px;">
+        ${(evoTipo==='centro'?centrosLista:despesasLista).map(it=>`<option value="${String(it).replace(/"/g,'')}" ${it===evoItem?'selected':''}>${it}</option>`).join('')}
+      </select>
+      <span style="font-size:13px;color:var(--cinza-600);margin-left:auto;">Total no período: <b>${finFmtM(evoTotal)}</b></span>
+    </div>
+    <div style="overflow-x:auto;margin-bottom:12px;">${evoGrafico}</div>
+    <table><thead><tr><th>Mês</th><th>Valor</th><th>Δ% vs anterior</th></tr></thead><tbody>${evoLinhas||'<tr><td colspan="3" class="vazio">Sem dados.</td></tr>'}</tbody></table>
+    <p style="font-size:12px;color:var(--cinza-500);margin-top:8px;">Δ% = variação vs o mês anterior. Verde = caiu, vermelho = subiu.</p>
+  </div>`;
   p.innerHTML=`
     <div class="filtros">
       <span style="font-size:13px;color:var(--cinza-600);">Mês (pagamento):</span>
@@ -7710,7 +7749,8 @@ function FIN_renderPagar(){
       <tr style="background:var(--cinza-100);"><td><b>TOTAL</b></td><td><b>${finFmtM(totalP)}</b></td><td></td></tr>
       </tbody></table>
     </div>
-    ${analise}`;
+    ${analise}
+    ${evolucao}`;
 }
 
 // ============ CONTAS A RECEBER ============
