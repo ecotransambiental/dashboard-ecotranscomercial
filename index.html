@@ -7296,11 +7296,16 @@ function FIN_processarPagar(wb, st){
   rows.forEach(r=>{
     const tit = String(r[cTit]||'').trim();
     if(!tit || jaTem.has(tit)) return;
+    // desconsidera "DISTRIBUIÇÃO DE LUCROS" (não é despesa operacional)
+    const centroRaw = finLc(r[finAchaCol(cols,'Custo')]);
+    const despesaRaw = finLc(r[finAchaCol(cols,'Despesa')]);
+    const semAcento = s => String(s||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    if (semAcento(centroRaw).includes('DISTRIBUICAO DE LUCROS') || semAcento(despesaRaw).includes('DISTRIBUICAO DE LUCROS')) return;
     FINdados.pagar.push({
       titulo:tit,
       fornecedor:finLc(r[finAchaCol(cols,'Fornecedor')]),
-      centro:finLc(r[finAchaCol(cols,'Custo')])||'(sem centro)',
-      despesa:finLc(r[finAchaCol(cols,'Despesa')]),
+      centro:centroRaw||'(sem centro)',
+      despesa:despesaRaw||'(sem despesa)',
       situacao:finLc(r[finAchaCol(cols,'Situação')]||r[finAchaCol(cols,'Situacao')]),
       competencia:finLc(r[finAchaCol(cols,'Competência')]||r[finAchaCol(cols,'Competencia')]),
       emissao:finLc(r[finAchaCol(cols,'Emissão')]||r[finAchaCol(cols,'Emissao')]),
@@ -7689,8 +7694,19 @@ function FIN_renderPagar(){
     </div>
     <div class="card">
       <h2>Despesa por centro de custo</h2>
+      <p style="font-size:12px;color:var(--cinza-500);margin-bottom:8px;"><i class="ti ti-info-circle"></i> Clique num centro de custo para ver as despesas dentro dele.</p>
       <table><thead><tr><th>Centro de custo</th><th>Total</th><th>% do total</th></tr></thead><tbody>
-      ${centros.map(([c,v])=>`<tr><td>${c}</td><td>${finFmtM(v)}</td><td>${totalP?(v/totalP*100).toFixed(1):'0'}%<div class="barra"><div style="width:${totalP?(v/totalP*100).toFixed(1):0}%"></div></div></td></tr>`).join('')}
+      ${centros.map(([c,v],idx)=>{
+        // despesas dentro deste centro (da lista filtrada)
+        const desp={}; lista.filter(x=>x.centro===c).forEach(x=>{ const d=x.despesa||'(sem despesa)'; desp[d]=(desp[d]||0)+x.valor; });
+        const despOrd=Object.entries(desp).sort((a,b)=>b[1]-a[1]);
+        const detId='pag-desp-'+idx;
+        const detalhe=despOrd.map(([d,dv])=>`<tr style="background:var(--cinza-50);font-size:12px;"><td style="padding:5px 0 5px 24px;">${d}</td><td>${finFmtM(dv)}</td><td style="color:var(--cinza-500);">${v?(dv/v*100).toFixed(1):'0'}% do centro</td></tr>`).join('');
+        return `<tr style="cursor:pointer;" onclick="var e=document.getElementById('${detId}');e.style.display=e.style.display==='table-row-group'?'none':'table-row-group';">
+            <td><i class="ti ti-chevron-right" style="font-size:12px;"></i> ${c}</td><td>${finFmtM(v)}</td>
+            <td>${totalP?(v/totalP*100).toFixed(1):'0'}%<div class="barra"><div style="width:${totalP?(v/totalP*100).toFixed(1):0}%"></div></div></td></tr>
+          <tbody id="${detId}" style="display:none;">${detalhe||'<tr><td colspan="3" style="padding-left:24px;color:var(--cinza-500);font-size:12px;">Sem detalhe de despesa.</td></tr>'}</tbody>`;
+      }).join('')}
       <tr style="background:var(--cinza-100);"><td><b>TOTAL</b></td><td><b>${finFmtM(totalP)}</b></td><td></td></tr>
       </tbody></table>
     </div>
