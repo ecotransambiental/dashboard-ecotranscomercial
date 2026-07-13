@@ -7525,6 +7525,15 @@ function finAtualizarTudo(){
 function finYmDeData(s){ const m=finLc(s).match(/(\d{2})\/(\d{2})\/(\d{2,4})/); if(!m) return ''; let ano=m[3].length===2?'20'+m[3]:m[3]; return `${ano}-${m[2]}`; }
 // mês de pagamento robusto: usa o campo pré-calculado se existir (sobrevive ao Sheets), senão parseia a data
 function finMesPag(x){ return x._mesPagamento || finYmDeData(x.pagamento); }
+// Receita dos meses do SISTEMA ANTIGO (jan-abril/2026), digitada manualmente.
+// A despesa NÃO entra aqui — vem dos relatórios de pagar que a Mafe sobe normalmente.
+// Regra: se o mês tiver relatório de receber subido, o relatório manda; senão, usa estes valores.
+const FIN_RECEITA_HISTORICA = {
+  '2026-01': { bruto: 2458688.48, liquido: 2317026.87, recebido: 2187688.42 },
+  '2026-02': { bruto: 2264213.09, liquido: 2126857.38, recebido: 2630394.75 },
+  '2026-03': { bruto: 2719801.49, liquido: 2568799.13, recebido: 2522616.42 },
+  '2026-04': { bruto: 2696995.03, liquido: 2531406.81, recebido: 2495213.71 },
+};
 function FIN_renderSaude(){
   const p=document.getElementById('p-saude');
   if(!FINdados.pagar.length && !FINdados.receber.length){ p.innerHTML='<div class="card"><div class="vazio">Suba os relatórios de Pagar e Receber primeiro.</div></div>'; return; }
@@ -7543,12 +7552,32 @@ function FIN_renderSaude(){
     const ym = baseData==='competencia' ? finCompYM(r.competencia) : (r._mesPagamento || finYmDeData(r.pagamento));
     if(ym){ despesa[ym]=(despesa[ym]||0)+r.valor; }
   });
+  // meses que têm relatório de receber subido (por emissão)
+  const mesesComRelatorio = new Set(Object.keys(receita));
+  // adiciona os meses históricos fixos SÓ se não houver relatório daquele mês (relatório manda)
+  Object.entries(FIN_RECEITA_HISTORICA).forEach(([ym, v])=>{
+    if (!mesesComRelatorio.has(ym)) {
+      receita[ym] = v.liquido;         // receita líquida (padrão da tela)
+      receitaBruta[ym] = v.bruto;      // bruto
+    }
+  });
   const meses=[...new Set([...Object.keys(receita),...Object.keys(despesa)])].filter(Boolean).sort();
   const mesSel = window._saudeMes || 'todos';
   const mesesMostrar = mesSel==='todos' ? meses : meses.filter(m=>m===mesSel);
   let totR=0,totD=0,totBruto=0;
   let linhas=mesesMostrar.map(m=>{ const rv=receita[m]||0, dv=despesa[m]||0, res=rv-dv; totR+=rv; totD+=dv; totBruto+=(receitaBruta[m]||0);
-    return `<tr><td>${finRotMes(m)}</td><td>${finFmtM(rv)}</td><td>${finFmtM(dv)}</td><td class="${res>=0?'pos':'neg'}">${finFmtM(res)}</td><td class="${res>=0?'pos':'neg'}">${rv?(res/rv*100).toFixed(1):'0'}%</td></tr>`;
+    // variação da receita vs o mês imediatamente anterior (na sequência completa de meses)
+    const idxM = meses.indexOf(m);
+    const mAnt = idxM>0 ? meses[idxM-1] : null;
+    const rvAnt = mAnt ? (receita[mAnt]||0) : null;
+    let varHtml = '<span style="color:var(--cinza-400);">—</span>';
+    if (rvAnt!=null && rvAnt>0) {
+      const pct = (rv-rvAnt)/rvAnt*100;
+      const cor = pct>=0 ? 'var(--verde-medio)' : 'var(--vermelho)';
+      const seta = pct>=0 ? '▲' : '▼';
+      varHtml = `<span style="color:${cor};font-weight:600;">${seta} ${Math.abs(pct).toFixed(1)}%</span>`;
+    }
+    return `<tr><td>${finRotMes(m)}</td><td>${finFmtM(rv)}</td><td>${varHtml}</td><td>${finFmtM(dv)}</td><td class="${res>=0?'pos':'neg'}">${finFmtM(res)}</td><td class="${res>=0?'pos':'neg'}">${rv?(res/rv*100).toFixed(1):'0'}%</td></tr>`;
   }).join('');
   const totRes=totR-totD;
   const maiorCentro=(()=>{ const c={}; FINdados.pagar.forEach(x=>c[x.centro]=(c[x.centro]||0)+x.valor); return Object.entries(c).sort((a,b)=>b[1]-a[1])[0]; })();
@@ -7575,8 +7604,9 @@ function FIN_renderSaude(){
     </div>
     <div class="card">
       <h2>Receita vs Despesa por mês</h2>
-      <table><thead><tr><th>Mês</th><th>Receita</th><th>Despesa</th><th>Resultado</th><th>Margem</th></tr></thead>
-      <tbody>${linhas||'<tr><td colspan="5" class="vazio">Sem FINdados no período.</td></tr>'}</tbody></table>
+      <table><thead><tr><th>Mês</th><th>Receita</th><th>vs mês anterior</th><th>Despesa</th><th>Resultado</th><th>Margem</th></tr></thead>
+      <tbody>${linhas||'<tr><td colspan="6" class="vazio">Sem dados no período.</td></tr>'}</tbody></table>
+      <div style="font-size:11px;color:var(--cinza-500);margin-top:8px;"><i class="ti ti-info-circle"></i> Janeiro a Abril/2026: receita vem de registro histórico (sistema antigo). Maio em diante vem dos relatórios. A despesa de todos os meses vem dos relatórios de Contas a Pagar que você sobe.</div>
     </div>
     <div class="card">
       <h2>Leitura automática</h2>
