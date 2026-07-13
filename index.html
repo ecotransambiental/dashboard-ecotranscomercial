@@ -7522,7 +7522,16 @@ function finAtualizarTudo(){
 }
 
 // ============ SAÚDE FINANCEIRA ============
-function finYmDeData(s){ const m=finLc(s).match(/(\d{2})\/(\d{2})\/(\d{2,4})/); if(!m) return ''; let ano=m[3].length===2?'20'+m[3]:m[3]; return `${ano}-${m[2]}`; }
+function finYmDeData(s){
+  const t=finLc(s);
+  // formato BR: dd/mm/aaaa (ou dd/mm/aa)
+  let m=t.match(/(\d{2})\/(\d{2})\/(\d{2,4})/);
+  if(m){ let ano=m[3].length===2?'20'+m[3]:m[3]; return `${ano}-${m[2]}`; }
+  // formato ISO: aaaa-mm-dd (como às vezes volta do Sheets)
+  m=t.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if(m){ return `${m[1]}-${m[2]}`; }
+  return '';
+}
 // mês de pagamento robusto: usa o campo pré-calculado se existir (sobrevive ao Sheets), senão parseia a data
 function finMesPag(x){ return x._mesPagamento || finYmDeData(x.pagamento); }
 // Receita dos meses do SISTEMA ANTIGO (jan-abril/2026), digitada manualmente.
@@ -7552,7 +7561,15 @@ function FIN_renderSaude(){
     const ym = baseData==='competencia' ? finCompYM(r.competencia) : (r._mesPagamento || finYmDeData(r.pagamento));
     if(ym){ despesa[ym]=(despesa[ym]||0)+r.valor; }
   });
-  // meses que têm relatório de receber subido (por emissão)
+  // normaliza qualquer chave de mês pro formato aaaa-mm (evita "2026-5" vs "2026-05" virarem 2 linhas)
+  const norYm = k => { const m=String(k).match(/(\d{4})-(\d{1,2})/); return m ? `${m[1]}-${String(m[2]).padStart(2,'0')}` : k; };
+  const consolida = obj => { const out={}; Object.entries(obj).forEach(([k,v])=>{ const nk=norYm(k); out[nk]=(out[nk]||0)+v; }); return out; };
+  // consolida os dados dos relatórios PRIMEIRO (chaves normalizadas)
+  const receitaR = consolida(receita), receitaBrutaR = consolida(receitaBruta), despesaR = consolida(despesa);
+  Object.keys(receita).forEach(k=>delete receita[k]); Object.assign(receita, receitaR);
+  Object.keys(receitaBruta).forEach(k=>delete receitaBruta[k]); Object.assign(receitaBruta, receitaBrutaR);
+  Object.keys(despesa).forEach(k=>delete despesa[k]); Object.assign(despesa, despesaR);
+  // meses que têm relatório de receber subido (já normalizados)
   const mesesComRelatorio = new Set(Object.keys(receita));
   // adiciona os meses históricos fixos SÓ se não houver relatório daquele mês (relatório manda)
   Object.entries(FIN_RECEITA_HISTORICA).forEach(([ym, v])=>{
