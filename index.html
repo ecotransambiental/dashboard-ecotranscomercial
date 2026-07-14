@@ -6658,50 +6658,54 @@ function blocoFechamentosComissao() {
       <div style="background:var(--amarelo-bg);border-radius:8px;padding:12px;font-size:13px;color:#8a6d00;">Para ver os fechamentos aqui, suba a planilha de comissões no módulo <b>Financeiro › Relatórios</b>.</div>
     </div>`;
   }
-  // filtro de mês (mesRef)
   const meses = [...new Set(fech.map(f=>f.mesRef).filter(m=>m&&!String(m).endsWith('-00')))].sort();
-  const mesSel = window._fechMesSel || 'todos';
-  const fechMes = mesSel==='todos' ? fech : fech.filter(f=>f.mesRef===mesSel);
   const rotMes = (m)=> (typeof finRotMes==='function' && m) ? finRotMes(m) : m;
 
-  const contam = fechMes.filter(f=>!f.foraDoTotal);
-  const fora = fechMes.filter(f=>f.foraDoTotal);
-  const totVal = contam.reduce((s,x)=>s+(x.valor||0),0);
-  const porCons = {};
-  contam.forEach(f=>{ porCons[f.consultor]=porCons[f.consultor]||{n:0,v:0,itens:[]}; porCons[f.consultor].n++; porCons[f.consultor].v+=(f.valor||0); porCons[f.consultor].itens.push(f); });
+  // monta o conteúdo (tabela) de um conjunto de fechamentos
+  let idxGlobal = 0;
+  const montaConteudo = (arr, chaveMes) => {
+    const contam = arr.filter(f=>!f.foraDoTotal);
+    const fora = arr.filter(f=>f.foraDoTotal);
+    const totVal = contam.reduce((s,x)=>s+(x.valor||0),0);
+    const porCons = {};
+    contam.forEach(f=>{ porCons[f.consultor]=porCons[f.consultor]||{n:0,v:0,itens:[]}; porCons[f.consultor].n++; porCons[f.consultor].v+=(f.valor||0); porCons[f.consultor].itens.push(f); });
+    const linhasCons = Object.entries(porCons).sort((a,b)=>b[1].v-a[1].v).map(([c,o])=>{
+      const detId = 'fech-det-'+chaveMes+'-'+(idxGlobal++);
+      const detalhe = o.itens.sort((a,b)=>(b.valor||0)-(a.valor||0)).map(f=>
+        `<tr style="border-bottom:1px solid var(--cinza-100);background:var(--cinza-50);"><td style="padding:6px 0 6px 20px;">${f.cliente}</td><td><span class="badge" style="background:var(--verde-claro-bg);color:var(--verde-escuro);font-size:10px;padding:2px 6px;border-radius:4px;">${f.tipo}</span></td><td style="text-align:right;">${f.data||'—'}</td><td style="text-align:right;">${fmtMoeda(f.valor)}</td></tr>`
+      ).join('');
+      return `<tr style="border-bottom:1px solid var(--cinza-100);cursor:pointer;" onclick="var e=document.getElementById('${detId}');e.style.display=e.style.display==='table-row-group'?'none':'table-row-group';">
+          <td style="padding:8px 0;"><i class="ti ti-chevron-right" style="font-size:12px;"></i> ${c}</td><td style="text-align:right;">${o.n}</td><td style="text-align:right;font-weight:600;">${fmtMoeda(o.v)}</td></tr>
+        <tbody id="${detId}" style="display:none;"><tr style="font-size:11px;color:var(--cinza-500);"><td style="padding:4px 0 4px 20px;">Cliente</td><td>Tipo</td><td style="text-align:right;">Data</td><td style="text-align:right;">Valor</td></tr>${detalhe}</tbody>`;
+    }).join('');
+    const foraTxt = fora.length ? `<div style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--cinza-300);">
+        <div style="font-size:13px;color:var(--roxo);font-weight:600;margin-bottom:6px;">Aditivos e Eventuais Recicláveis (${fora.length}) — não somam ao total</div>
+        <div style="font-size:12px;color:var(--cinza-600);">Total à parte: ${fmtMoeda(fora.reduce((s,x)=>s+(x.valor||0),0))}</div>
+      </div>` : '';
+    return `<div style="font-size:12px;color:var(--cinza-500);margin-bottom:12px;">${contam.length} fechamentos · ${fmtMoeda(totVal)} · <i class="ti ti-info-circle"></i> clique num consultor para ver o detalhe</div>
+      <table style="width:100%;font-size:13px;border-collapse:collapse;">
+        <thead><tr style="border-bottom:2px solid var(--cinza-200);"><th style="text-align:left;padding:8px 0;">Consultor</th><th style="text-align:right;">Fechamentos</th><th style="text-align:right;">Valor</th></tr></thead>
+        ${linhasCons}
+      </table>${foraTxt}`;
+  };
 
-  // cada consultor vira uma linha clicável que expande o detalhe (os fechamentos dele)
-  const linhasCons = Object.entries(porCons).sort((a,b)=>b[1].v-a[1].v).map(([c,o],idx)=>{
-    const detId = 'fech-det-'+idx;
-    const detalhe = o.itens.sort((a,b)=>(b.valor||0)-(a.valor||0)).map(f=>
-      `<tr style="border-bottom:1px solid var(--cinza-100);background:var(--cinza-50);"><td style="padding:6px 0 6px 20px;">${f.cliente}</td><td><span class="badge" style="background:var(--verde-claro-bg);color:var(--verde-escuro);font-size:10px;padding:2px 6px;border-radius:4px;">${f.tipo}</span></td><td style="text-align:right;">${f.data||'—'}</td><td style="text-align:right;">${fmtMoeda(f.valor)}</td></tr>`
-    ).join('');
-    return `<tr style="border-bottom:1px solid var(--cinza-100);cursor:pointer;" onclick="var e=document.getElementById('${detId}');e.style.display=e.style.display==='table-row-group'?'none':'table-row-group';">
-        <td style="padding:8px 0;"><i class="ti ti-chevron-right" style="font-size:12px;"></i> ${c}</td><td style="text-align:right;">${o.n}</td><td style="text-align:right;font-weight:600;">${fmtMoeda(o.v)}</td></tr>
-      <tbody id="${detId}" style="display:none;"><tr style="font-size:11px;color:var(--cinza-500);"><td style="padding:4px 0 4px 20px;">Cliente</td><td>Tipo</td><td style="text-align:right;">Data</td><td style="text-align:right;">Valor</td></tr>${detalhe}</tbody>`;
-  }).join('');
+  // um container por mês (todos no HTML) + o de "todos". O filtro só mostra/esconde — funciona sem re-render.
+  const blocoTodos = `<div class="fech-mes-bloco" data-fmes="todos">${montaConteudo(fech,'todos')}</div>`;
+  const blocosMes = meses.map(m=>`<div class="fech-mes-bloco" data-fmes="${m}" style="display:none;">${montaConteudo(fech.filter(f=>f.mesRef===m), m)}</div>`).join('');
 
-  const foraTxt = fora.length ? `<div style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--cinza-300);">
-      <div style="font-size:13px;color:var(--roxo);font-weight:600;margin-bottom:6px;">Aditivos e Eventuais Recicláveis (${fora.length}) — não somam ao total</div>
-      <div style="font-size:12px;color:var(--cinza-600);">Total à parte: ${fmtMoeda(fora.reduce((s,x)=>s+(x.valor||0),0))}</div>
-    </div>` : '';
-
-  const selMes = `<select onchange="window._fechMesSel=this.value;renderResultadosCRM(document.getElementById('area-conteudo'))" style="padding:6px 10px;border:1.5px solid var(--cinza-300);border-radius:8px;font-size:12px;">
-      <option value="todos" ${mesSel==='todos'?'selected':''}>Todos os meses</option>
-      ${meses.map(m=>`<option value="${m}" ${m===mesSel?'selected':''}>${rotMes(m)}</option>`).join('')}
+  // o select controla a visibilidade via JS puro (sem depender de renderResultadosCRM)
+  const selMes = `<select onchange="(function(v,sel){var w=sel.closest('.fech-wrap');w.querySelectorAll('.fech-mes-bloco').forEach(function(b){b.style.display=b.getAttribute('data-fmes')===v?'block':'none';});})(this.value,this)" style="padding:6px 10px;border:1.5px solid var(--cinza-300);border-radius:8px;font-size:12px;">
+      <option value="todos">Todos os meses</option>
+      ${meses.map(m=>`<option value="${m}">${rotMes(m)}</option>`).join('')}
     </select>`;
 
-  return `<div style="background:white;border:1px solid var(--cinza-200);border-radius:12px;padding:20px;margin-top:18px;">
-    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:4px;">
+  return `<div class="fech-wrap" style="background:white;border:1px solid var(--cinza-200);border-radius:12px;padding:20px;margin-top:18px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
       <h3 style="font-family:var(--fonte-display);font-size:15px;margin:0;">Fechamentos (planilha de comissões)</h3>
       ${selMes}
     </div>
-    <div style="font-size:12px;color:var(--cinza-500);margin-bottom:12px;">${contam.length} fechamentos · ${fmtMoeda(totVal)} · <i class="ti ti-info-circle"></i> clique num consultor para ver o detalhe</div>
-    <table style="width:100%;font-size:13px;border-collapse:collapse;">
-      <thead><tr style="border-bottom:2px solid var(--cinza-200);"><th style="text-align:left;padding:8px 0;">Consultor</th><th style="text-align:right;">Fechamentos</th><th style="text-align:right;">Valor</th></tr></thead>
-      ${linhasCons}
-    </table>
-    ${foraTxt}
+    ${blocoTodos}
+    ${blocosMes}
   </div>`;
 }
 
