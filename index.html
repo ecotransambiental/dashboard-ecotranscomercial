@@ -6342,6 +6342,30 @@ function montarHTMLResultados() {
   const fim = (document.getElementById('rt-fim')||{}).value;
   const periodo = (ini&&fim) ? `${fmtDataBR(ini)} a ${fmtDataBR(fim)}` : 'período selecionado';
   const hoje = new Date().toLocaleDateString('pt-BR');
+
+  // clona o conteúdo pra poder ajustar sem mexer na tela
+  const clone = corpo.cloneNode(true);
+  // FECHAMENTOS: se houver um mês selecionado no dropdown, o HTML sai TRAVADO nesse mês
+  // (remove a caixinha de seleção e mantém só o bloco do mês escolhido).
+  let mesFechLabel = '';
+  const wrap = clone.querySelector('.fech-wrap');
+  if (wrap) {
+    const sel = wrap.querySelector('select');
+    const mesEscolhido = sel ? sel.value : 'todos';
+    if (mesEscolhido && mesEscolhido !== 'todos') {
+      // pega o rótulo pra mostrar no título
+      if (sel) { const op = sel.querySelector('option[value="'+mesEscolhido+'"]'); if(op) mesFechLabel = op.textContent; }
+      // esconde todos os blocos e mostra só o do mês escolhido
+      wrap.querySelectorAll('.fech-mes-bloco').forEach(b=>{ b.style.display = b.getAttribute('data-fmes')===mesEscolhido ? 'block' : 'none'; });
+      // remove a caixinha de seleção (fica travado)
+      if (sel) sel.remove();
+      // ajusta o título pra indicar o mês
+      const h3 = wrap.querySelector('h3');
+      if (h3 && mesFechLabel) h3.textContent = 'Fechamentos — ' + mesFechLabel;
+    }
+  }
+  const corpoHTML = clone.innerHTML;
+
   return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Resultados Comerciais — Ecotrans</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -6374,7 +6398,7 @@ function montarHTMLResultados() {
         <div class="sub">Período: ${periodo} &nbsp;·&nbsp; Gerado em ${hoje}</div>
       </div>
     </div>
-    <div class="wrap"><div class="conteudo">${corpo.innerHTML}</div>
+    <div class="wrap"><div class="conteudo">${corpoHTML}</div>
     <button class="btn-print" onclick="window.print()"><i class="ti ti-printer"></i> Imprimir / Salvar PDF</button>
     </div>
     <script>
