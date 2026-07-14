@@ -454,6 +454,8 @@ const USUARIOS = [
   { id: 'danielly', nome: 'Danielly Santos', role: 'Assistente',                 perfil: 'assistente' },
   { id: 'andrea',   nome: 'Andrea Fernandes', role: 'Admin — Diretora Adm.',     perfil: 'admin' },
   { id: 'joyce',    nome: 'Joyce Freitas',   role: 'Financeiro',                 perfil: 'financeiro' },
+  { id: 'guilherme', nome: 'Guilherme Fernandes', role: 'Admin — Diretoria',     perfil: 'admin' },
+  { id: 'leonardo', nome: 'Leonardo Fernandes', role: 'Admin — Diretoria',       perfil: 'admin' },
 ];
 
 // Definição dos módulos (nível 1) e submódulos (nível 2)
@@ -585,6 +587,13 @@ function veSomenteProprios_Carteira() {
   if (IDS_VE_TUDO.includes(id)) return false;
   if (IDS_SO_PROPRIOS_CARTEIRA.includes(id)) return true;
   return PERFIL_SO_PROPRIOS.includes(usuarioAtual.perfil);
+}
+// só Mafe (admin) e Danielly (assistente) podem mudar a fonte de um lead já criado
+function podeEditarFonteLead() {
+  if (!usuarioAtual) return false;
+  const id = String(usuarioAtual.id||'').toLowerCase();
+  if (id==='mafe' || id==='danielly') return true;
+  return false;
 }
 // confere se um registro (cliente/lead) pertence ao usuário logado
 function normalizaNome(s) {
@@ -1721,6 +1730,28 @@ async function salvarNomeLead(idLead) {
     aplicarKanban();
     const av = document.createElement('div');
     av.textContent = 'Nome atualizado!';
+    av.style.cssText = 'position:fixed;bottom:20px;right:20px;background:var(--verde-escuro);color:white;padding:10px 18px;border-radius:8px;font-size:13px;z-index:9999;';
+    document.body.appendChild(av); setTimeout(()=>av.remove(), 2000);
+  } catch(e) { alert('Erro de conexão.'); }
+}
+
+async function salvarFonteLead(idLead) {
+  if (!podeEditarFonteLead()) { alert('Você não tem permissão para alterar a fonte.'); return; }
+  const fonte = (document.getElementById('lead-fonte')||{}).value || '';
+  if (!fonte) { alert('Escolha uma fonte.'); return; }
+  try {
+    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
+      acao:'atualizarLeadCampos', token: sessaoToken, dados:{ idLead:String(idLead), campos:{ FONTE: fonte } }
+    })});
+    const r = await resp.json();
+    if (!r.ok) { alert('Erro: '+(r.erro||'verifique se o Apps Script foi republicado.')); return; }
+    const lead = (kanbanLeads||[]).find(l=>String(l['ID_LEAD'])===String(idLead));
+    if (lead) lead['FONTE'] = fonte;
+    if (typeof limparCacheBusca==='function') limparCacheBusca();
+    fecharFicha();
+    aplicarKanban();
+    const av = document.createElement('div');
+    av.textContent = 'Fonte atualizada!';
     av.style.cssText = 'position:fixed;bottom:20px;right:20px;background:var(--verde-escuro);color:white;padding:10px 18px;border-radius:8px;font-size:13px;z-index:9999;';
     document.body.appendChild(av); setTimeout(()=>av.remove(), 2000);
   } catch(e) { alert('Erro de conexão.'); }
@@ -6295,22 +6326,23 @@ async function renderResultadosCRM(area) {
       <div><label style="font-size:12px;color:var(--cinza-600);display:block;margin-bottom:3px;">Até</label>
         <input type="date" id="rt-fim" value="${hoje.toISOString().slice(0,10)}" class="filtro-sel"></div>
       <button class="btn-importar" onclick="calcResultados()"><i class="ti ti-refresh"></i> Atualizar</button>
-      <button class="btn-importar" style="background:var(--verde-escuro);" onclick="exportarResultadosHTML()"><i class="ti ti-file-export"></i> Exportar HTML</button>
+      <button class="btn-importar" style="background:var(--verde-escuro);" onclick="exportarResultadosHTML()"><i class="ti ti-eye"></i> Abrir HTML</button>
+      <button class="btn-importar" style="background:var(--verde-escuro);" onclick="baixarResultadosHTML()"><i class="ti ti-download"></i> Baixar HTML</button>
     </div>
     <div id="rt-corpo"></div>`;
   calcResultados();
 }
 
 // exporta os resultados do período numa janela HTML com bom design, pronta pra apresentar/imprimir
-function exportarResultadosHTML() {
+// monta o HTML completo dos resultados (usado tanto pra abrir quanto pra baixar)
+function montarHTMLResultados() {
   const corpo = document.getElementById('rt-corpo');
-  if (!corpo) return;
+  if (!corpo) return '';
   const ini = (document.getElementById('rt-ini')||{}).value;
   const fim = (document.getElementById('rt-fim')||{}).value;
   const periodo = (ini&&fim) ? `${fmtDataBR(ini)} a ${fmtDataBR(fim)}` : 'período selecionado';
   const hoje = new Date().toLocaleDateString('pt-BR');
-  const w = window.open('', '_blank');
-  w.document.write(`<html><head><meta charset="utf-8"><title>Resultados Comerciais — Ecotrans</title>
+  return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Resultados Comerciais — Ecotrans</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.30.0/tabler-icons.min.css">
@@ -6346,23 +6378,41 @@ function exportarResultadosHTML() {
     <button class="btn-print" onclick="window.print()"><i class="ti ti-printer"></i> Imprimir / Salvar PDF</button>
     </div>
     <script>
-      // blocos começam fechados; clicar na linha-título abre/fecha o detalhe (tbody com data-det)
       document.querySelectorAll('tbody[id]').forEach(function(tb){ if(tb.querySelector('td')) { tb.setAttribute('data-det','1'); tb.style.display='none'; } });
-      document.addEventListener('click', function(e){
-        var tr = e.target.closest('tr[onclick]');
-        if(!tr) return;
-        e.stopImmediatePropagation();
-      }, true);
-      // reescreve os onclick (que apontam pra funções inexistentes aqui) por um toggle local
       document.querySelectorAll('tr[onclick]').forEach(function(tr){
         var m = tr.getAttribute('onclick').match(/getElementById\\('([^']+)'\\)/);
         tr.removeAttribute('onclick');
         if(m){ tr.style.cursor='pointer'; tr.addEventListener('click', function(){ var d=document.getElementById(m[1]); if(d) d.style.display = d.style.display==='table-row-group'?'none':'table-row-group'; }); }
       });
     <\/script>
-  </body></html>`);
+  </body></html>`;
+}
+
+// abre os resultados numa aba nova (pra ver/imprimir na hora)
+function exportarResultadosHTML() {
+  const html = montarHTMLResultados();
+  if (!html) return;
+  const w = window.open('', '_blank');
+  w.document.write(html);
   w.document.close();
 }
+
+// baixa os resultados como arquivo .html no computador (pra levar/apresentar em outra máquina)
+function baixarResultadosHTML() {
+  const html = montarHTMLResultados();
+  if (!html) return;
+  const ini = (document.getElementById('rt-ini')||{}).value || '';
+  const fim = (document.getElementById('rt-fim')||{}).value || '';
+  const nome = `Resultados_Ecotrans_${ini}_a_${fim}.html`.replace(/[^\w.\-]/g,'_');
+  const blob = new Blob([html], {type:'text/html;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = nome;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+}
+
 
 function calcResultados() {
   const ini = (document.getElementById('rt-ini')||{}).value;
@@ -6687,6 +6737,16 @@ function abrirLead(id) {
               <button onclick="salvarNomeLead('${idLead}')" style="padding:9px 14px;border:none;background:var(--verde-medio);color:white;border-radius:8px;cursor:pointer;font-size:13px;white-space:nowrap;"><i class="ti ti-check"></i> Salvar</button>
             </div>
           </div>
+          ${podeEditarFonteLead() ? `
+          <div style="background:var(--cinza-100);border-radius:10px;padding:12px;margin-bottom:14px;">
+            <label style="font-size:12px;color:var(--cinza-600);display:block;margin-bottom:6px;font-weight:600;">Fonte do lead</label>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <select id="lead-fonte" style="flex:1;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;font-size:13px;">
+                ${LISTA_FONTES.map(f=>`<option ${String(l['FONTE']||'')===f?'selected':''}>${f}</option>`).join('')}
+              </select>
+              <button onclick="salvarFonteLead('${idLead}')" style="padding:9px 14px;border:none;background:var(--verde-medio);color:white;border-radius:8px;cursor:pointer;font-size:13px;white-space:nowrap;"><i class="ti ti-check"></i> Salvar</button>
+            </div>
+          </div>` : ''}
           <div style="background:var(--cinza-100);border-radius:10px;padding:12px;margin-bottom:14px;">
             <label style="font-size:12px;color:var(--cinza-600);display:block;margin-bottom:6px;font-weight:600;">Mudar etapa</label>
             <div style="display:flex;gap:8px;align-items:center;">
