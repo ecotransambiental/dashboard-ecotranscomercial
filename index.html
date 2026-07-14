@@ -1705,6 +1705,27 @@ async function salvarStatusEntrada(idLead) {
   } catch(e) { alert('Erro de conexão.'); }
 }
 
+async function salvarNomeLead(idLead) {
+  const nome = ((document.getElementById('lead-nome')||{}).value || '').trim();
+  if (!nome) { alert('Digite um nome para o lead.'); return; }
+  try {
+    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
+      acao:'atualizarLeadCampos', token: sessaoToken, dados:{ idLead:String(idLead), campos:{ CLIENTE: nome } }
+    })});
+    const r = await resp.json();
+    if (!r.ok) { alert('Erro: '+(r.erro||'verifique se o Apps Script foi republicado.')); return; }
+    const lead = (kanbanLeads||[]).find(l=>String(l['ID_LEAD'])===String(idLead));
+    if (lead) lead['CLIENTE'] = nome;
+    if (typeof limparCacheBusca==='function') limparCacheBusca();
+    fecharFicha();
+    aplicarKanban();
+    const av = document.createElement('div');
+    av.textContent = 'Nome atualizado!';
+    av.style.cssText = 'position:fixed;bottom:20px;right:20px;background:var(--verde-escuro);color:white;padding:10px 18px;border-radius:8px;font-size:13px;z-index:9999;';
+    document.body.appendChild(av); setTimeout(()=>av.remove(), 2000);
+  } catch(e) { alert('Erro de conexão.'); }
+}
+
 async function salvarEndCepLead(idLead) {
   const end = (document.getElementById('lead-end')||{}).value || '';
   const cep = (document.getElementById('lead-cep')||{}).value || '';
@@ -6653,6 +6674,13 @@ function abrirLead(id) {
           </div>
         </div>
         <div class="ficha-corpo">
+          <div style="background:var(--cinza-100);border-radius:10px;padding:12px;margin-bottom:14px;">
+            <label style="font-size:12px;color:var(--cinza-600);display:block;margin-bottom:6px;font-weight:600;">Nome do lead</label>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <input id="lead-nome" type="text" value="${String(l['CLIENTE']||'').replace(/"/g,'&quot;')}" style="flex:1;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;font-size:13px;">
+              <button onclick="salvarNomeLead('${idLead}')" style="padding:9px 14px;border:none;background:var(--verde-medio);color:white;border-radius:8px;cursor:pointer;font-size:13px;white-space:nowrap;"><i class="ti ti-check"></i> Salvar</button>
+            </div>
+          </div>
           <div style="background:var(--cinza-100);border-radius:10px;padding:12px;margin-bottom:14px;">
             <label style="font-size:12px;color:var(--cinza-600);display:block;margin-bottom:6px;font-weight:600;">Mudar etapa</label>
             <div style="display:flex;gap:8px;align-items:center;">
