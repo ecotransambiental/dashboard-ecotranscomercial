@@ -6506,7 +6506,13 @@ function blocoPorConsultor(leadsPeriodo) {
       </tr></thead><tbody>`;
   linhas.forEach(([c,o],idx)=>{
     const detId = 'cons-det-'+idx;
-    const detalhe = o.itens.sort((a,b)=>{ const oa={'Fechado':0,'Proposta Enviada':1,'Em Contato':2,'Declinado':4}[a['ETAPA']]??3; const ob={'Fechado':0,'Proposta Enviada':1,'Em Contato':2,'Declinado':4}[b['ETAPA']]??3; return oa-ob; })
+    const ordEtapa = e => ({'Fechado':0,'Proposta Enviada':1,'Em Contato':2,'Declinado':4}[e]??3);
+    const detalhe = o.itens.sort((a,b)=>{
+        // primeiro agrupa por FONTE (Google juntos, Indicação juntos...), depois por etapa dentro da fonte
+        const fa=String(a['FONTE']||'').toLowerCase(), fb=String(b['FONTE']||'').toLowerCase();
+        if(fa!==fb) return fa<fb?-1:1;
+        return ordEtapa(a['ETAPA'])-ordEtapa(b['ETAPA']);
+      })
       .map(l=>`<tr style="background:var(--cinza-50);border-bottom:1px solid var(--cinza-100);font-size:12px;"><td style="padding:5px 0 5px 20px;">${l['CLIENTE']||'—'}</td><td colspan="2" style="color:var(--cinza-600);">${rotEtapa(l['ETAPA'])}${l['ETAPA']==='Declinado'&&l['MOTIVO_PERDA']?' · '+l['MOTIVO_PERDA']:''}</td><td colspan="1" style="color:var(--cinza-600);font-size:11px;">${l['FONTE']||''}</td><td colspan="2" style="text-align:right;color:var(--cinza-600);">${val(l)?fmtMoeda(val(l)):'—'}</td></tr>`).join('');
     html += `<tr style="border-bottom:1px solid var(--cinza-100);cursor:pointer;" onclick="var e=document.getElementById('${detId}');e.style.display=e.style.display==='table-row-group'?'none':'table-row-group';">
         <td style="padding:8px 0;"><i class="ti ti-chevron-right" style="font-size:12px;"></i> ${c}</td>
