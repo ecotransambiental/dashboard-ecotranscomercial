@@ -6265,7 +6265,6 @@ async function gerarRelatorioPDF() {
 async function renderResultadosCRM(area) {
   area.innerHTML = `<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando resultados...</h2></div>`;
   await carregarLeads();
-  if (!window._histEtapas) { const r = await buscarDados('Historico_Etapas'); window._histEtapas = r.ok?r.linhas:[]; }
   const hoje = new Date();
   const ini30 = new Date(); ini30.setDate(ini30.getDate()-30);
   area.innerHTML = `
@@ -6281,7 +6280,7 @@ async function renderResultadosCRM(area) {
   calcResultados();
 }
 
-// exporta os resultados do período numa janela HTML pronta pra imprimir/salvar
+// exporta os resultados do período numa janela HTML com bom design, pronta pra apresentar/imprimir
 function exportarResultadosHTML() {
   const corpo = document.getElementById('rt-corpo');
   if (!corpo) return;
@@ -6291,21 +6290,55 @@ function exportarResultadosHTML() {
   const hoje = new Date().toLocaleDateString('pt-BR');
   const w = window.open('', '_blank');
   w.document.write(`<html><head><meta charset="utf-8"><title>Resultados Comerciais — Ecotrans</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.30.0/tabler-icons.min.css">
     <style>
-      :root{--vermelho:#c53030;--roxo:#6B5B95;--verde-escuro:#2d5a3d;--verde-medio:#4a8c5c;--verde-claro:#8bc34a;
-        --cinza-100:#f0f0ec;--cinza-200:#e2e2dc;--cinza-500:#8a8a80;--cinza-600:#6a6a60;--cinza-700:#4a4a42;--cinza-50:#f8f8f5;
-        --verde-claro-bg:#eef5ea;--amarelo-bg:#fdf6e3;--fonte-display:Arial,sans-serif;}
-      body{font-family:Arial,Helvetica,sans-serif;color:#222;padding:30px;max-width:1100px;margin:0 auto;}
-      h1{color:var(--verde-escuro);font-size:22px;margin:0;}
-      .sub{color:#666;font-size:13px;margin:4px 0 24px;}
+      :root{--vermelho:#c53030;--vermelho-bg:#fdeaea;--roxo:#6B5B95;--verde-escuro:#2d5a3d;--verde-medio:#4a8c5c;--verde-claro:#8bc34a;--verde-ok:#4a8c5c;
+        --cinza-100:#f0f0ec;--cinza-200:#e2e2dc;--cinza-400:#b0b0a6;--cinza-500:#8a8a80;--cinza-600:#6a6a60;--cinza-700:#4a4a42;--cinza-900:#2a2a24;--cinza-50:#f8f8f5;
+        --verde-claro-bg:#eef5ea;--amarelo-bg:#fdf6e3;--fonte-display:'Outfit',sans-serif;}
+      *{box-sizing:border-box;}
+      body{font-family:'Inter',sans-serif;color:var(--cinza-900);margin:0;background:#fafaf7;}
+      .wrap{max-width:1080px;margin:0 auto;padding:0 0 60px;}
+      .cabecalho{background:linear-gradient(135deg,var(--verde-escuro),var(--verde-medio));color:#fff;padding:32px 40px;margin-bottom:28px;}
+      .cabecalho h1{font-family:var(--fonte-display);font-size:24px;margin:0 0 4px;font-weight:700;}
+      .cabecalho .sub{font-size:13px;opacity:.9;}
+      .cabecalho .logo{font-family:var(--fonte-display);font-size:13px;font-weight:600;letter-spacing:1px;text-transform:uppercase;opacity:.85;margin-bottom:10px;}
+      .conteudo{padding:0 40px;}
+      h2,h3{font-family:var(--fonte-display);}
       table{width:100%;border-collapse:collapse;}
-      tbody[style*="none"]{display:table-row-group !important;} /* no export, mostra todos os detalhes */
-      @media print{ button{display:none;} }
+      th{text-align:left;padding:8px 0;border-bottom:2px solid var(--cinza-200);font-size:12px;color:var(--cinza-600);text-transform:uppercase;letter-spacing:.3px;}
+      td{padding:7px 0;border-bottom:1px solid var(--cinza-100);font-size:13px;}
+      .toggle-hint{font-size:11px;color:var(--verde-medio);font-weight:500;}
+      .btn-print{margin:28px 40px 0;padding:11px 22px;background:var(--verde-medio);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-family:var(--fonte-display);font-weight:600;}
+      .btn-print:hover{background:var(--verde-escuro);}
+      @media print{ .btn-print{display:none;} body{background:#fff;} .cabecalho{-webkit-print-color-adjust:exact;print-color-adjust:exact;} tbody[data-det]{display:table-row-group !important;} }
     </style></head><body>
-    <h1>Resultados Comerciais — Ecotrans</h1>
-    <div class="sub">Período: ${periodo} · Emitido em ${hoje}</div>
-    ${corpo.innerHTML}
-    <button onclick="window.print()" style="margin-top:24px;padding:10px 18px;background:var(--verde-medio);color:#fff;border:none;border-radius:8px;cursor:pointer;">Imprimir / Salvar PDF</button>
+    <div class="cabecalho">
+      <div class="wrap" style="padding:0;">
+        <div class="logo"><i class="ti ti-recycle"></i> Ecotrans Ambiental</div>
+        <h1>Resultados Comerciais</h1>
+        <div class="sub">Período: ${periodo} &nbsp;·&nbsp; Gerado em ${hoje}</div>
+      </div>
+    </div>
+    <div class="wrap"><div class="conteudo">${corpo.innerHTML}</div>
+    <button class="btn-print" onclick="window.print()"><i class="ti ti-printer"></i> Imprimir / Salvar PDF</button>
+    </div>
+    <script>
+      // blocos começam fechados; clicar na linha-título abre/fecha o detalhe (tbody com data-det)
+      document.querySelectorAll('tbody[id]').forEach(function(tb){ if(tb.querySelector('td')) { tb.setAttribute('data-det','1'); tb.style.display='none'; } });
+      document.addEventListener('click', function(e){
+        var tr = e.target.closest('tr[onclick]');
+        if(!tr) return;
+        e.stopImmediatePropagation();
+      }, true);
+      // reescreve os onclick (que apontam pra funções inexistentes aqui) por um toggle local
+      document.querySelectorAll('tr[onclick]').forEach(function(tr){
+        var m = tr.getAttribute('onclick').match(/getElementById\\('([^']+)'\\)/);
+        tr.removeAttribute('onclick');
+        if(m){ tr.style.cursor='pointer'; tr.addEventListener('click', function(){ var d=document.getElementById(m[1]); if(d) d.style.display = d.style.display==='table-row-group'?'none':'table-row-group'; }); }
+      });
+    <\/script>
   </body></html>`);
   w.document.close();
 }
@@ -6316,46 +6349,22 @@ function calcResultados() {
   const dIni = new Date(ini+'T00:00:00'), dFim = new Date(fim+'T23:59:59');
   const corpo = document.getElementById('rt-corpo');
 
-  const movs = (window._histEtapas||[]).map(e=>({...e,_d:parseDataReaj(e['DATA'])})).filter(e=>e._d&&e._d>=dIni&&e._d<=dFim);
-  const temHistorico = movs.length > 0;
   const leadsPeriodo = kanbanLeads.filter(l=>{ const d=parseDataReaj(l['DATA_CONTATO']); return d&&d>=dIni&&d<=dFim; });
 
-  if (!temHistorico) {
-    const ativos = kanbanLeads.filter(l=>l['ETAPA']!=='Cobertura');
-    const emProposta = ativos.filter(l=>l['ETAPA']==='Proposta Enviada').length;
-    const emFechado = ativos.filter(l=>l['ETAPA']==='Fechado').length;
-    const emProspec = ativos.filter(l=>{ const e=String(l['ETAPA']).toLowerCase(); return e.includes('prospec')||e.includes('indica'); }).length;
-    const emContato = ativos.filter(l=>l['ETAPA']==='Em Contato').length;
-    const emDeclinado = ativos.filter(l=>l['ETAPA']==='Declinado').length;
-    corpo.innerHTML = `
-      <div style="background:var(--amarelo-bg);border-radius:12px;padding:16px;margin-bottom:16px;font-size:13px;color:#8a6d00;line-height:1.6;">
-        <i class="ti ti-info-circle"></i> <b>As taxas de conversão por período ainda não estão disponíveis.</b> Elas dependem do registro de movimentação dos cards (de uma etapa para outra), que começa a contar agora que o Apps Script foi republicado. Conforme a equipe arrastar os cards no Funil, as taxas vão aparecer aqui. Por enquanto, mostro a <b>foto atual do funil</b>:
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;">
-        <div class="kpi-card" style="border-top:3px solid var(--cinza-500);"><div class="kpi-num" style="color:var(--cinza-600);">${emProspec}</div><div class="kpi-lbl">Em prospecção</div></div>
-        <div class="kpi-card" style="border-top:3px solid #185FA5;"><div class="kpi-num" style="color:#185FA5;">${emContato}</div><div class="kpi-lbl">Em contato</div></div>
-        <div class="kpi-card" style="border-top:3px solid #BA7517;"><div class="kpi-num" style="color:#BA7517;">${emProposta}</div><div class="kpi-lbl">Proposta enviada</div></div>
-        <div class="kpi-card" style="border-top:3px solid var(--verde-ok);"><div class="kpi-num" style="color:var(--verde-ok);">${emFechado}</div><div class="kpi-lbl">Fechado</div></div>
-        <div class="kpi-card" style="border-top:3px solid var(--vermelho);"><div class="kpi-num" style="color:var(--vermelho);">${emDeclinado}</div><div class="kpi-lbl">Declinado</div></div>
-      </div>
-      ${blocoPorConsultor(leadsPeriodo)}
-      ${blocoDeclinadosCoberturas(leadsPeriodo)}
-      ${blocoFechamentosComissao()}`;
-    return;
-  }
-
-  // total de leads: só fontes PASSIVAS — exclui coberturas E prospecção ativa (regra da Mafe)
+  // ===== Cálculo por ENTRADA do lead (DATA_CONTATO) + ESTADO ATUAL =====
+  // Funciona pra qualquer período, inclusive passado, sem depender da movimentação de cards.
+  // "chegou em proposta" = está em Proposta Enviada OU Fechado (passou pela proposta).
   const ehProspFonte = l => String(l['FONTE']||'').toLowerCase().includes('prospec');
-  const totalLeads = leadsPeriodo.filter(l=>l['ETAPA']!=='Cobertura' && !ehProspFonte(l)).length;
-  const propostas = movs.filter(m=>m['ETAPA_NOVA']==='Proposta Enviada').length;
-  const fechados = movs.filter(m=>m['ETAPA_NOVA']==='Fechado').length;
+  const passivos = leadsPeriodo.filter(l=>l['ETAPA']!=='Cobertura' && !ehProspFonte(l));
+  const totalLeads = passivos.length;
+  const chegouProposta = l => l['ETAPA']==='Proposta Enviada' || l['ETAPA']==='Fechado';
+  const propostas = passivos.filter(chegouProposta).length;
+  const fechados = passivos.filter(l=>l['ETAPA']==='Fechado').length;
 
-  // "Prospecção → Proposta" pelo ESTADO ATUAL (não depende do histórico de arrastar cards):
-  // dos leads que entraram como prospecção (todos entram por lá, menos coberturas),
-  // quantos já chegaram em Proposta Enviada ou Fechado.
-  const leadsProspec = leadsPeriodo.filter(l=>l['ETAPA']!=='Cobertura');
-  const prospParaProp = leadsProspec.filter(l=> l['ETAPA']==='Proposta Enviada' || l['ETAPA']==='Fechado').length;
-  const totalProspec = leadsProspec.length;
+  // prospecção ativa do período (fonte Prospecção)
+  const leadsProspecAtiva = leadsPeriodo.filter(l=>l['ETAPA']!=='Cobertura' && ehProspFonte(l));
+  const prospParaProp = leadsProspecAtiva.filter(chegouProposta).length;
+  const totalProspec = leadsProspecAtiva.length;
 
   const pct = (a,b)=> b>0 ? (a/b*100) : 0;
   const taxaLeadProposta  = pct(propostas, totalLeads);
