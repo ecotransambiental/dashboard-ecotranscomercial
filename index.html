@@ -522,9 +522,9 @@ const MODULOS = [
 const ACESSO = {
   admin:       ['crm','carteira','agenda','regula','financeiro'],   // Mafe, Andrea — tudo
   diretor:     ['crm','carteira','agenda','regula','financeiro'],   // Roberto — tudo
-  supervisor:  ['crm','carteira','agenda'],                  // Rogério — sem SP Regula; financeiro bloqueado (ver SUBMODULOS_BLOQUEADOS)
-  assistente:  ['crm','carteira','agenda','regula'],          // Danielly — CRM de todos; carteira só os próprios + "quem atende"; SP Regula completo
-  vendedor:    ['crm','carteira','agenda'],                // Bruna, Elaine — CRM, Carteira (só os próprios clientes/contratos) e Agenda
+  supervisor:  ['crm','agenda'],                            // Rogério — sem Carteira, sem SP Regula
+  assistente:  ['crm','agenda','regula'],                   // Danielly — CRM de todos, Agenda, SP Regula; SEM Carteira
+  vendedor:    ['crm','agenda'],                            // Bruna, Elaine — CRM e Agenda; SEM Carteira
   financeiro:  ['carteira','financeiro'],                     // Joyce — carteira + módulo financeiro
 };
 
@@ -4613,6 +4613,7 @@ function filtraRegula(tipo) {
       const ef = d._ef;
       const podeEmail = ef==='vencido'||ef==='pendente'|| (d._dias!=null && d._dias>=0 && d._dias<=60);
       const podeRenovar = ef==='vencido'||ef==='pendente'|| (d._dias!=null && d._dias>=0 && d._dias<=60);
+      const emRenov = ef==='em_renovacao';
       const pillTxt = ef==='pendente'?'Sem cadastro':ef==='em_renovacao'?'Em renovação':ef==='vencido'?'Vencido':d._c.txt;
       const pillCls = ef==='pendente'?'pill-ok':ef==='em_renovacao'?'pill-r60':d._c.pill;
       const cardCls = ef==='em_renovacao'?'ok':ef==='pendente'?'ok':d._c.cls;
@@ -4622,8 +4623,9 @@ function filtraRegula(tipo) {
         <span class="reaj-pill ${pillCls}">${pillTxt}</span></div>
         <div class="reaj-linhas"><div><span>Validade</span><b>${fmtDataBR(d['DATA_VALIDADE'])}</b></div><div><span>Consultor</span><b style="font-size:12px;">${d['CONSULTOR']||'—'}</b></div></div>
         ${jaEnviado?`<div style="font-size:11px;color:var(--verde-ok);margin-top:8px;"><i class="ti ti-mail-check"></i> Alerta enviado em ${jaEnviado}</div>`:''}
-        <div style="display:flex;gap:6px;margin-top:10px;">
+        <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;">
           ${podeEmail?`<button class="ficha-btn-secundario" style="flex:1;padding:7px;border-radius:7px;cursor:pointer;font-size:12px;" onclick="abrirEmailAlerta('rgg','${String(d['ID']||'').replace(/'/g,'')}')"><i class="ti ti-mail"></i> Alerta</button>`:''}
+          ${emRenov?`<span style="flex:1;padding:7px;border-radius:7px;font-size:12px;text-align:center;background:var(--amarelo-bg);color:#8a6d00;"><i class="ti ti-clock"></i> Em renovação</span>`:`<button class="ficha-btn-secundario" style="flex:1;padding:7px;border-radius:7px;cursor:pointer;font-size:12px;border-color:#8a6d00;color:#8a6d00;" onclick="marcarEmRenovacao('${String(d['ID']||'').replace(/'/g,'')}')"><i class="ti ti-clock"></i> Em renovação</button>`}
           ${podeRenovar?`<button class="ficha-btn-primario" style="flex:1;padding:7px;border:none;border-radius:7px;cursor:pointer;font-size:12px;" onclick="abrirModalRenovar('${String(d['ID']||'').replace(/'/g,'')}')"><i class="ti ti-refresh"></i> Renovar</button>`:''}
         </div>
       </div>`;
@@ -4679,6 +4681,26 @@ async function salvarSituacaoSigor(id) {
     const av = document.createElement('div');
     av.textContent = 'Situação atualizada para: '+novaSit;
     av.style.cssText = 'position:fixed;bottom:20px;right:20px;background:var(--verde-escuro);color:white;padding:10px 18px;border-radius:8px;font-size:13px;z-index:9999;';
+    document.body.appendChild(av); setTimeout(()=>av.remove(), 2200);
+  } catch(e) { alert('Erro de conexão.'); }
+}
+
+// marca um cadastro RGG como "Em renovação" (não recebe mais alerta enquanto estiver assim)
+async function marcarEmRenovacao(id) {
+  const d = (cacheRGG||[]).find(x=>String(x['ID'])===String(id));
+  if (!d) return;
+  if (!confirm(`Marcar "${d['CLIENTE']||'este cadastro'}" como Em renovação? Ele não vai mais gerar alerta enquanto estiver nesse status.`)) return;
+  try {
+    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
+      acao:'salvar', aba:'Clientes_RGG', token: sessaoToken, dados: Object.assign({}, d, { STATUS: 'Em renovação' })
+    })});
+    const r = await resp.json();
+    if (!r.ok) { alert('Erro: '+(r.erro||'verifique se o Apps Script foi republicado.')); return; }
+    d['STATUS'] = 'Em renovação';
+    renderRegula(document.getElementById('area-conteudo'), 'rgg');
+    const av = document.createElement('div');
+    av.textContent = 'Marcado como Em renovação!';
+    av.style.cssText = 'position:fixed;bottom:20px;right:20px;background:#8a6d00;color:white;padding:10px 18px;border-radius:8px;font-size:13px;z-index:9999;';
     document.body.appendChild(av); setTimeout(()=>av.remove(), 2200);
   } catch(e) { alert('Erro de conexão.'); }
 }
