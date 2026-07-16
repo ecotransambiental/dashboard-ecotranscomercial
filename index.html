@@ -2277,6 +2277,8 @@ async function carregarLeads(forcar) {
 async function renderKanban(area) {
   area.innerHTML = `<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando funil...</h2></div>`;
   await carregarLeads();
+  // carrega as tratativas (atividades) uma vez, pro filtro "com tratativa no período"
+  try { const ra = await buscarDados('Atividades_Cliente'); window._kanbanAtivs = ra.ok?ra.linhas:[]; } catch(e){ window._kanbanAtivs = []; }
   const consultores = [...new Set(kanbanLeads.map(l=>l['CONSULTOR']).filter(Boolean))].sort();
   const fontes = [...new Set(kanbanLeads.map(l=>l['FONTE']).filter(Boolean))].sort();
   area.innerHTML = `
@@ -2296,7 +2298,12 @@ async function renderKanban(area) {
       <select class="filtro-sel" id="k-etapa" onchange="aplicarKanban()"><option value="">Todas etapas</option><option value="Prospecção">Pendente</option><option>Em Contato</option><option>Proposta Solicitada</option><option>Proposta Enviada</option><option>Fechado</option><option>Declinado</option></select>
       <select class="filtro-sel" id="k-status" onchange="aplicarKanban()"><option value="">Status (entrada)</option><option value="pendente">Pendente</option><option value="em contato">Em contato</option></select>
       <span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--cinza-600);">
-        <i class="ti ti-calendar" style="font-size:15px;"></i> De
+        <i class="ti ti-calendar" style="font-size:15px;"></i>
+        <select class="filtro-sel" id="k-data-tipo" onchange="aplicarKanban()" style="padding:6px 8px;">
+          <option value="entrada">Entrada do lead</option>
+          <option value="tratativa">Com tratativa</option>
+        </select>
+        De
         <input type="date" class="filtro-sel" id="k-data-ini" onchange="aplicarKanban()" style="padding:6px 8px;">
         até
         <input type="date" class="filtro-sel" id="k-data-fim" onchange="aplicarKanban()" style="padding:6px 8px;">
@@ -2357,13 +2364,29 @@ function aplicarKanban() {
   if (dIni || dFim) {
     const ini = dIni ? new Date(dIni+'T00:00:00') : null;
     const fim = dFim ? new Date(dFim+'T23:59:59') : null;
-    leads = leads.filter(l => {
-      const d = parseDataReaj(l['DATA_CONTATO']);
-      if (!d) return false;
-      if (ini && d < ini) return false;
-      if (fim && d > fim) return false;
-      return true;
-    });
+    const tipoData = (document.getElementById('k-data-tipo')||{}).value || 'entrada';
+    if (tipoData === 'tratativa') {
+      // parse que preserva a hora da tratativa
+      const parseTrat = v => { if(!v) return null; const s=String(v).trim(); let m=s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/); if(m) return new Date(+m[1],+m[2]-1,+m[3],+m[4],+m[5]); return parseDataReaj(v); };
+      // conjunto de leads (por cnpj limpo e por nome) que tiveram tratativa no período
+      const ativs = (window._kanbanAtivs||[]).filter(a=>{ const d=parseTrat(a['DATA_REGISTRO']); return d && (!ini||d>=ini) && (!fim||d<=fim); });
+      const cnpjsComTrat = new Set(ativs.map(a=>String(a['CNPJ']||'').replace(/\D/g,'')).filter(Boolean));
+      const nomesComTrat = new Set(ativs.map(a=>String(a['CLIENTE']||'').trim().toLowerCase()).filter(Boolean));
+      leads = leads.filter(l => {
+        const cnpjL = String(l['CNPJ']||'').replace(/\D/g,'');
+        const nomeL = String(l['CLIENTE']||'').trim().toLowerCase();
+        return (cnpjL && cnpjsComTrat.has(cnpjL)) || (nomeL && nomesComTrat.has(nomeL));
+      });
+    } else {
+      // por entrada do lead (DATA_CONTATO)
+      leads = leads.filter(l => {
+        const d = parseDataReaj(l['DATA_CONTATO']);
+        if (!d) return false;
+        if (ini && d < ini) return false;
+        if (fim && d > fim) return false;
+        return true;
+      });
+    }
   }
 
   // ---- Cards de números no topo (só etapas principais; Prospecção à parte) ----
@@ -2519,12 +2542,26 @@ async function confirmarDeclinio(idLead) {
   if (ehCobertura && !quemAtende) { document.getElementById('mp-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Informe quem atende o cliente hoje.</div>'; return; }
   // motivo padronizado fica limpo (pra consolidar certo); a observação vai separada
   const motivo = motivoSel;
+  const lead = kanbanLeads.find(l => String(l['ID_LEAD'])===String(idLead));
   const overlay = document.getElementById('modal-motivo-overlay');
   if (overlay) overlay.remove();
   if (ehCobertura) {
     await mudarEtapaLead(idLead, 'Cobertura', motivo, { _cobertura:true, quemAtende, obsPerda: obs });
   } else {
     await mudarEtapaLead(idLead, 'Declinado', motivo, { obsPerda: obs });
+  }
+  // registra o motivo como TRATATIVA (pra ficar no histórico de atividades do lead/cliente)
+  if (lead) {
+    const tit = ehCobertura ? 'Cobertura' : 'Declínio';
+    const desc = ehCobertura
+      ? `Motivo: ${motivo}${quemAtende?' · Atendido por: '+quemAtende:''}${obs?' · Obs: '+obs:''}`
+      : `Motivo: ${motivo}${obs?' · Obs: '+obs:''}`;
+    try {
+      await fetch(API_URL, { method:'POST', body: JSON.stringify({
+        acao:'registrarAtividade', token: sessaoToken,
+        dados:{ cnpj: lead['CNPJ']||'', cliente: lead['CLIENTE']||'', tipo: tit, titulo: (ehCobertura?'Cobertura registrada':'Lead declinado'), descricao: desc, dataAgendada:'', registradoPor: usuarioAtual.nome }
+      })});
+    } catch(e) { /* não impede o declínio se o registro falhar */ }
   }
   fecharFicha();
 }
@@ -6243,6 +6280,10 @@ async function renderRelatoriosCRM(area) {
         <button class="btn-importar" onclick="gerarRelatorioPDF()"><i class="ti ti-download"></i> Baixar PDF</button>
       </div>
       <div style="font-size:11px;color:var(--cinza-500);margin-top:8px;">O PDF traz as mudanças de etapa e as atividades (visitas, ligações...) do consultor no período.</div>
+      ${usuarioAtual && usuarioAtual.perfil==='admin' ? `<div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--cinza-200);">
+        <button class="btn-importar" style="background:white;color:var(--cinza-600);border:1.5px solid var(--cinza-300);font-size:12px;" onclick="backfillDeclinios()"><i class="ti ti-history"></i> Salvar declínios antigos como tratativas</button>
+        <span style="font-size:11px;color:var(--cinza-500);margin-left:8px;">Roda uma vez: cria as tratativas dos leads já declinados que não tinham registro.</span>
+      </div>` : ''}
     </div>
 
     <div class="kpi-funil" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));">
@@ -6278,7 +6319,34 @@ async function renderRelatoriosCRM(area) {
 // ============================================================
 // RELATÓRIO PDF — atividades + mudanças de etapa por consultor/período
 // ============================================================
+async function backfillDeclinios() {
+  if (!confirm('Isso vai criar as tratativas dos leads já declinados/cobertura que ainda não têm registro. Rodar agora?')) return;
+  try {
+    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({ acao:'backfillDeclinios', token: sessaoToken })});
+    const r = await resp.json();
+    if (r.ok) {
+      alert(r.criadas>0 ? `Pronto! ${r.criadas} tratativa(s) de declínio/cobertura criada(s).` : 'Tudo certo — nenhum declínio pendente (já estavam todos registrados).');
+    } else {
+      alert('Erro: '+(r.erro||'verifique se o Apps Script foi republicado.'));
+    }
+  } catch(e) { alert('Erro de conexão.'); }
+}
+
 async function gerarRelatorioPDF() {
+  // parse que PRESERVA a hora (o parseDataReaj corta a hora de propósito, o que zerava pra 00:00 no relatório)
+  const parseComHora = (v) => {
+    if (!v) return null;
+    if (v instanceof Date) return isNaN(v)?null:v;
+    let s = String(v).trim();
+    // "2026-07-16 14:32:00" ou ISO "2026-07-16T14:32:00"
+    let m = s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+    if (m) return new Date(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +(m[6]||0));
+    // "16/07/2026 14:32"
+    m = s.match(/^(\d{2})\/(\d{2})\/(\d{2,4})[ ](\d{2}):(\d{2})/);
+    if (m) { let a=+m[3]; if(a<100)a+=2000; return new Date(a, +m[2]-1, +m[1], +m[4], +m[5]); }
+    // sem hora: cai no parse padrão (fica 00:00 mesmo)
+    return parseDataReaj(v);
+  };
   const cons = (document.getElementById('rel-cons')||{}).value||'';
   const ini = (document.getElementById('rel-ini')||{}).value||'';
   const fim = (document.getElementById('rel-fim')||{}).value||'';
@@ -6290,8 +6358,8 @@ async function gerarRelatorioPDF() {
     buscarDados('Historico_Etapas'), buscarDados('Atividades_Cliente'),
     buscarDados('Clientes'), buscarDados('Contratos')
   ]);
-  let etapas = (re.ok?re.linhas:[]).map(e=>({...e,_d:parseDataReaj(e['DATA'])})).filter(e=>e._d&&e._d>=dIni&&e._d<=dFim);
-  let ativs = (ra.ok?ra.linhas:[]).map(a=>({...a,_d:parseDataReaj(a['DATA_REGISTRO'])})).filter(a=>a._d&&a._d>=dIni&&a._d<=dFim);
+  let etapas = (re.ok?re.linhas:[]).map(e=>({...e,_d:parseComHora(e['DATA'])})).filter(e=>e._d&&e._d>=dIni&&e._d<=dFim);
+  let ativs = (ra.ok?ra.linhas:[]).map(a=>({...a,_d:parseComHora(a['DATA_REGISTRO'])})).filter(a=>a._d&&a._d>=dIni&&a._d<=dFim);
   // clientes e contratos abertos no período (pela DATA_CADASTRO)
   let clientes = (rcli.ok?rcli.linhas:[]).map(c=>({...c,_d:parseDataReaj(c['DATA_CADASTRO'])})).filter(c=>c._d&&c._d>=dIni&&c._d<=dFim);
   let contratos = (rctr.ok?rctr.linhas:[]).map(c=>({...c,_d:parseDataReaj(c['DATA_CADASTRO'])})).filter(c=>c._d&&c._d>=dIni&&c._d<=dFim);
