@@ -936,6 +936,32 @@ async function carregarClientes() {
   return cacheClientes;
 }
 
+// normaliza nome de cliente pra casar faturamento (a Variação de Faturamento não tem CNPJ, casa por nome)
+function _finNormNome(s){ return String(s||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Z0-9 ]/g,'').replace(/\b(LTDA|SA|EIRELI|ME|EPP|S\/A)\b/g,'').replace(/\s+/g,' ').trim(); }
+
+// faturamento de UM cliente por mês (retorna {mes: valor}). Casa por nome; garante FINdados carregado.
+function faturamentoDoCliente(cliente, cnpj){
+  try { if(typeof finCarregar==='function' && (!FINdados.faturamento||!FINdados.faturamento.length)) finCarregar(); } catch(e){}
+  const lista = (typeof FINdados!=='undefined' && FINdados.faturamento) ? FINdados.faturamento : [];
+  if(!lista.length) return null;
+  const alvo = _finNormNome(cliente);
+  let item = lista.find(x=>_finNormNome(x.cliente)===alvo);
+  if(!item && alvo) item = lista.find(x=>{ const n=_finNormNome(x.cliente); return n && (n.includes(alvo)||alvo.includes(n)); });
+  return item ? item.valores : null;
+}
+
+// coletas de UM cliente por mês (retorna {mes: quantidade}). Casa por CNPJ.
+function coletasDoCliente(cnpj){
+  try { if(typeof finCarregar==='function' && (!FINdados.coletas||!FINdados.coletas.length)) finCarregar(); } catch(e){}
+  const lista = (typeof FINdados!=='undefined' && FINdados.coletas) ? FINdados.coletas : [];
+  if(!lista.length || !cnpj) return null;
+  const alvo = String(cnpj).replace(/\D/g,'');
+  const porMes = {};
+  lista.forEach(x=>{ if(String(x.cnpj||'').replace(/\D/g,'')===alvo){ porMes[x.ym]=(porMes[x.ym]||0)+(x.qtdeServ||0); } });
+  return Object.keys(porMes).length ? porMes : null;
+}
+
+
 // Faturamento é carregado SEPARADAMENTE e só quando a tela precisa (era carregado junto
 // com os clientes em toda tela, o que pesava à toa). Telas que cruzam faturamento chamam esta.
 async function carregarFaturamento() {
@@ -1102,6 +1128,10 @@ async function renderClientes(area) {
   if (!cacheFaturamento) {
     carregarFaturamento().then(() => { aplicarFiltrosCli(); }).catch(()=>{});
   }
+  // carrega faturamento (Variação) e coletas do módulo financeiro, pra aparecer no card e na ficha
+  if (typeof finCarregarDoSheets==='function') {
+    finCarregarDoSheets(['faturamento','coletas']).then(()=>{ aplicarFiltrosCli(); }).catch(()=>{});
+  }
 }
 
 function setFiltroTipo(t) { filtroTipo = t; renderClientes(document.getElementById('area-conteudo')); }
@@ -1132,9 +1162,13 @@ function cardsClientes(lista) {
   let html = '<div class="grid-cards">';
   lista.slice(0, 150).forEach(c => {
     const cnpj = String(c['CNPJ']||'');
-    const fat = cacheFaturamento ? cacheFaturamento[cnpj] : undefined;
     const tipo = c['TIPO'] || '';
     const grupo = c['GRUPO'] || '';
+    // faturamento: pega o mês mais recente que foi subido pra este cliente
+    const fatMeses = faturamentoDoCliente(c['CLIENTE'], cnpj);
+    let fatLabel = 'Faturamento', fatVal = '';
+    if (fatMeses) { const ms = Object.keys(fatMeses); const ult = ms[ms.length-1]; fatLabel = 'Faturamento '+ult; fatVal = fatMeses[ult]; }
+    else if (cacheFaturamento && cacheFaturamento[cnpj]!=null) { fatVal = cacheFaturamento[cnpj]; }
     html += `<div class="card-cli ativo-status" onclick="abrirFicha('${cnpj.replace(/'/g,'')}')">
       <div class="card-cli-topo">
         <div class="card-cli-avatar">${iniciais(c['CLIENTE'])}</div>
@@ -1147,7 +1181,7 @@ function cardsClientes(lista) {
         ${tipo==='Eventual'?'<span class="tag tag-eventual">Eventual</span>':'<span class="tag tag-contrato">Contrato</span>'}
         ${grupo?`<span class="tag tag-grupo">${grupo}</span>`:''}
       </div>
-      <div class="card-cli-linha borda"><span>Faturamento abr</span><b>${fmtMoeda(fat)}</b></div>
+      <div class="card-cli-linha borda"><span>${fatLabel}</span><b>${fatVal!==''?fmtMoeda(fatVal):'—'}</b></div>
       <div class="card-cli-linha"><span>Consultor</span><span>${c['CONSULTOR']||'— a definir'}</span></div>
     </div>`;
   });
@@ -1193,6 +1227,19 @@ async function abrirFicha(cnpj, nome) {
   // se não existe na aba Clientes (ex: contrato sem cliente cadastrado), monta ficha mínima
   if (!c) c = { CLIENTE: nome || '(cliente não cadastrado na aba Clientes)', CNPJ: cnpj, TIPO: 'Contrato' };
   fichaClienteAtual = c;
+  // acha um campo do cliente de forma tolerante: ignora espaços, acentos e maiúsculas/minúsculas
+  // (resolve casos onde o cabeçalho da planilha tem espaço extra, acento ou caixa diferente)
+  const _norm = s => String(s||'').trim().toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,'');
+  const campoCli = (...nomes) => {
+    // 1) tenta match exato primeiro
+    for(const n of nomes){ if(c[n]!=null && String(c[n]).trim()!=='') return String(c[n]); }
+    // 2) tenta match tolerante (varre todas as chaves do objeto)
+    const alvos = nomes.map(_norm);
+    for(const k of Object.keys(c)){ if(alvos.includes(_norm(k)) && String(c[k]).trim()!=='') return String(c[k]); }
+    return '';
+  };
+  const endCli = campoCli('ENDERECO','ENDEREÇO','Endereco','Endereço','endereco','LOGRADOURO','Logradouro','ENDERECO_COLETA','ENDERECO COMPLETO','END');
+  const cepCli = campoCli('CEP','Cep','cep','CEP_COLETA');
   fichaAbaAtual = 'geral';
   const fat = cacheFaturamento ? cacheFaturamento[cnpj] : 0;
   const cont = document.getElementById('ficha-container');
@@ -1230,10 +1277,10 @@ async function abrirFicha(cnpj, nome) {
             <tr><td><i class="ti ti-mail" style="vertical-align:-2px;margin-right:6px;"></i>E-mail</td><td>${c['EMAIL']||'—'}</td></tr>
             <tr><td><i class="ti ti-phone" style="vertical-align:-2px;margin-right:6px;"></i>Telefone</td><td>${c['TELEFONE']||'—'}</td></tr>
             <tr><td><i class="ti ti-map-pin" style="vertical-align:-2px;margin-right:6px;"></i>Endereço</td><td>
-              ${podeEditarConsultorLead() ? `<input type="text" id="ficha-endereco" value="${(c['ENDERECO']||'').replace(/"/g,'&quot;')}" placeholder="—" style="padding:5px 8px;border:1.5px solid var(--cinza-300);border-radius:6px;font-size:13px;font-family:var(--fonte-corpo);width:60%;">
-              <button onclick="salvarEnderecoFicha('${cnpj.replace(/'/g,'')}')" style="margin-left:6px;padding:5px 10px;border:none;background:var(--verde-medio);color:white;border-radius:6px;cursor:pointer;font-size:12px;"><i class="ti ti-check"></i></button>` : (c['ENDERECO']||'—')}
+              ${podeEditarConsultorLead() ? `<input type="text" id="ficha-endereco" value="${endCli.replace(/"/g,'&quot;')}" placeholder="—" style="padding:5px 8px;border:1.5px solid var(--cinza-300);border-radius:6px;font-size:13px;font-family:var(--fonte-corpo);width:60%;">
+              <button onclick="salvarEnderecoFicha('${cnpj.replace(/'/g,'')}')" style="margin-left:6px;padding:5px 10px;border:none;background:var(--verde-medio);color:white;border-radius:6px;cursor:pointer;font-size:12px;"><i class="ti ti-check"></i></button>` : (endCli||'—')}
             </td></tr>
-            <tr><td><i class="ti ti-map-2" style="vertical-align:-2px;margin-right:6px;"></i>CEP</td><td>${c['CEP']||'—'}</td></tr>
+            <tr><td><i class="ti ti-map-2" style="vertical-align:-2px;margin-right:6px;"></i>CEP</td><td>${cepCli||'—'}</td></tr>
             <tr><td><i class="ti ti-calendar-repeat" style="vertical-align:-2px;margin-right:6px;"></i>Frequência de coleta</td><td>${c['FREQUENCIA_COLETA']||c['FREQUENCIA']||c['FREQUEN']||'—'}</td></tr>
             <tr><td><i class="ti ti-target" style="vertical-align:-2px;margin-right:6px;"></i>Mínima de coleta</td><td>${c['MINIMA_COLETA']||c['MINIMA']||c['MIN']||c['MIN_CONTRATUAL']||'—'}</td></tr>
             <tr><td><i class="ti ti-briefcase" style="vertical-align:-2px;margin-right:6px;"></i>Consultor</td><td>
@@ -1953,10 +2000,14 @@ async function renderAbaFaturamento(corpo) {
   const nomeCli = String(fichaClienteAtual['CLIENTE']||'').toUpperCase();
   // faturamento vem do módulo Financeiro (aba Fin_Faturamento, upload único) e coletas do relatório
   if (typeof FIN_garantirSheetJS==='function') { await new Promise(r=>FIN_garantirSheetJS(r)); }
-  if (typeof finCarregarDoSheets==='function') { try { await finCarregarDoSheets(['faturamento']); } catch(e){} }
+  const jaTemFat = (typeof FINdados!=='undefined' && FINdados.faturamento && FINdados.faturamento.length);
+  const jaTemColetas = (typeof FINdados!=='undefined' && FINdados.coletas && FINdados.coletas.length);
+  if ((!jaTemFat || !jaTemColetas) && typeof finCarregarDoSheets==='function') { try { await finCarregarDoSheets(['faturamento','coletas']); } catch(e){} }
   const rc = await buscarDados('Coletas_Mes');
   const normN = s => String(s||'').trim().toUpperCase().replace(/\s+/g,' ');
-  const fatItem = ((typeof FINdados!=='undefined' && FINdados.faturamento)?FINdados.faturamento:[]).find(x => normN(x.cliente)===normN(nomeCli));
+  // faturamento por mês (casa por nome, robusto) — helper global
+  const fatValores = (typeof faturamentoDoCliente==='function') ? faturamentoDoCliente(fichaClienteAtual['CLIENTE'], fichaClienteAtual['CNPJ']) : null;
+  const fatItem = fatValores ? { valores: fatValores } : null;
   const MESES_NOME = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
   function mesServico(nomeFaturado){ const base=String(nomeFaturado).trim().toLowerCase().replace('marco','março'); const idx=['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'].indexOf(base); return idx===-1?nomeFaturado:MESES_NOME[(idx-1+12)%12]; }
 
@@ -1986,6 +2037,24 @@ async function renderAbaFaturamento(corpo) {
     html += '<div style="font-size:13px;color:var(--cinza-500);padding:10px 0;">Sem faturamento para este cliente. Suba o relatório de Variação em <b>Financeiro › Relatórios</b>.</div>';
   }
   // quantidade de equipamentos coletados — histórico por mês + média (do relatório)
+  // coletas: primeiro tenta o upload novo (FINdados.coletas, por CNPJ, campo qtdeServ por mês);
+  // se não houver, cai no sistema antigo (aba Coletas_Mes com TOTAL_COLETAS).
+  const coletasNovas = (typeof coletasDoCliente==='function') ? coletasDoCliente(fichaClienteAtual['CNPJ']) : null;
+  function rotMes(m){ const ab=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez']; const s=String(m); const mm=s.match(/^(\d{4})-(\d{2})/); if(mm){return ab[parseInt(mm[2],10)-1]+'/'+mm[1].slice(-2);} return m; }
+  if (coletasNovas && Object.keys(coletasNovas).length) {
+    const meses = Object.keys(coletasNovas).sort();
+    const totais = meses.map(m=>coletasNovas[m]);
+    const media = totais.length ? Math.round(totais.reduce((a,b)=>a+b,0)/totais.length) : 0;
+    const ultMes = meses[meses.length-1];
+    html += `<div style="font-size:12px;font-weight:600;color:var(--cinza-600);margin:16px 0 8px;">Equipamentos coletados</div>`;
+    html += `<div style="display:flex;gap:10px;margin-bottom:10px;">
+      <div style="flex:1;background:var(--verde-claro-bg);border-radius:8px;padding:10px;text-align:center;"><div style="font-size:22px;font-weight:700;color:var(--verde-escuro);font-family:var(--fonte-display);">${media}</div><div style="font-size:11px;color:var(--cinza-600);">média/mês</div></div>
+      <div style="flex:1;background:var(--cinza-100);border-radius:8px;padding:10px;text-align:center;"><div style="font-size:22px;font-weight:700;color:var(--cinza-800);font-family:var(--fonte-display);">${coletasNovas[ultMes]}</div><div style="font-size:11px;color:var(--cinza-600);">último (${rotMes(ultMes)})</div></div>
+    </div>`;
+    html += '<table class="ficha-tab"><tr style="background:var(--cinza-100);"><td style="font-weight:600;">Mês</td><td style="font-weight:600;">Equipamentos coletados</td></tr>';
+    meses.forEach(m => { html += `<tr><td>${rotMes(m)}</td><td><b>${coletasNovas[m]}</b></td></tr>`; });
+    html += '</table>';
+  } else {
   const todasColetas = (rc.ok?rc.linhas:[]).filter(l => cnpjLimpo(l['CNPJ'])===alvo);
   if (todasColetas.length) {
     // ordenar por mês
@@ -1993,7 +2062,6 @@ async function renderAbaFaturamento(corpo) {
     const totais = todasColetas.map(c=>num(c['TOTAL_COLETAS']));
     const media = totais.length ? Math.round(totais.reduce((a,b)=>a+b,0)/totais.length) : 0;
     const ultimo = todasColetas[todasColetas.length-1];
-    function rotMes(m){ const ab=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez']; const s=String(m); const mm=s.match(/^(\d{4})-(\d{2})/); if(mm){return ab[parseInt(mm[2],10)-1]+'/'+mm[1].slice(-2);} return m; }
     html += `<div style="font-size:12px;font-weight:600;color:var(--cinza-600);margin:16px 0 8px;">Equipamentos coletados</div>`;
     html += `<div style="display:flex;gap:10px;margin-bottom:10px;">
       <div style="flex:1;background:var(--verde-claro-bg);border-radius:8px;padding:10px;text-align:center;"><div style="font-size:22px;font-weight:700;color:var(--verde-escuro);font-family:var(--fonte-display);">${media}</div><div style="font-size:11px;color:var(--cinza-600);">média/mês</div></div>
@@ -2008,6 +2076,7 @@ async function renderAbaFaturamento(corpo) {
     html += '</table>';
   } else {
     html += '<div style="font-size:13px;color:var(--cinza-500);padding:10px 0;">Sem coletas registradas no relatório de serviços.</div>';
+  }
   }
   corpo.innerHTML = html;
 }
@@ -6820,7 +6889,95 @@ function blocoFechamentosComissao() {
     </div>
     ${blocoTodos}
     ${blocosMes}
+  </div>` + blocoFechamentosComercial();
+}
+
+// Tabela consolidada do COMERCIAL (soma de todos os consultores), separada por CONTRATO / EVENTUAL / ASSESSORIA.
+// Não conta aditivos nem eventuais recicláveis (foraDoTotal). Filtro por mês OU por período (De/Até).
+function blocoFechamentosComercial() {
+  let fech = [];
+  try { if (typeof finCarregar==='function') { finCarregar(); fech = (typeof FINdados!=='undefined' && FINdados.fechamentos) ? FINdados.fechamentos : []; } } catch(e) {}
+  if (!fech.length) return '';
+  const contam = fech.filter(f=>!f.foraDoTotal);
+  const rotMes = (m)=> (typeof finRotMes==='function' && m) ? finRotMes(m) : m;
+  const meses = [...new Set(contam.map(f=>f.mesRef).filter(m=>m&&!String(m).endsWith('-00')))].sort();
+  const categoria = (t) => { const s=String(t||'').toUpperCase(); if(s.includes('ASSESSOR'))return 'ASSESSORIA'; if(s.includes('CONTRATO'))return 'CONTRATO'; if(s.includes('EVENTUAL'))return 'EVENTUAL'; return 'OUTROS'; };
+  const cor = { CONTRATO:'var(--verde-medio)', EVENTUAL:'#185FA5', ASSESSORIA:'var(--roxo)', OUTROS:'var(--cinza-500)' };
+  const nome = { CONTRATO:'Contrato', EVENTUAL:'Eventual', ASSESSORIA:'Assessoria', OUTROS:'Outros' };
+  const montaTabela = (arr) => {
+    const grupos = { CONTRATO:{n:0,v:0}, EVENTUAL:{n:0,v:0}, ASSESSORIA:{n:0,v:0}, OUTROS:{n:0,v:0} };
+    arr.forEach(f=>{ const g=categoria(f.tipo); grupos[g].n++; grupos[g].v+=(f.valor||0); });
+    const totN=arr.length, totV=arr.reduce((s,x)=>s+(x.valor||0),0);
+    const ordem = ['CONTRATO','EVENTUAL','ASSESSORIA']; if(grupos.OUTROS.n>0) ordem.push('OUTROS');
+    const linhas = ordem.map(g=>`<tr>
+        <td style="padding:8px 0;"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${cor[g]};margin-right:8px;"></span>${nome[g]}</td>
+        <td style="text-align:right;">${grupos[g].n}</td>
+        <td style="text-align:right;font-weight:600;">${fmtMoeda(grupos[g].v)}</td>
+        <td style="text-align:right;color:var(--cinza-500);">${totV?(grupos[g].v/totV*100).toFixed(1):'0'}%</td>
+      </tr>`).join('');
+    return `<table style="width:100%;font-size:13px;border-collapse:collapse;">
+      <thead><tr style="border-bottom:2px solid var(--cinza-200);"><th style="text-align:left;padding:8px 0;">Tipo</th><th style="text-align:right;">Fechamentos</th><th style="text-align:right;">Valor</th><th style="text-align:right;">% do total</th></tr></thead>
+      <tbody>${linhas}
+        <tr style="border-top:2px solid var(--cinza-200);"><td style="padding:8px 0;font-weight:700;">TOTAL</td><td style="text-align:right;font-weight:700;">${totN}</td><td style="text-align:right;font-weight:700;color:var(--verde-escuro);">${fmtMoeda(totV)}</td><td style="text-align:right;">100%</td></tr>
+      </tbody></table>`;
+  };
+  const blocoTodos = `<div class="fcom-bloco" data-fcom="todos">${montaTabela(contam)}</div>`;
+  const blocosMes = meses.map(m=>`<div class="fcom-bloco" data-fcom="${m}" style="display:none;">${montaTabela(contam.filter(f=>f.mesRef===m))}</div>`).join('');
+  const blocoPeriodo = `<div class="fcom-bloco" data-fcom="periodo" style="display:none;"><div id="fcom-periodo-alvo"></div></div>`;
+  const dadosJSON = JSON.stringify(contam.map(f=>({t:categoria(f.tipo),v:f.valor||0,m:f.mesRef})));
+  const selMes = `<select onchange="fcomFiltrar(this)" style="padding:6px 10px;border:1.5px solid var(--cinza-300);border-radius:8px;font-size:12px;">
+      <option value="todos">Todos os meses</option>
+      ${meses.map(m=>`<option value="${m}">${rotMes(m)}</option>`).join('')}
+      <option value="periodo">Período específico...</option>
+    </select>`;
+  const periodoUI = `<div class="fcom-periodo-ui" style="display:none;gap:6px;align-items:center;margin-top:10px;font-size:12px;color:var(--cinza-600);">
+      De <select class="fcom-de" style="padding:5px 8px;border:1.5px solid var(--cinza-300);border-radius:6px;">${meses.map(m=>`<option value="${m}">${rotMes(m)}</option>`).join('')}</select>
+      até <select class="fcom-ate" style="padding:5px 8px;border:1.5px solid var(--cinza-300);border-radius:6px;">${meses.map((m,i)=>`<option value="${m}" ${i===meses.length-1?'selected':''}>${rotMes(m)}</option>`).join('')}</select>
+      <button onclick="fcomCalcPeriodo(this)" style="padding:5px 12px;border:none;background:var(--verde-medio);color:white;border-radius:6px;cursor:pointer;font-size:12px;">Ver</button>
+    </div>`;
+  return `<div class="fcom-wrap" data-fcom-json='${dadosJSON.replace(/'/g,"&#39;")}' style="background:white;border:1px solid var(--cinza-200);border-radius:12px;padding:20px;margin-top:18px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px;">
+      <h3 style="font-family:var(--fonte-display);font-size:15px;margin:0;">Fechamentos do comercial (por tipo)</h3>
+      ${selMes}
+    </div>
+    <div style="font-size:12px;color:var(--cinza-500);margin-bottom:12px;"><i class="ti ti-info-circle"></i> Soma de todos os consultores, separada por tipo. Não inclui aditivos nem eventuais recicláveis.</div>
+    ${periodoUI}
+    ${blocoTodos}
+    ${blocosMes}
+    ${blocoPeriodo}
   </div>`;
+}
+function fcomFiltrar(sel) {
+  const w = sel.closest('.fcom-wrap'); const v = sel.value;
+  w.querySelector('.fcom-periodo-ui').style.display = (v==='periodo') ? 'flex' : 'none';
+  w.querySelectorAll('.fcom-bloco').forEach(b=>{ b.style.display = b.getAttribute('data-fcom')===v ? 'block' : 'none'; });
+}
+function fcomCalcPeriodo(btn) {
+  const w = btn.closest('.fcom-wrap');
+  const de = w.querySelector('.fcom-de').value, ate = w.querySelector('.fcom-ate').value;
+  let dados = []; try { dados = JSON.parse(w.getAttribute('data-fcom-json')||'[]'); } catch(e){}
+  const ini = de<ate?de:ate, fim = de<ate?ate:de;
+  const arr = dados.filter(d=> d.m>=ini && d.m<=fim );
+  const grupos = { CONTRATO:{n:0,v:0}, EVENTUAL:{n:0,v:0}, ASSESSORIA:{n:0,v:0}, OUTROS:{n:0,v:0} };
+  arr.forEach(d=>{ const g=grupos[d.t]||grupos.OUTROS; g.n++; g.v+=d.v; });
+  const totN=arr.length, totV=arr.reduce((s,x)=>s+x.v,0);
+  const cor = { CONTRATO:'var(--verde-medio)', EVENTUAL:'#185FA5', ASSESSORIA:'var(--roxo)', OUTROS:'var(--cinza-500)' };
+  const nome = { CONTRATO:'Contrato', EVENTUAL:'Eventual', ASSESSORIA:'Assessoria', OUTROS:'Outros' };
+  const ordem = ['CONTRATO','EVENTUAL','ASSESSORIA']; if(grupos.OUTROS.n>0) ordem.push('OUTROS');
+  const linhas = ordem.map(g=>`<tr>
+      <td style="padding:8px 0;"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${cor[g]};margin-right:8px;"></span>${nome[g]}</td>
+      <td style="text-align:right;">${grupos[g].n}</td>
+      <td style="text-align:right;font-weight:600;">${fmtMoeda(grupos[g].v)}</td>
+      <td style="text-align:right;color:var(--cinza-500);">${totV?(grupos[g].v/totV*100).toFixed(1):'0'}%</td>
+    </tr>`).join('');
+  const rotMes = (m)=> (typeof finRotMes==='function' && m) ? finRotMes(m) : m;
+  w.querySelector('#fcom-periodo-alvo').innerHTML = `
+    <div style="font-size:12px;color:var(--verde-escuro);font-weight:600;margin-bottom:8px;">${rotMes(ini)} até ${rotMes(fim)}</div>
+    <table style="width:100%;font-size:13px;border-collapse:collapse;">
+      <thead><tr style="border-bottom:2px solid var(--cinza-200);"><th style="text-align:left;padding:8px 0;">Tipo</th><th style="text-align:right;">Fechamentos</th><th style="text-align:right;">Valor</th><th style="text-align:right;">% do total</th></tr></thead>
+      <tbody>${linhas}
+        <tr style="border-top:2px solid var(--cinza-200);"><td style="padding:8px 0;font-weight:700;">TOTAL</td><td style="text-align:right;font-weight:700;">${totN}</td><td style="text-align:right;font-weight:700;color:var(--verde-escuro);">${fmtMoeda(totV)}</td><td style="text-align:right;">100%</td></tr>
+      </tbody></table>`;
 }
 
 // ---- Abrir detalhes de um lead (clique no card do Kanban) ----
@@ -7764,6 +7921,20 @@ function finMesPag(x){ return x._mesPagamento || finYmDeData(x.pagamento); }
 // A despesa NÃO entra aqui — vem dos relatórios de pagar que a Mafe sobe normalmente.
 // Regra: se o mês tiver relatório de receber subido, o relatório manda; senão, usa estes valores.
 const FIN_RECEITA_HISTORICA = {
+  // 2025 — histórico completo (inclui despesa, que veio dos relatórios do ano; 2026 não tem despesa fixa)
+  '2025-01': { bruto: 1777137.69, liquido: 1675526.71, recebido: 1896009.45, despesa: 1217722.44 },
+  '2025-02': { bruto: 1875492.00, liquido: 1767921.17, recebido: 1806052.33, despesa: 1085054.32 },
+  '2025-03': { bruto: 1896005.61, liquido: 1789524.26, recebido: 1835553.43, despesa: 1068640.79 },
+  '2025-04': { bruto: 2115843.47, liquido: 1995683.16, recebido: 2000677.65, despesa: 1277369.30 },
+  '2025-05': { bruto: 2031384.95, liquido: 1914678.22, recebido: 2094558.52, despesa: 1558300.82 },
+  '2025-06': { bruto: 2379063.68, liquido: 2247963.15, recebido: 2333925.50, despesa: 886782.01 },
+  '2025-07': { bruto: 2155615.31, liquido: 2032863.11, recebido: 2155440.49, despesa: 1382342.74 },
+  '2025-08': { bruto: 2309728.89, liquido: 2180831.95, recebido: 2048835.44, despesa: 3841418.81 },
+  '2025-09': { bruto: 2426751.33, liquido: 2291574.48, recebido: 2344373.44, despesa: 2099626.02 },
+  '2025-10': { bruto: 2500509.23, liquido: 2362123.82, recebido: 2386106.32, despesa: 1281701.58 },
+  '2025-11': { bruto: 2735256.17, liquido: 2578983.91, recebido: 2711238.06, despesa: 1273019.55 },
+  '2025-12': { bruto: 2418228.98, liquido: 2281334.87, recebido: 2626499.91, despesa: 1429612.19 },
+  // 2026 — só receita fixa (a despesa vem dos relatórios de pagar que a Mafe sobe)
   '2026-01': { bruto: 2458688.48, liquido: 2317026.87, recebido: 2187688.42 },
   '2026-02': { bruto: 2264213.09, liquido: 2126857.38, recebido: 2630394.75 },
   '2026-03': { bruto: 2719801.49, liquido: 2568799.13, recebido: 2522616.42 },
@@ -7795,13 +7966,18 @@ function FIN_renderSaude(){
   Object.keys(receita).forEach(k=>delete receita[k]); Object.assign(receita, receitaR);
   Object.keys(receitaBruta).forEach(k=>delete receitaBruta[k]); Object.assign(receitaBruta, receitaBrutaR);
   Object.keys(despesa).forEach(k=>delete despesa[k]); Object.assign(despesa, despesaR);
-  // meses que têm relatório de receber subido (já normalizados)
+  // meses que têm relatório subido (receber e pagar, separadamente — já normalizados)
   const mesesComRelatorio = new Set(Object.keys(receita));
-  // adiciona os meses históricos fixos SÓ se não houver relatório daquele mês (relatório manda)
+  const mesesComDespesa = new Set(Object.keys(despesa));
+  // adiciona os valores históricos fixos SÓ onde não há relatório daquele mês (relatório manda)
   Object.entries(FIN_RECEITA_HISTORICA).forEach(([ym, v])=>{
     if (!mesesComRelatorio.has(ym)) {
       receita[ym] = v.liquido;         // receita líquida (padrão da tela)
       receitaBruta[ym] = v.bruto;      // bruto
+    }
+    // despesa histórica (só 2025 tem): aplica se o mês não tiver relatório de pagar subido
+    if (v.despesa!=null && !mesesComDespesa.has(ym)) {
+      despesa[ym] = v.despesa;
     }
   });
   const meses=[...new Set([...Object.keys(receita),...Object.keys(despesa)])].filter(Boolean).sort();
@@ -7849,7 +8025,7 @@ function FIN_renderSaude(){
       <h2>Receita vs Despesa por mês</h2>
       <table><thead><tr><th>Mês</th><th>Receita</th><th>vs mês anterior</th><th>Despesa</th><th>Resultado</th><th>Margem</th></tr></thead>
       <tbody>${linhas||'<tr><td colspan="6" class="vazio">Sem dados no período.</td></tr>'}</tbody></table>
-      <div style="font-size:11px;color:var(--cinza-500);margin-top:8px;"><i class="ti ti-info-circle"></i> Janeiro a Abril/2026: receita vem de registro histórico (sistema antigo). Maio em diante vem dos relatórios. A despesa de todos os meses vem dos relatórios de Contas a Pagar que você sobe.</div>
+      <div style="font-size:11px;color:var(--cinza-500);margin-top:8px;"><i class="ti ti-info-circle"></i> Todo o ano de 2025 e Janeiro a Abril/2026: dados de registro histórico. Maio/2026 em diante vem dos relatórios subidos (que têm prioridade). Em 2025 a despesa também é histórica; em 2026 a despesa vem dos relatórios de Contas a Pagar.</div>
     </div>
     <div class="card">
       <h2>Leitura automática</h2>
@@ -8303,9 +8479,23 @@ function FIN_processarFaturamentoVar(wb, st){
   st.textContent=`${n} clientes carregados (meses: ${nomesMeses.join(', ')}).`; st.style.color='var(--verde-medio)';
 }
 
+// reescreve no Sheets todo o faturamento que está em memória (corrige quando só um mês foi salvo lá)
+async function FIN_reenviarFaturamento(){
+  if(!FINdados.faturamento || !FINdados.faturamento.length){ alert('Não há faturamento em memória. Suba o relatório primeiro.'); return; }
+  const nMeses = Object.keys(FINdados.faturamento[0].valores||{}).length;
+  if(!confirm(`Regravar no sistema o faturamento de ${FINdados.faturamento.length} clientes (${nMeses} meses)? Isso corrige a ficha do cliente pra todo mundo.`)) return;
+  try {
+    if (typeof finInvalidarCache==='function') finInvalidarCache();
+    await finEnviarSheetsCompleto('faturamento', null);
+    alert('Faturamento reenviado! Agora a ficha do cliente mostra todos os meses.');
+  } catch(e) { alert('Erro ao reenviar: '+e.message); }
+}
+
 function FIN_renderFaturamentoVar(){
   const p=document.getElementById('p-faturamento');
   if(!FINdados.faturamento.length){ p.innerHTML='<div class="card"><div class="vazio">Suba o relatório de Variação de Faturamento (.xlsx) na aba Relatórios.</div></div>'; return; }
+  // quantos meses cada cliente tem em memória (pra o diagnóstico do botão de reenvio)
+  const mesesMem = FINdados.faturamento[0] ? Object.keys(FINdados.faturamento[0].valores||{}).length : 0;
   const meses = window._fatVarMeses || Object.keys(FINdados.faturamento[0].valores);
   const mesAtual = window._fatVarMes || meses[meses.length-1];
   const iAtual = meses.indexOf(mesAtual);
@@ -8343,7 +8533,9 @@ function FIN_renderFaturamentoVar(){
         <option value="nome" ${ordem==='nome'?'selected':''}>Nome (A-Z)</option>
       </select>
       <button class="btn sec" onclick="window.print()"><i class="ti ti-printer"></i> Exportar</button>
+      <button class="btn sec" onclick="FIN_reenviarFaturamento()" title="Regrava no sistema todos os meses (corrige se na ficha do cliente só aparece um mês)"><i class="ti ti-cloud-upload"></i> Reenviar ao sistema</button>
     </div>
+    <div style="font-size:11px;color:var(--cinza-500);margin:-4px 0 10px;"><i class="ti ti-info-circle"></i> ${mesesMem} ${mesesMem===1?'mês carregado':'meses carregados'} em memória. Se na ficha do cliente só aparecer um mês, clique em "Reenviar ao sistema".</div>
     <div class="kpis">
       <div class="kpi"><div class="num">${finFmtM(totAtual)}</div><div class="lbl">Faturamento ${mesAtual}</div></div>
       ${mesAnt?`<div class="kpi ${varTot>=0?'':'verm'}"><div class="num" style="color:${varTot>=0?'var(--verde-medio)':'var(--vermelho)'};">${varTot>=0?'+':''}${varTot.toFixed(1)}%</div><div class="lbl">vs ${mesAnt}</div></div>`:''}
