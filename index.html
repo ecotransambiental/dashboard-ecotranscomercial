@@ -3335,6 +3335,19 @@ async function carregarInad() {
   return cacheInad;
 }
 
+// status possíveis do caso de cobrança + cores
+const INAD_STATUS = ['Em andamento','Aguardando retorno do cliente','No jurídico','Finalizado'];
+function inadStatusInfo(s){
+  const st = String(s||'').trim() || 'Em andamento';
+  const mapa = {
+    'Em andamento':                   { cor:'#2c5282', bg:'#eef4fb' },
+    'Aguardando retorno do cliente':  { cor:'#8a6d00', bg:'var(--amarelo-bg)' },
+    'No jurídico':                    { cor:'#6b46c1', bg:'#ede9fe' },
+    'Finalizado':                     { cor:'var(--verde-medio)', bg:'var(--verde-claro-bg)' },
+  };
+  return { nome:st, ...(mapa[st] || mapa['Em andamento']) };
+}
+
 async function renderInadimplencia(area) {
   area.innerHTML = `<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando inadimplência...</h2></div>`;
   const lista = await carregarInad();
@@ -3344,20 +3357,36 @@ async function renderInadimplencia(area) {
   }
   const total = lista.reduce((s,l)=>s+(parseFloat(l['VALOR_ABERTO'])||0),0);
   const podeEnviar = usuarioAtual.perfil==='financeiro' || usuarioAtual.perfil==='admin';
+  const filtro = window._inadStatusFiltro || 'todos';
+  // aplica o filtro por status do caso (STATUS_CASO vazio conta como "Em andamento")
+  const listaF = filtro==='todos' ? lista : lista.filter(l => (String(l['STATUS_CASO']||'').trim()||'Em andamento') === filtro);
+  // contagem por status pro dropdown
+  const cont = {}; INAD_STATUS.forEach(s=>cont[s]=0);
+  lista.forEach(l=>{ const s=String(l['STATUS_CASO']||'').trim()||'Em andamento'; cont[s]=(cont[s]||0)+1; });
   let html = `
     <div class="kpi-funil" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));">
       <div class="kpi-card" style="border-top:3px solid var(--vermelho);"><div class="kpi-num" style="color:var(--vermelho);">${lista.length}</div><div class="kpi-lbl">Inadimplentes</div></div>
       <div class="kpi-card" style="border-top:3px solid var(--vermelho);"><div class="kpi-num" style="color:var(--vermelho);font-size:22px;">${fmtMoeda(total)}</div><div class="kpi-lbl">Total em aberto</div></div>
       <div class="kpi-card" style="border-top:3px solid var(--laranja);"><div class="kpi-num" style="color:var(--laranja);">${lista.filter(l=>l['AGING']==='90+').length}</div><div class="kpi-lbl">Mais de 90 dias</div></div>
     </div>
+    <div style="display:flex;align-items:center;gap:10px;margin:4px 0 14px;flex-wrap:wrap;">
+      <span style="font-size:13px;color:var(--cinza-600);"><i class="ti ti-filter"></i> Status do caso:</span>
+      <select class="filtro-sel" onchange="window._inadStatusFiltro=this.value;renderInadimplencia(document.getElementById('area-conteudo'))" style="min-width:220px;">
+        <option value="todos" ${filtro==='todos'?'selected':''}>Todos (${lista.length})</option>
+        ${INAD_STATUS.map(s=>`<option value="${s}" ${filtro===s?'selected':''}>${s} (${cont[s]||0})</option>`).join('')}
+      </select>
+    </div>
     <div class="grid-cards">`;
-  lista.forEach(l => {
+  if (!listaF.length) html += `<div style="grid-column:1/-1;color:var(--cinza-500);font-size:13px;padding:20px;text-align:center;">Nenhum caso com status "${filtro}".</div>`;
+  listaF.forEach(l => {
     const ag = String(l['AGING']||'');
     const agCls = ag==='0-30'?'a30':ag==='31-60'?'a30':ag==='61-90'?'a60':'a90';
     const agBadge = ag==='0-30'?'ag-30':ag==='31-60'?'ag-30':ag==='61-90'?'ag-60':'ag-90';
+    const cnpjJs = String(l['CNPJ']).replace(/'/g,'');
+    const stInfo = inadStatusInfo(l['STATUS_CASO']);
     html += `<div class="inad-card ${agCls}">
       <div class="reaj-topo">
-        <div style="min-width:0;"><div class="reaj-nome">${l['CLIENTE']||'—'}</div><div class="reaj-cnpj">${l['CNPJ']||''}</div></div>
+        <div class="clicavel-ficha" style="min-width:0;cursor:pointer;" onclick="abrirFicha('${cnpjJs}')" title="Abrir ficha do cliente"><div class="reaj-nome" style="text-decoration:underline;text-decoration-style:dotted;">${l['CLIENTE']||'—'}</div><div class="reaj-cnpj">${l['CNPJ']||''}</div></div>
         <span class="aging-badge ${agBadge}">${ag} dias</span>
       </div>
       <div class="reaj-linhas">
@@ -3365,9 +3394,15 @@ async function renderInadimplencia(area) {
         <div><span>Atraso</span><b>${l['DIAS_ATRASO']||'—'}d</b></div>
       </div>
       ${l['OBS']?`<div style="font-size:12px;color:var(--cinza-600);margin-top:8px;font-style:italic;">"${l['OBS']}"</div>`:''}
-      <div style="margin-top:12px;display:flex;gap:8px;align-items:center;">
+      <div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span class="badge" style="background:${stInfo.bg};color:${stInfo.cor};font-size:10.5px;padding:3px 9px;border-radius:6px;font-weight:600;">${stInfo.nome}</span>
+        ${podeEnviar ? `<select onchange="atualizarStatusInadFront('${cnpjJs}',this.value)" style="font-size:11px;padding:4px 6px;border:1.5px solid var(--cinza-300);border-radius:7px;cursor:pointer;margin-left:auto;">
+          ${INAD_STATUS.map(s=>`<option value="${s}" ${stInfo.nome===s?'selected':''}>${s}</option>`).join('')}
+        </select>` : ''}
+      </div>
+      <div style="margin-top:10px;display:flex;gap:8px;align-items:center;">
         ${podeEnviar
-          ? `<button class="ficha-btn-primario" style="flex:1;padding:8px;border:none;border-radius:8px;font-size:12px;cursor:pointer;" onclick="enviarEmailInad('${String(l['CNPJ']).replace(/'/g,'')}','${(l['CLIENTE']||'').replace(/'/g,'')}','${l['VALOR_ABERTO']}','${l['DIAS_ATRASO']}','${(l['OBS']||'').replace(/'/g,'')}')"><i class="ti ti-mail"></i> Enviar e-mail</button>`
+          ? `<button class="ficha-btn-primario" style="flex:1;padding:8px;border:none;border-radius:8px;font-size:12px;cursor:pointer;" onclick="enviarEmailInad('${cnpjJs}','${(l['CLIENTE']||'').replace(/'/g,'')}','${l['VALOR_ABERTO']}','${l['DIAS_ATRASO']}','${(l['OBS']||'').replace(/'/g,'')}')"><i class="ti ti-mail"></i> Enviar e-mail</button>`
           : ''}
         ${l['EMAIL_ENVIADO'] && String(l['EMAIL_ENVIADO']).startsWith('Sim')?`<span style="font-size:11px;color:var(--verde-ok);"><i class="ti ti-check"></i> ${l['EMAIL_ENVIADO']}</span>`:''}
       </div>
@@ -3375,6 +3410,20 @@ async function renderInadimplencia(area) {
   });
   html += '</div>';
   area.innerHTML = html;
+}
+
+// salva a troca de status do caso no backend e atualiza a tela
+async function atualizarStatusInadFront(cnpj, statusCaso) {
+  try {
+    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
+      acao:'atualizarStatusInad', token: sessaoToken, dados:{ cnpj, statusCaso }
+    })});
+    const r = await resp.json();
+    if (!r.ok) { alert('Erro ao salvar status: '+(r.erro||'republique o Apps Script.')); return; }
+    // atualiza o cache local pra não precisar refazer a busca
+    if (Array.isArray(cacheInad)) { const it = cacheInad.find(x=>String(x['CNPJ'])===String(cnpj)); if (it) it['STATUS_CASO'] = statusCaso; }
+    renderInadimplencia(document.getElementById('area-conteudo'));
+  } catch(e) { alert('Erro de conexão ao salvar o status.'); }
 }
 
 function enviarEmailInad(cnpj, cliente, valor, dias, obs) {
