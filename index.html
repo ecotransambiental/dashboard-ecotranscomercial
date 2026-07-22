@@ -3561,7 +3561,7 @@ async function renderGraficos(area) {
   const reajLinhas = rr.ok ? rr.linhas : [];
   const inad = await carregarInad();
 
-  // detectar colunas de mês (abr/26, mai/26...) na aba Faturamento
+  // detectar colunas de mês (abr/26, mai/26...) na aba Faturamento (fonte antiga — usada só pelo impacto de reajustes)
   const mesesCols = (rf.ok ? rf.colunas : []).filter(c => {
     const s = String(c).trim();
     if (s === 'CNPJ' || s === 'CLIENTE') return false;
@@ -3570,13 +3570,20 @@ async function renderGraficos(area) {
     return true;
   }).map(c => String(c).trim());
 
+  // FONTE DO GRÁFICO DE VARIAÇÃO: faturamento do módulo Financeiro (aba Fin_Faturamento), que traz TODOS os meses.
+  // Antes o gráfico lia de buscarDados('Faturamento') (aba antiga), que só tinha abril — por isso mostrava um mês só.
+  if (typeof FIN_garantirSheetJS==='function') { await new Promise(r=>FIN_garantirSheetJS(r)); }
+  if (typeof finCarregarDoSheets==='function') { try { await finCarregarDoSheets(['faturamento']); } catch(e){} }
+  const fatVar = (typeof FINdados!=='undefined' && FINdados.faturamento) ? FINdados.faturamento : [];
+  const mesesVar = (fatVar.length ? (window._fatVarMeses || Object.keys(fatVar[0].valores||{})) : []);
+
   area.innerHTML = `
     <div style="margin-bottom:18px;">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
         <h3 style="font-family:var(--fonte-display);font-size:16px;color:var(--cinza-900);margin:0;">Variação de faturamento</h3>
         <select class="filtro-sel" id="g-cliente" onchange="atualizaGraficoFat()" style="margin-left:auto;min-width:200px;">
           <option value="__todos">Empresa toda (somado)</option>
-          ${fatLinhas.map(l=>`<option value="${String(l['CNPJ'])}">${l['CLIENTE']}</option>`).join('')}
+          ${fatVar.map(l=>`<option value="${String(l.cliente).replace(/"/g,'&quot;')}">${l.cliente}</option>`).join('')}
         </select>
       </div>
       <div style="background:white;border:1px solid var(--cinza-200);border-radius:12px;padding:16px;height:280px;"><canvas id="chart-fat"></canvas></div>
@@ -3605,10 +3612,13 @@ async function renderGraficos(area) {
       </div>
     </div>`;
 
-  // guardar dados pro filtro
+  // guardar dados pro filtro (fonte antiga — impacto de reajustes casa por CNPJ)
   window._fatLinhas = fatLinhas;
   window._mesesCols = mesesCols;
   window._reajLinhas = reajLinhas;
+  // dados do gráfico de variação (fonte nova, com todos os meses)
+  window._fatChartLinhas = fatVar;
+  window._fatChartMeses = mesesVar;
 
   // popular dropdown de meses de reajuste (a partir das datas de último reajuste)
   setTimeout(()=>{
@@ -3701,15 +3711,15 @@ function normalizaIndice(ind) {
 }
 
 function atualizaGraficoFat() {
-  const cnpj = (document.getElementById('g-cliente')||{}).value || '__todos';
-  const meses = window._mesesCols || [];
-  const linhas = window._fatLinhas || [];
+  const sel = (document.getElementById('g-cliente')||{}).value || '__todos';
+  const meses = window._fatChartMeses || [];
+  const linhas = window._fatChartLinhas || [];
   let valores;
-  if (cnpj === '__todos') {
-    valores = meses.map(m => Math.round(linhas.reduce((s,l)=>s+(parseFloat(l[m])||0),0)));
+  if (sel === '__todos') {
+    valores = meses.map(m => Math.round(linhas.reduce((s,l)=>s+(parseFloat((l.valores||{})[m])||0),0)));
   } else {
-    const cli = linhas.find(l=>String(l['CNPJ'])===cnpj);
-    valores = meses.map(m => cli ? Math.round(parseFloat(cli[m])||0) : 0);
+    const cli = linhas.find(l=>String(l.cliente)===sel);
+    valores = meses.map(m => cli ? Math.round(parseFloat((cli.valores||{})[m])||0) : 0);
   }
   const ctx = document.getElementById('chart-fat');
   if (!ctx) return;
