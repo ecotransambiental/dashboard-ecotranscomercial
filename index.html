@@ -3547,8 +3547,9 @@ function abrirFormInadimplencia(cnpj) {
             <input type="number" id="inad-valor" step="0.01" placeholder="ex: 4500.00" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;">
           </div>
           <div style="margin-bottom:14px;">
-            <label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Dias de atraso</label>
-            <input type="number" id="inad-dias" placeholder="ex: 45" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;">
+            <label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Vencimento da nota</label>
+            <input type="date" id="inad-venc" oninput="calcDiasInad()" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;">
+            <div id="inad-diascalc" style="font-size:12px;color:var(--cinza-500);margin-top:5px;"></div>
           </div>
           <div style="margin-bottom:16px;">
             <label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Observação</label>
@@ -3564,16 +3565,34 @@ function abrirFormInadimplencia(cnpj) {
     </div>`;
 }
 
+// dias de atraso = hoje − vencimento (calculado automaticamente)
+function diasAtrasoDeVenc(venc){
+  if(!venc) return null;
+  const p=String(venc).split('-'); if(p.length<3) return null;
+  const d=new Date(+p[0], +p[1]-1, +p[2]);
+  const hoje=new Date(); hoje.setHours(0,0,0,0);
+  return Math.floor((hoje - d)/(1000*60*60*24));
+}
+function calcDiasInad(){
+  const el=document.getElementById('inad-diascalc'); if(!el) return;
+  const dias=diasAtrasoDeVenc((document.getElementById('inad-venc')||{}).value);
+  if(dias==null){ el.textContent=''; return; }
+  el.innerHTML = dias<0 ? `<span style="color:var(--cinza-500);">Ainda não venceu (faltam ${Math.abs(dias)} dia(s)).</span>`
+    : `<b style="color:var(--vermelho);">${dias} dia(s) de atraso</b> (calculado automaticamente).`;
+}
+
 async function salvarInadimplencia(cnpj, cliente) {
   const valor = document.getElementById('inad-valor').value;
-  const dias = document.getElementById('inad-dias').value;
+  const venc = document.getElementById('inad-venc').value;
+  const dias = diasAtrasoDeVenc(venc);
   const obs = document.getElementById('inad-obs').value;
-  if (!valor || !dias) { document.getElementById('inad-msg').innerHTML = '<div class="sem-acesso" style="margin-top:12px;">Preencha valor e dias.</div>'; return; }
+  if (!valor || !venc) { document.getElementById('inad-msg').innerHTML = '<div class="sem-acesso" style="margin-top:12px;">Preencha o valor e o vencimento da nota.</div>'; return; }
+  if (dias == null || dias < 0) { document.getElementById('inad-msg').innerHTML = '<div class="sem-acesso" style="margin-top:12px;">O vencimento informado ainda não passou — confira a data.</div>'; return; }
   document.getElementById('inad-msg').innerHTML = '<div style="text-align:center;padding:12px;color:var(--cinza-500);">Salvando...</div>';
   try {
     const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
       acao:'inadimplencia', token: sessaoToken,
-      dados: { cnpj, cliente, valor, dias, obs }
+      dados: { cnpj, cliente, valor, dias, vencimento: venc, obs }
     })});
     const r = await resp.json();
     if (!r.ok) { document.getElementById('inad-msg').innerHTML = `<div class="sem-acesso" style="margin-top:12px;">${r.erro}</div>`; return; }
@@ -8861,24 +8880,27 @@ async function FIN_carregarAuxMotivo(){
 function FIN_ymDeNomeMes(nome, ano){ const idx=FIN_MES_IDX[String(nome||'').trim().toLowerCase()]; return idx ? (ano+'-'+String(idx).padStart(2,'0')) : ''; }
 
 // NÚCLEO do estudo de motivo: recebe o mês do SERVIÇO já em ym (yyyy-mm) e o anterior.
+// REGRA: só estuda motivo pra quem CAIU mais de 5% no faturamento. Quem não caiu fica sem motivo automático.
+// Ordem das justificativas: 1) variação de equipamentos  2) SP Regula/MTR  3) reajuste  4) feriado (por último).
 function FIN_motivoDeServico(cliente, ymServ, ymServAnt, varPct){
+  if(varPct==null || varPct >= -5) return ''; // sem queda relevante (> -5%) => sem motivo automático
   const nomeN=FIN_normNomeMot(cliente);
   const rot = ymServ ? finRotMes(ymServ) : '';
   const motivos=[];
-  // 1) reajuste no mês do serviço
-  const teveReaj=(_reajFat||[]).some(r=>{ if(FIN_normNomeMot(r['CLIENTE'])!==nomeN) return false; const d=parseDataReaj(r['DATA ÚLTIMO REAJUSTE ']||r['DATA ÚLTIMO REAJUSTE']); return d && (d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'))===ymServ; });
-  if(teveReaj) motivos.push('Reajuste aplicado em '+rot);
-  // 2) feriado no mês do serviço (menos dias de coleta)
-  const fer=FIN_feriadosDoMes(ymServ);
-  if(fer.length) motivos.push('Feriado em '+rot+' — menos dias de coleta ('+fer.join(', ')+')');
-  // 3) queda de coletas: só se o faturamento caiu mais de 5% e a quantidade caiu de forma coerente
-  if(varPct!=null && varPct<-5 && ymServ && ymServAnt){
+  // 1) variação (queda) de equipamentos coletados — quando a quantidade caiu de forma coerente
+  if(ymServ && ymServAnt){
     const qA=FIN_qtdeColetasClienteYM(cliente, ymServ), qP=FIN_qtdeColetasClienteYM(cliente, ymServAnt);
     if(qP>0 && qA<qP){ const q=((qA-qP)/qP*100); motivos.push('Menos equipamentos coletados em '+rot+' ('+q.toFixed(0)+'%: '+qP+'→'+qA+')'); }
   }
-  // 4) assessoria SP Regula/MTR no mês do serviço
+  // 2) assessoria SP Regula/MTR no mês do serviço
   const ass=(_assessFat||[]).find(a=>{ if(FIN_normNomeMot(a['CLIENTE'])!==nomeN) return false; if(String(a['ASSESSORIA']||'').trim().toLowerCase()!=='sim') return false; const d=parseDataReaj(a['DATA_RENOVACAO']); return d && (d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'))===ymServ; });
   if(ass) motivos.push('Assessoria SP Regula/MTR em '+rot+(ass['VALOR']?(' (R$ '+ass['VALOR']+')'):''));
+  // 3) reajuste no mês do serviço
+  const teveReaj=(_reajFat||[]).some(r=>{ if(FIN_normNomeMot(r['CLIENTE'])!==nomeN) return false; const d=parseDataReaj(r['DATA ÚLTIMO REAJUSTE ']||r['DATA ÚLTIMO REAJUSTE']); return d && (d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'))===ymServ; });
+  if(teveReaj) motivos.push('Reajuste aplicado em '+rot);
+  // 4) feriado no mês do serviço (menos dias de coleta) — POR ÚLTIMO
+  const fer=FIN_feriadosDoMes(ymServ);
+  if(fer.length) motivos.push('Feriado em '+rot+' — menos dias de coleta ('+fer.join(', ')+')');
   return motivos.join(' · ');
 }
 
