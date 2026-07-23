@@ -1953,7 +1953,8 @@ async function renderAbaServicos(corpo){
   salvos.forEach(s=>{
     const rj=String(s['VAI_REAJUSTE']||'').toLowerCase()==='sim';
     const badge=rj?`<span style="background:var(--verde-claro-bg);color:var(--verde-escuro);border-radius:5px;padding:1px 7px;font-size:11px;font-weight:600;">sim</span>`:`<span style="color:var(--cinza-400);font-size:11px;">não</span>`;
-    html+=`<tr><td><b>${s['EQUIPAMENTO']||'—'}</b></td><td>${s['RESIDUO']||'—'}</td><td>${s['FREQUENCIA']||'—'}</td><td>${vfmt(s['VALOR'])}</td><td>${s['DATA_INICIO']?fmtDataBR(s['DATA_INICIO']):'—'}</td><td>${badge}</td><td style="color:var(--verde-medio);font-size:11px;"><i class="ti ti-check"></i> salvo</td></tr>`;
+    const extra=(s['NUM_PROPOSTA']||s['TEMPO_LOCACAO'])?`<div style="font-size:10.5px;color:var(--cinza-500);">${s['NUM_PROPOSTA']?('Prop. '+s['NUM_PROPOSTA']):''}${s['NUM_PROPOSTA']&&s['TEMPO_LOCACAO']?' · ':''}${s['TEMPO_LOCACAO']?('Locação: '+s['TEMPO_LOCACAO']):''}</div>`:'';
+    html+=`<tr><td><b>${s['EQUIPAMENTO']||'—'}</b>${extra}</td><td>${s['RESIDUO']||'—'}</td><td>${s['FREQUENCIA']||'—'}</td><td>${vfmt(s['VALOR'])}</td><td>${s['DATA_INICIO']?fmtDataBR(s['DATA_INICIO']):'—'}</td><td>${badge}</td><td style="color:var(--verde-medio);font-size:11px;"><i class="ti ti-check"></i> salvo</td></tr>`;
   });
   derivados.forEach(d=>{
     const preJson=JSON.stringify(d).replace(/'/g,"&#39;").replace(/"/g,'&quot;');
@@ -1973,12 +1974,14 @@ function abrirFormServico(cnpj, cliente, pre){
     <div style="background:var(--verde-claro-bg);border-radius:10px;padding:16px;">
       <div style="font-weight:600;color:var(--verde-escuro);margin-bottom:12px;"><i class="ti ti-package"></i> Serviço — ${cliente}</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-        <div><label style="font-size:12px;color:var(--cinza-700);">Equipamento</label><input id="sv-equip" value="${g(pre.equipamento)}" placeholder="ex: Caçamba 5m³" style="width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+        <div><label style="font-size:12px;color:var(--cinza-700);">Equipamento</label><input id="sv-equip" oninput="servToggleLoc()" value="${g(pre.equipamento)}" placeholder="ex: Caçamba 5m³" style="width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
         <div><label style="font-size:12px;color:var(--cinza-700);">Resíduo</label><input id="sv-residuo" value="${g(pre.residuo)}" placeholder="ex: Madeira" style="width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
         <div><label style="font-size:12px;color:var(--cinza-700);">Frequência</label><input id="sv-freq" value="${g(pre.frequencia)}" placeholder="ex: 2x na semana - seg, qui" style="width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
         <div><label style="font-size:12px;color:var(--cinza-700);">Valor (R$)</label><input id="sv-valor" type="number" step="0.01" value="${g(pre.valor)}" style="width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
         <div><label style="font-size:12px;color:var(--cinza-700);">Data de início</label><input id="sv-inicio" type="date" value="${g(pre.dataInicio)}" style="width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
         <div><label style="font-size:12px;color:var(--cinza-700);">Índice (reajuste)</label><input id="sv-indice" value="${g(pre.indice)}" placeholder="ex: IGP-M" style="width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+        <div><label style="font-size:12px;color:var(--cinza-700);">Nº da proposta (opcional)</label><input id="sv-proposta" value="${g(pre.numProposta)}" placeholder="ex: 543/24" style="width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+        <div id="sv-loc-wrap" style="display:none;"><label style="font-size:12px;color:var(--cinza-700);">Tempo de locação</label><input id="sv-loc" value="${g(pre.tempoLocacao)}" placeholder="ex: 5 dias / 30 dias" style="width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
       </div>
       <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px;cursor:pointer;">
         <input type="checkbox" id="sv-reaj" checked> Enviar para a aba <b>Reajustes</b> (reajuste em 12 meses a partir do início)
@@ -1989,6 +1992,15 @@ function abrirFormServico(cnpj, cliente, pre){
       </div>
       <div id="sv-msg"></div>
     </div>`;
+  servToggleLoc();
+}
+
+// mostra o campo "tempo de locação" só quando o equipamento for caçamba ou caixa roll on
+function servToggleLoc(){
+  const eq=((document.getElementById('sv-equip')||{}).value)||'';
+  const wrap=document.getElementById('sv-loc-wrap');
+  if(!wrap) return;
+  wrap.style.display = /ca[çc]amba|roll\s*-?\s*on/i.test(eq) ? '' : 'none';
 }
 
 async function salvarServico(cnpj, cliente){
@@ -1998,11 +2010,15 @@ async function salvarServico(cnpj, cliente){
   const vaiReaj=document.getElementById('sv-reaj').checked;
   const inicio=document.getElementById('sv-inicio').value;
   if(vaiReaj && !inicio){ msg.innerHTML='<div class="sem-acesso" style="margin-top:10px;">Pra enviar ao reajuste, informe a data de início.</div>'; return; }
+  const locWrap=document.getElementById('sv-loc-wrap');
+  const tempoLoc=(locWrap && locWrap.style.display!=='none') ? ((document.getElementById('sv-loc')||{}).value||'').trim() : '';
   const campos={ cnpj:cnpjLimpo(cnpj), cliente, equipamento:equip,
     residuo:(document.getElementById('sv-residuo').value||'').trim(),
     frequencia:(document.getElementById('sv-freq').value||'').trim(),
     valor:document.getElementById('sv-valor').value||'',
     dataInicio:inicio, indice:(document.getElementById('sv-indice').value||'').trim(),
+    numProposta:((document.getElementById('sv-proposta')||{}).value||'').trim(),
+    tempoLocacao:tempoLoc,
     vaiReajuste:vaiReaj };
   msg.innerHTML='<div style="text-align:center;padding:10px;color:var(--cinza-500);">Salvando...</div>';
   try{
@@ -3159,9 +3175,23 @@ async function renderReajustes(area) {
         <button class="${modoReaj==='cards'?'ativo':''}" onclick="setModoReaj('cards')"><i class="ti ti-layout-grid"></i> Cards</button>
         <button class="${modoReaj==='lista'?'ativo':''}" onclick="setModoReaj('lista')"><i class="ti ti-list"></i> Lista</button>
       </div>
+      ${['admin','diretor','financeiro'].includes(usuarioAtual && usuarioAtual.perfil) ? `<button class="filtro-chip" style="border:1px solid var(--cinza-300);" onclick="limparDuplicatasReajustesFront()" title="Remove linhas duplicadas da planilha (mantém a mais recente por cliente+serviço)"><i class="ti ti-eraser"></i> Limpar duplicatas</button>` : ''}
     </div>
     <div id="reaj-resultado"></div>`;
   aplicarReaj();
+}
+
+// remove FISICAMENTE as duplicatas na aba Reajustes (ex: as coladas de junho)
+async function limparDuplicatasReajustesFront() {
+  if (!confirm('Isso vai apagar da planilha as linhas de reajuste duplicadas (mesmo cliente + mesmo serviço), mantendo só a mais recente. Deseja continuar?')) return;
+  try {
+    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({ acao:'limparDuplicatasReajustes', token: sessaoToken })});
+    const r = await resp.json();
+    if (!r.ok) { alert('Erro: '+(r.erro||'republique o Apps Script.')); return; }
+    cacheReajustes = null;
+    alert(r.removidas>0 ? `Pronto! ${r.removidas} linha(s) duplicada(s) removida(s).` : 'Nenhuma duplicata encontrada — a aba já está limpa.');
+    renderReajustes(document.getElementById('area-conteudo'));
+  } catch(e) { alert('Erro de conexão.'); }
 }
 
 let filtroReaj = 'todos';
