@@ -508,7 +508,8 @@ const MODULOS = [
       { id: 'fin-saude',        nome: 'Saúde Financeira',    icone: 'ti-heart-rate-monitor' },
       { id: 'fin-pagar',        nome: 'Contas a Pagar',      icone: 'ti-arrow-up-right' },
       { id: 'fin-receber',      nome: 'Contas a Receber',    icone: 'ti-arrow-down-left' },
-      { id: 'fin-coletas',      nome: 'Coletas (semanal)',   icone: 'ti-recycle' },
+      { id: 'fin-coletas',      nome: 'Coletas',             icone: 'ti-recycle' },
+      { id: 'fin-fislurb',      nome: 'Taxa FISLURB',        icone: 'ti-receipt' },
       { id: 'cart-faturamento', nome: 'Faturamento',         icone: 'ti-cash' },
       { id: 'cart-reajustes',   nome: 'Reajustes',           icone: 'ti-trending-up' },
       { id: 'cart-aprovacoes',  nome: 'Aprovações',          icone: 'ti-checkup-list' },
@@ -6351,7 +6352,10 @@ async function abrirFormContrato(clientePre, cnpjPre) {
               <select id="nc-mintipo" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"><option value="">—</option><option>Sacos</option><option>Contêiner</option><option>Caçamba</option><option>Big Bag</option></select></div>
             <div><label style="font-size:13px;color:var(--cinza-700);">Mínima contratual — qtde</label>
               <input type="number" id="nc-minqtd" placeholder="ex: 30" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+            <div><label style="font-size:13px;color:var(--cinza-700);">Paga taxa FISLURB?</label>
+              <select id="nc-fislurb" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"><option value="Não">Não</option><option value="Sim">Sim</option></select></div>
           </div>
+          <div style="font-size:11px;color:var(--cinza-500);margin-top:8px;"><i class="ti ti-info-circle"></i> Se marcar "Sim", o cliente entra automaticamente na aba <b>Financeiro › Taxa FISLURB</b> pra Joyce lançar o valor anual.</div>
           <div class="ficha-botoes" style="margin-top:14px;">
             <button class="ficha-btn-primario" onclick="salvarContrato()"><i class="ti ti-check"></i> Salvar contrato</button>
             <button class="ficha-btn-secundario" onclick="fecharFicha()">Cancelar</button>
@@ -6378,6 +6382,7 @@ async function salvarContrato() {
     'STATUS': document.getElementById('nc-status').value,
     'MINIMA_EQUIP_TIPO': (document.getElementById('nc-mintipo')||{}).value||'',
     'MINIMA_EQUIP_QTD': (document.getElementById('nc-minqtd')||{}).value||'',
+    'FISLURB': (document.getElementById('nc-fislurb')||{}).value||'Não',
     'CONSULTOR': usuarioAtual.nome
   };
   const num = document.getElementById('nc-num').value;
@@ -8657,23 +8662,101 @@ function FIN_verFechamentos(consultor){
 }
 
 // ============ COLETAS (acompanhamento semanal + mensal) ============
+// ============ TAXA FISLURB (anual) ============
+// Lista clientes que pagam a taxa (origem: aba Reajustes FISLURB=Sim + os já salvos).
+// Valor + pago + data, editáveis por ANO (uma linha por cliente; histórico por ano guardado em JSON).
+function _fisNorm(s){ return String(s||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim(); }
+async function FIN_renderFislurb(){
+  const p=document.getElementById('p-fislurb');
+  p.innerHTML='<div class="card"><div class="vazio">Carregando taxa FISLURB...</div></div>';
+  // quem paga: aba Reajustes (FISLURB=Sim), deduplicado por cliente
+  const rr=await buscarDados('Reajustes');
+  const reaj = (typeof dedupReajustes==='function') ? dedupReajustes(rr.ok?rr.linhas:[]) : (rr.ok?rr.linhas:[]);
+  const pagam={};
+  reaj.forEach(r=>{ if(String(r['FISLURB']||'').trim().toLowerCase()==='sim'){ const n=_fisNorm(r['CLIENTE']); if(n && !pagam[n]) pagam[n]={cliente:r['CLIENTE'],cnpj:r['CNPJ']||''}; } });
+  // valores já salvos
+  const rt=await buscarDados('Taxa_Fislurb');
+  const salvos={};
+  (rt.ok?rt.linhas:[]).forEach(l=>{ const n=_fisNorm(l['CLIENTE']); let v={}; try{v=JSON.parse(l['VALORES_JSON']||'{}');}catch(e){} salvos[n]={valores:v}; if(!pagam[n]) pagam[n]={cliente:l['CLIENTE'],cnpj:l['CNPJ']||''}; });
+  const anoAtual=new Date().getFullYear();
+  const ano=window._fisAno||String(anoAtual);
+  const anosSet=new Set([String(anoAtual),String(anoAtual-1)]);
+  Object.values(salvos).forEach(s=>Object.keys(s.valores||{}).forEach(a=>anosSet.add(a)));
+  const anos=[...anosSet].sort().reverse();
+  const busca=(window._fisBusca||'').toLowerCase();
+  let lista=Object.values(pagam);
+  if(busca) lista=lista.filter(x=>String(x.cliente||'').toLowerCase().includes(busca));
+  lista.sort((a,b)=>String(a.cliente).localeCompare(String(b.cliente)));
+  // KPIs do ano
+  let totValor=0,nPagos=0,nPend=0;
+  lista.forEach(x=>{ const e=(salvos[_fisNorm(x.cliente)]||{}).valores; const it=e?e[ano]:null; const val=it?(parseMoedaReaj(it.valor)||0):0; totValor+=val; if(it&&String(it.pago).toLowerCase()==='sim')nPagos++; else nPend++; });
+  const rows=lista.map((x,i)=>{
+    const e=((salvos[_fisNorm(x.cliente)]||{}).valores||{})[ano]||{};
+    const pagoSim=String(e.pago||'').toLowerCase()==='sim';
+    const cliJs=String(x.cliente).replace(/'/g,"\\'");
+    const cnpjJs=String(x.cnpj||'').replace(/'/g,"\\'");
+    return `<tr>
+      <td><b>${x.cliente}</b>${x.cnpj?`<div style="font-size:11px;color:var(--cinza-500);">${x.cnpj}</div>`:''}</td>
+      <td><span style="font-size:12px;color:var(--cinza-500);">R$</span> <input type="number" step="0.01" id="fis-val-${i}" value="${e.valor!=null?e.valor:''}" placeholder="0,00" style="width:110px;padding:6px;border:1.5px solid var(--cinza-300);border-radius:7px;"></td>
+      <td><select id="fis-pago-${i}" style="padding:6px;border:1.5px solid var(--cinza-300);border-radius:7px;"><option value="Não" ${!pagoSim?'selected':''}>Não pago</option><option value="Sim" ${pagoSim?'selected':''}>Pago</option></select></td>
+      <td><input type="date" id="fis-data-${i}" value="${e.data||''}" style="padding:6px;border:1.5px solid var(--cinza-300);border-radius:7px;"></td>
+      <td><button id="fis-btn-${i}" class="btn sec" onclick="salvarFislurbFront(${i},'${cliJs}','${cnpjJs}')"><i class="ti ti-device-floppy"></i> Salvar</button></td>
+    </tr>`;
+  });
+  p.innerHTML=`
+    <div class="filtros" style="flex-wrap:wrap;">
+      <span style="font-size:13px;color:var(--cinza-600);">Ano:</span>
+      <select onchange="window._fisAno=this.value;FIN_renderFislurb()">${anos.map(a=>`<option value="${a}" ${a===ano?'selected':''}>${a}</option>`).join('')}</select>
+      <input type="text" placeholder="Buscar cliente..." value="${(window._fisBusca||'').replace(/"/g,'&quot;')}" oninput="window._fisBusca=this.value;FIN_renderFislurb()" style="padding:7px 10px;border:1.5px solid var(--cinza-300);border-radius:8px;font-size:13px;min-width:180px;">
+      <button class="btn sec" onclick="window.print()" style="margin-left:auto;"><i class="ti ti-printer"></i> Exportar / Imprimir</button>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><div class="num">${lista.length}</div><div class="lbl">Clientes que pagam FISLURB</div></div>
+      <div class="kpi" style="border-top-color:var(--verde-medio);"><div class="num" style="color:var(--verde-escuro);">${nPagos}</div><div class="lbl">Pagaram em ${ano}</div></div>
+      <div class="kpi verm"><div class="num">${nPend}</div><div class="lbl">Pendentes em ${ano}</div></div>
+      <div class="kpi"><div class="num">${finFmtM(totValor)}</div><div class="lbl">Total lançado em ${ano}</div></div>
+    </div>
+    <div class="card">
+      <h2>Taxa FISLURB — ${ano}</h2>
+      <p style="font-size:12px;color:var(--cinza-500);margin-bottom:8px;">Anual. Preencha o valor, marque se já foi pago e a data. Cada ano fica salvo separadamente (troque no seletor de ano). Clientes vêm de quem tem FISLURB = Sim na aba Reajustes.</p>
+      <table><thead><tr><th>Cliente</th><th>Valor pago</th><th>Situação</th><th>Data</th><th></th></tr></thead>
+      <tbody>${rows.join('')||'<tr><td colspan="5" class="vazio">Nenhum cliente paga FISLURB (ou nenhum marcado como Sim na aba Reajustes).</td></tr>'}</tbody></table>
+    </div>`;
+}
+async function salvarFislurbFront(i, cliente, cnpj){
+  const ano=window._fisAno||String(new Date().getFullYear());
+  const valor=(document.getElementById('fis-val-'+i)||{}).value||'';
+  const pago=(document.getElementById('fis-pago-'+i)||{}).value||'Não';
+  const data=(document.getElementById('fis-data-'+i)||{}).value||'';
+  const btn=document.getElementById('fis-btn-'+i); if(btn){ btn.disabled=true; btn.innerHTML='Salvando...'; }
+  try{
+    const resp=await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'salvarTaxaFislurb',token:sessaoToken,dados:{cliente,cnpj,ano,valor,pago,data}})});
+    const r=await resp.json();
+    if(!r.ok){ alert('Erro: '+(r.erro||'republique o Apps Script.')); if(btn){btn.disabled=false;btn.innerHTML='<i class="ti ti-device-floppy"></i> Salvar';} return; }
+    if(btn){ btn.innerHTML='<i class="ti ti-check"></i> Salvo'; }
+    setTimeout(()=>FIN_renderFislurb(), 600);
+  }catch(e){ alert('Erro de conexão.'); if(btn){btn.disabled=false;btn.innerHTML='<i class="ti ti-device-floppy"></i> Salvar';} }
+}
+
 function FIN_renderColetas(){
   const p=document.getElementById('p-coletas');
   if(!FINdados.coletas.length){ p.innerHTML='<div class="card"><div class="vazio">Suba o Relatório de Serviços (.csv) na aba Relatórios.</div></div>'; return; }
   // meses disponíveis
   const meses=[...new Set(FINdados.coletas.map(c=>c.ym))].sort();
-  const modo = window._coletaModo || 'semana';
+  const modo = window._coletaModo || 'mescomp';
   const rotYM = ym=>{ const [a,m]=ym.split('-'); return (FIN_MESNOME[m]||m)+'/'+a.slice(2); };
   p.innerHTML=`
     <div class="filtros">
       <select onchange="window._coletaModo=this.value;FIN_renderColetas()">
+        <option value="mescomp" ${modo==='mescomp'?'selected':''}>Comparar por mês (entre 2 meses)</option>
         <option value="semana" ${modo==='semana'?'selected':''}>Comparar por semana (entre 2 meses)</option>
         <option value="mes" ${modo==='mes'?'selected':''}>Visão mensal por cliente</option>
       </select>
       <button class="btn sec" onclick="window.print()"><i class="ti ti-printer"></i> Exportar / Imprimir</button>
     </div>
     <div id="coleta-area"></div>`;
-  if(modo==='semana') FIN_renderColetaSemana(meses, rotYM);
+  if(modo==='semana') FIN_renderColetaComp(meses, rotYM, true);
+  else if(modo==='mescomp') FIN_renderColetaComp(meses, rotYM, false);
   else FIN_renderColetaMes(meses, rotYM);
 }
 
@@ -8699,46 +8782,59 @@ function FIN_finNormNomeCli(s){
     .replace(/[^A-Z0-9 ]/g,'').replace(/\s+/g,' ').trim();
 }
 
-function FIN_renderColetaSemana(meses, rotYM){
+// comparação de coletas entre 2 meses — por SEMANA (porSemana=true) ou pelo MÊS INTEIRO (porSemana=false)
+// com busca por cliente e ordenação. Substitui a antiga FIN_renderColetaSemana.
+function FIN_renderColetaComp(meses, rotYM, porSemana){
   const area=document.getElementById('coleta-area');
-  if(meses.length<2){ area.innerHTML='<div class="card"><div class="aviso">Suba pelo menos 2 meses pra comparar semanas (ex: junho e julho).</div></div>'; return; }
-  // seletores de mês A (base) e B (comparação) + semana
-  const mesA = window._coletaMesA || meses[meses.length-2];
-  const mesB = window._coletaMesB || meses[meses.length-1];
-  const semanas=[...new Set(FINdados.coletas.filter(c=>c.ym===mesA||c.ym===mesB).map(c=>Number(c.semana)))].sort((a,b)=>a-b);
-  const sem = Number(window._coletaSem || semanas[0]);
-  // agrupa por cliente+equip+classe em cada mês, só na semana escolhida (compara semana como número)
-  const gA=FIN_agrupaColetas(c=>c.ym===mesA && Number(c.semana)===sem);
-  const gB=FIN_agrupaColetas(c=>c.ym===mesB && Number(c.semana)===sem);
+  if(meses.length<2){ area.innerHTML='<div class="card"><div class="aviso">Suba pelo menos 2 meses pra comparar (ex: junho e julho).</div></div>'; return; }
+  const mesA = (window._coletaMesA && meses.includes(window._coletaMesA)) ? window._coletaMesA : meses[meses.length-2];
+  const mesB = (window._coletaMesB && meses.includes(window._coletaMesB)) ? window._coletaMesB : meses[meses.length-1];
+  let sem=null, semanas=[];
+  if(porSemana){
+    semanas=[...new Set(FINdados.coletas.filter(c=>c.ym===mesA||c.ym===mesB).map(c=>Number(c.semana)))].sort((a,b)=>a-b);
+    sem = Number(window._coletaSem || semanas[0]);
+  }
+  // agrupa por cliente+equip+classe (mês inteiro, ou só a semana escolhida)
+  const filtA = porSemana ? (c=>c.ym===mesA && Number(c.semana)===sem) : (c=>c.ym===mesA);
+  const filtB = porSemana ? (c=>c.ym===mesB && Number(c.semana)===sem) : (c=>c.ym===mesB);
+  const gA=FIN_agrupaColetas(filtA), gB=FIN_agrupaColetas(filtB);
   const chaves=[...new Set([...Object.keys(gA),...Object.keys(gB)])];
-  // monta linhas com variação
   let linhas=chaves.map(k=>{
     const a=gA[k], b=gB[k]; const base=a||b;
     const qa=a?a.qtde:0, qb=b?b.qtde:0;
     const varPct = qa===0 ? (qb>0?null:0) : ((qb-qa)/qa*100);
     return {cliente:base.cliente, equip:base.equip, classe:base.classe, qa, qb, varPct, peso_a:a?a.peso:0, peso_b:b?b.peso:0};
-  }).sort((x,y)=>{ // quem mais caiu primeiro
-    const vx=x.varPct===null?999:x.varPct, vy=y.varPct===null?999:y.varPct; return vx-vy;
   });
+  // busca por nome do cliente
+  const busca=(window._coletaBusca||'').toLowerCase();
+  if(busca) linhas=linhas.filter(l=>String(l.cliente||'').toLowerCase().includes(busca));
   // filtro de exibição
   const filtroEx = window._coletaFiltro || 'movimento';
-  let linhasEx = linhas;
-  if(filtroEx==='movimento') linhasEx = linhas.filter(l=>l.qa>0 && l.qb>0); // tem nos 2 meses
-  else if(filtroEx==='caiu') linhasEx = linhas.filter(l=>l.qa>0 && l.qb<l.qa); // caiu (inclui zerou)
-  else if(filtroEx==='parou') linhasEx = linhas.filter(l=>l.qa>0 && l.qb===0); // parou de vez
-  else if(filtroEx==='novos') linhasEx = linhas.filter(l=>l.qa===0 && l.qb>0); // clientes novos
-  // else 'todos' -> tudo
   const nMovimento=linhas.filter(l=>l.qa>0&&l.qb>0).length, nParou=linhas.filter(l=>l.qa>0&&l.qb===0).length, nNovos=linhas.filter(l=>l.qa===0&&l.qb>0).length;
+  let linhasEx = linhas;
+  if(filtroEx==='movimento') linhasEx = linhas.filter(l=>l.qa>0 && l.qb>0);
+  else if(filtroEx==='caiu') linhasEx = linhas.filter(l=>l.qa>0 && l.qb<l.qa);
+  else if(filtroEx==='parou') linhasEx = linhas.filter(l=>l.qa>0 && l.qb===0);
+  else if(filtroEx==='novos') linhasEx = linhas.filter(l=>l.qa===0 && l.qb>0);
+  // ordenação
+  const ordem = window._coletaOrdem || 'var-menor';
+  const vp = l => (l.varPct===null ? (ordem==='var-menor'?9999:-9999) : l.varPct);
+  if(ordem==='var-menor') linhasEx.sort((x,y)=>vp(x)-vp(y));       // quem mais caiu primeiro
+  else if(ordem==='var-maior') linhasEx.sort((x,y)=>vp(y)-vp(x));  // quem mais subiu primeiro
+  else if(ordem==='nome') linhasEx.sort((x,y)=>String(x.cliente).localeCompare(String(y.cliente)));
+  else if(ordem==='volume') linhasEx.sort((x,y)=>y.qb-x.qb);       // maior volume no mês B
+  const titulo = porSemana ? `${FIN_rotSemana(sem)}: ${rotYM(mesA)} vs ${rotYM(mesB)}` : `Mês inteiro: ${rotYM(mesA)} vs ${rotYM(mesB)}`;
   area.innerHTML=`
     <div class="filtros" style="margin-bottom:10px;">
       <span style="font-size:13px;color:var(--cinza-600);">Comparar</span>
       <select onchange="window._coletaMesA=this.value;FIN_renderColetas()">${meses.map(m=>`<option value="${m}" ${m===mesA?'selected':''}>${rotYM(m)}</option>`).join('')}</select>
       <span style="font-size:13px;color:var(--cinza-600);">com</span>
       <select onchange="window._coletaMesB=this.value;FIN_renderColetas()">${meses.map(m=>`<option value="${m}" ${m===mesB?'selected':''}>${rotYM(m)}</option>`).join('')}</select>
-      <span style="font-size:13px;color:var(--cinza-600);">·</span>
-      <select onchange="window._coletaSem=parseInt(this.value);FIN_renderColetas()">${semanas.map(s=>`<option value="${s}" ${s===sem?'selected':''}>${FIN_rotSemana(s)}</option>`).join('')}</select>
+      ${porSemana?`<span style="font-size:13px;color:var(--cinza-600);">·</span>
+      <select onchange="window._coletaSem=parseInt(this.value);FIN_renderColetas()">${semanas.map(s=>`<option value="${s}" ${s===sem?'selected':''}>${FIN_rotSemana(s)}</option>`).join('')}</select>`:''}
     </div>
-    <div class="filtros" style="margin-bottom:10px;">
+    <div class="filtros" style="margin-bottom:10px;flex-wrap:wrap;">
+      <input type="text" placeholder="Buscar cliente..." value="${(window._coletaBusca||'').replace(/"/g,'&quot;')}" oninput="window._coletaBusca=this.value;FIN_renderColetas()" style="padding:7px 10px;border:1.5px solid var(--cinza-300);border-radius:8px;font-size:13px;min-width:180px;">
       <span style="font-size:13px;color:var(--cinza-600);">Mostrar:</span>
       <select onchange="window._coletaFiltro=this.value;FIN_renderColetas()">
         <option value="movimento" ${filtroEx==='movimento'?'selected':''}>Com movimento nos 2 meses (${nMovimento})</option>
@@ -8747,11 +8843,18 @@ function FIN_renderColetaSemana(meses, rotYM){
         <option value="novos" ${filtroEx==='novos'?'selected':''}>Só clientes novos (${nNovos})</option>
         <option value="todos" ${filtroEx==='todos'?'selected':''}>Todos</option>
       </select>
+      <span style="font-size:13px;color:var(--cinza-600);">Ordenar:</span>
+      <select onchange="window._coletaOrdem=this.value;FIN_renderColetas()">
+        <option value="var-menor" ${ordem==='var-menor'?'selected':''}>Variação: menor → maior (quem caiu)</option>
+        <option value="var-maior" ${ordem==='var-maior'?'selected':''}>Variação: maior → menor</option>
+        <option value="nome" ${ordem==='nome'?'selected':''}>Nome do cliente (A-Z)</option>
+        <option value="volume" ${ordem==='volume'?'selected':''}>Maior volume</option>
+      </select>
       <button class="btn sec" onclick="window.print()" style="margin-left:auto;"><i class="ti ti-printer"></i> Exportar</button>
     </div>
     <div class="card">
-      <h2>${FIN_rotSemana(sem)}: ${rotYM(mesA)} vs ${rotYM(mesB)}</h2>
-      <p style="font-size:12px;color:var(--cinza-500);margin-bottom:8px;">Ordenado pelos que mais caíram. Verde = subiu, vermelho = caiu. Mostrando ${linhasEx.length} de ${linhas.length}.</p>
+      <h2>${titulo}</h2>
+      <p style="font-size:12px;color:var(--cinza-500);margin-bottom:8px;">Verde = subiu, vermelho = caiu. Mostrando ${linhasEx.length} de ${linhas.length}.</p>
       <table><thead><tr><th>Cliente</th><th>Equipamento / Resíduo</th><th>${rotYM(mesA)}</th><th>${rotYM(mesB)}</th><th>Variação</th></tr></thead><tbody>
       ${linhasEx.map(l=>{
         const cor = l.varPct===null?'':(l.varPct>0.5?'pos':l.varPct<-0.5?'neg':'');
@@ -9078,6 +9181,7 @@ function renderFinanceiro(area, subId){
       'fin-pagar':       ['pagar'],
       'fin-receber':     ['receber','recebeReceb'],
       'fin-coletas':     ['coletas'],
+      'fin-fislurb':     [],
     };
     try { await finCarregarDoSheets(TIPOS_POR_TELA[subId] || []); } catch(e){ /* segue com o cache local */ }
     const mapa = {
@@ -9085,6 +9189,7 @@ function renderFinanceiro(area, subId){
       'fin-pagar':      { id:'p-pagar',      fn: FIN_renderPagar },
       'fin-receber':    { id:'p-receber',    fn: FIN_renderReceber },
       'fin-coletas':    { id:'p-coletas',    fn: FIN_renderColetas },
+      'fin-fislurb':    { id:'p-fislurb',    fn: FIN_renderFislurb },
     };
     const alvo = mapa[subId];
     if (!alvo){ area.innerHTML = '<div class="sem-acesso">Tela não encontrada.</div>'; return; }
