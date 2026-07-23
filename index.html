@@ -2188,8 +2188,9 @@ async function renderAbaFaturamento(corpo) {
     html += '<div style="font-size:12px;font-weight:600;color:var(--cinza-600);margin-bottom:8px;">Faturamento por mês (R$)</div><table class="ficha-tab">';
     Object.keys(fatItem.valores).forEach(mFat => {
       const v=num(fatItem.valores[mFat]);
-      // motivo da variação salvo (aprovado/manual) para este mês faturado
-      const mv = (typeof _motivosFat!=='undefined' && _motivosFat) ? _motivosFat[FIN_chaveMotivo(fichaClienteAtual['CLIENTE'], mFat)] : null;
+      // motivo salvo (chave = ym do mês de SERVIÇO, defasagem de 1 mês)
+      const _ymS = (typeof FIN_ymServicoDeNome==='function') ? FIN_ymServicoDeNome(mFat, (typeof FIN_anoRefFat==='function'?FIN_anoRefFat():new Date().getFullYear())) : mFat;
+      const mv = (typeof _motivosFat!=='undefined' && _motivosFat) ? _motivosFat[FIN_chaveMotivo(fichaClienteAtual['CLIENTE'], _ymS)] : null;
       const motTxt = (mv && mv.motivo && (mv.status==='Aprovado'||mv.status==='Manual'))
         ? `<div style="font-size:11px;color:var(--cinza-600);font-style:italic;margin-top:3px;"><i class="ti ti-clipboard-text" style="font-size:12px;"></i> Motivo: ${mv.motivo}</div>` : '';
       html += `<tr><td>${mesServico(mFat)}${motTxt}</td><td><b>${fmtMoeda(v)}</b></td></tr>`;
@@ -4096,7 +4097,8 @@ async function renderFaturamento(area) {
   await carregarClientes(); // pra saber tipo (Contrato/Eventual)
   // carrega o faturamento do módulo Financeiro (upload único, aba Fin_Faturamento)
   if (typeof FIN_garantirSheetJS==='function') { await new Promise(r=>FIN_garantirSheetJS(r)); }
-  if (typeof finCarregarDoSheets==='function') { try { await finCarregarDoSheets(['faturamento']); } catch(e){} }
+  if (typeof finCarregarDoSheets==='function') { try { await finCarregarDoSheets(['faturamento','coletas']); } catch(e){} }
+  if (typeof FIN_carregarAuxMotivo==='function') { try { await FIN_carregarAuxMotivo(); } catch(e){} } // reajustes/assessoria/motivos p/ a coluna Motivo
   const fatNovo = (typeof FINdados!=='undefined' && FINdados.faturamento) ? FINdados.faturamento : [];
   // converte {cliente, valores:{mes:v}} para o formato de linha que a tela usa (CLIENTE + colunas de mês)
   cacheFat = fatNovo.map(x => ({ CLIENTE: x.cliente, ...x.valores }));
@@ -4321,23 +4323,45 @@ function filtraTabelaFat() {
     });
     html += `</tbody></table>`;
   } else {
-    // mês único: ANTERIOR à esquerda, ATUAL à direita, depois variação
-    html = `<table class="fat-tabela"><thead><tr><th>Cliente</th><th>Tipo</th>${mesAnt?`<th class="num">${rot(mesAnt)}</th>`:''}<th class="num">${rot(mes)}</th>${mesAnt?`<th class="num">Variação</th>`:''}</tr></thead><tbody>`;
+    // mês único: ANTERIOR à esquerda, ATUAL à direita, variação, depois MOTIVO
+    // chave do motivo = ym do mês de SERVIÇO (aqui 'mes' já é o mês de serviço)
+    const _anoM = (typeof FIN_anoRefFat==='function') ? FIN_anoRefFat() : new Date().getFullYear();
+    const ymServ = (typeof FIN_ymDeNomeMes==='function') ? FIN_ymDeNomeMes(mes, _anoM) : '';
+    const ymServAnt = (mesAnt && typeof FIN_ymDeNomeMes==='function') ? FIN_ymDeNomeMes(mesAnt, _anoM) : '';
+    const temMotivo = typeof FIN_motivoDeServico==='function';
+    html = `<table class="fat-tabela"><thead><tr><th>Cliente</th><th>Tipo</th>${mesAnt?`<th class="num">${rot(mesAnt)}</th>`:''}<th class="num">${rot(mes)}</th>${mesAnt?`<th class="num">Variação</th>`:''}<th>Motivo</th></tr></thead><tbody>`;
     lista.slice(0,200).forEach(l => {
       const atual = vm(l, mes);
       const ant = mesAnt ? vm(l, mesAnt) : null;
       const tipo = tipos[normF(l['CLIENTE'])] || 'Contrato';
+      const pVar = (mesAnt && ant) ? ((atual-ant)/ant*100) : null;
       let varCol = '';
       if (mesAnt) {
         if (ant === 0) varCol = `<td class="num fat-var-zero">novo</td>`;
-        else { const p=((atual-ant)/ant*100); varCol = `<td class="num ${p>0.05?'fat-var-pos':p<-0.05?'fat-var-neg':'fat-var-zero'}">${p>0?'+':''}${p.toFixed(1)}%</td>`; }
+        else { const p=pVar; varCol = `<td class="num ${p>0.05?'fat-var-pos':p<-0.05?'fat-var-neg':'fat-var-zero'}">${p>0?'+':''}${p.toFixed(1)}%</td>`; }
       }
-      html += `<tr onclick="abrirFicha('${cnpjLimpo(l['CNPJ']||'')}','${String(l['CLIENTE']||'').replace(/'/g,"\\'")}')">
+      // MOTIVO
+      let motCell='<span style="color:var(--cinza-400);">—</span>';
+      if (temMotivo) {
+        const chave=FIN_chaveMotivo(l['CLIENTE'], ymServ);
+        const sug=FIN_motivoDeServico(l['CLIENTE'], ymServ, ymServAnt, pVar);
+        window._fatMotivoSugestoes[chave]=sug;
+        const salvo=(_motivosFat||{})[chave];
+        if(salvo && salvo.motivo && (salvo.status==='Aprovado'||salvo.status==='Manual')){
+          const bd=salvo.status==='Aprovado'?'<i class="ti ti-circle-check" style="color:var(--verde-medio);"></i>':'<i class="ti ti-edit" style="color:var(--cinza-500);"></i>';
+          motCell=`<span title="${(salvo.motivo||'').replace(/"/g,'&quot;')}">${bd} ${(salvo.motivo||'').slice(0,50)}${(salvo.motivo||'').length>50?'…':''}</span>`;
+        } else if(salvo && salvo.status==='Recusado'){ motCell='<span style="color:var(--cinza-400);">recusado</span>'; }
+        else if(sug){ motCell=`<span style="color:var(--cinza-500);font-style:italic;"><i class="ti ti-bulb"></i> ${sug.slice(0,50)}${sug.length>50?'…':''} <span style="color:#2c5282;">(revisar)</span></span>`; }
+        else { motCell='<span style="color:#2c5282;">+ adicionar</span>'; }
+      }
+      const cliJs=String(l['CLIENTE']||'').replace(/'/g,"\\'");
+      html += `<tr onclick="abrirFicha('${cnpjLimpo(l['CNPJ']||'')}','${cliJs}')">
         <td><b style="color:var(--cinza-900);">${l['CLIENTE']||'—'}</b></td>
         <td><span class="tag ${tipo==='Eventual'?'tag-eventual':'tag-contrato'}">${tipo}</span></td>
         ${mesAnt?`<td class="num" style="color:var(--cinza-600);">${fmtMoeda(ant)}</td>`:''}
         <td class="num"><b>${fmtMoeda(atual)}</b></td>
         ${varCol}
+        <td class="clicavel" style="max-width:260px;font-size:12px;" onclick="event.stopPropagation(); abrirMotivoFat('${cliJs}','${ymServ}','${rot(mes)}')">${motCell}</td>
       </tr>`;
     });
     html += `</tbody></table>`;
@@ -8833,12 +8857,13 @@ async function FIN_carregarAuxMotivo(){
 }
 
 // estuda os possíveis motivos da variação de um cliente no mês faturado (retorna string, '' se nada)
-function FIN_estudarMotivoFat(cliente, mesAtualNome, mesAntNome, varPct){
-  const ano=FIN_anoRefFat();
-  const ymServ=FIN_ymServicoDeNome(mesAtualNome, ano);
-  const ymServAnt=mesAntNome ? FIN_ymServicoDeNome(mesAntNome, ano) : '';
+// ym (yyyy-mm) a partir do NOME do mês (sem defasagem — quando o mês já é o do serviço)
+function FIN_ymDeNomeMes(nome, ano){ const idx=FIN_MES_IDX[String(nome||'').trim().toLowerCase()]; return idx ? (ano+'-'+String(idx).padStart(2,'0')) : ''; }
+
+// NÚCLEO do estudo de motivo: recebe o mês do SERVIÇO já em ym (yyyy-mm) e o anterior.
+function FIN_motivoDeServico(cliente, ymServ, ymServAnt, varPct){
   const nomeN=FIN_normNomeMot(cliente);
-  const rot = ymServ ? finRotMes(ymServ) : mesAtualNome;
+  const rot = ymServ ? finRotMes(ymServ) : '';
   const motivos=[];
   // 1) reajuste no mês do serviço
   const teveReaj=(_reajFat||[]).some(r=>{ if(FIN_normNomeMot(r['CLIENTE'])!==nomeN) return false; const d=parseDataReaj(r['DATA ÚLTIMO REAJUSTE ']||r['DATA ÚLTIMO REAJUSTE']); return d && (d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'))===ymServ; });
@@ -8857,9 +8882,17 @@ function FIN_estudarMotivoFat(cliente, mesAtualNome, mesAntNome, varPct){
   return motivos.join(' · ');
 }
 
+// recebe o NOME do mês FATURADO (aplica a defasagem de 1 mês) — usado na página "Variação de Faturamento"
+function FIN_estudarMotivoFat(cliente, mesAtualNome, mesAntNome, varPct){
+  const ano=FIN_anoRefFat();
+  return FIN_motivoDeServico(cliente, FIN_ymServicoDeNome(mesAtualNome, ano), mesAntNome?FIN_ymServicoDeNome(mesAntNome, ano):'', varPct);
+}
+
 // modal: clicar no motivo -> aprovar / recusar / editar
-function abrirMotivoFat(cliente, mes){
-  const chave=FIN_chaveMotivo(cliente,mes);
+// mesKey = chave canônica (ym do mês de SERVIÇO); mesLabel = texto amigável mostrado
+function abrirMotivoFat(cliente, mesKey, mesLabel){
+  mesLabel = mesLabel || mesKey;
+  const chave=FIN_chaveMotivo(cliente,mesKey);
   const salvo=(_motivosFat||{})[chave];
   const sugestao=(window._fatMotivoSugestoes||{})[chave]||'';
   const textoAtual=(salvo && salvo.motivo) ? salvo.motivo : sugestao;
@@ -8870,16 +8903,16 @@ function abrirMotivoFat(cliente, mes){
       <div class="ficha" style="width:520px;">
         <div class="ficha-topo"><button class="fechar" onclick="fecharFicha()"><i class="ti ti-x"></i></button>
           <div class="nome"><i class="ti ti-clipboard-text"></i> Motivo da variação</div>
-          <div class="cnpj">${cliente} · ${mes}</div></div>
+          <div class="cnpj">${cliente} · ${mesLabel}</div></div>
         <div class="ficha-corpo">
           ${sugestao?`<div style="background:#eef4fb;color:#2c5282;border-radius:8px;padding:11px 13px;font-size:13px;margin-bottom:12px;"><b><i class="ti ti-bulb"></i> Sugestão automática:</b><br>${sugestao}</div>`:`<div style="font-size:12.5px;color:var(--cinza-500);margin-bottom:12px;">O sistema não encontrou um motivo automático pra este mês. Você pode escrever manualmente abaixo.</div>`}
           ${salvo && salvo.motivo?`<div style="font-size:12px;color:var(--cinza-600);margin-bottom:10px;">Motivo salvo (${salvo.status||'—'}): <i>"${salvo.motivo}"</i></div>`:''}
           <label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Motivo</label>
           <textarea id="motfat-txt" rows="3" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;font-family:var(--fonte-corpo);">${(textoAtual||'').replace(/</g,'&lt;')}</textarea>
           <div class="ficha-botoes" style="margin-top:14px;flex-wrap:wrap;">
-            ${sugestao?`<button class="ficha-btn-primario" onclick="salvarMotivoFatFront('${cliJs}','${mes}',(window._fatMotivoSugestoes||{})['${chave}']||'','Aprovado')"><i class="ti ti-check"></i> Aprovar sugestão</button>`:''}
-            <button class="ficha-btn-secundario" onclick="salvarMotivoFatFront('${cliJs}','${mes}',document.getElementById('motfat-txt').value,'Manual')"><i class="ti ti-edit"></i> Salvar (editado/manual)</button>
-            <button class="ficha-btn-secundario" style="color:var(--vermelho);border-color:var(--vermelho);" onclick="salvarMotivoFatFront('${cliJs}','${mes}','','Recusado')"><i class="ti ti-x"></i> Recusar</button>
+            ${sugestao?`<button class="ficha-btn-primario" onclick="salvarMotivoFatFront('${cliJs}','${mesKey}',(window._fatMotivoSugestoes||{})['${chave}']||'','Aprovado')"><i class="ti ti-check"></i> Aprovar sugestão</button>`:''}
+            <button class="ficha-btn-secundario" onclick="salvarMotivoFatFront('${cliJs}','${mesKey}',document.getElementById('motfat-txt').value,'Manual')"><i class="ti ti-edit"></i> Salvar (editado/manual)</button>
+            <button class="ficha-btn-secundario" style="color:var(--vermelho);border-color:var(--vermelho);" onclick="salvarMotivoFatFront('${cliJs}','${mesKey}','','Recusado')"><i class="ti ti-x"></i> Recusar</button>
           </div>
           <div id="motfat-msg"></div>
         </div>
@@ -8895,7 +8928,9 @@ async function salvarMotivoFatFront(cliente, mes, motivo, status){
     if(!_motivosFat)_motivosFat={};
     _motivosFat[FIN_chaveMotivo(cliente,mes)]={motivo,status};
     fecharFicha();
-    FIN_renderFaturamentoVar();
+    // atualiza a página de faturamento que estiver aberta
+    if(document.getElementById('fat-tabela-area')) filtraTabelaFat();
+    else if(document.getElementById('p-faturamento')) FIN_renderFaturamentoVar();
   }catch(e){ if(msg) msg.innerHTML='<div class="sem-acesso" style="margin-top:8px;">Erro de conexão.</div>'; }
 }
 
@@ -8958,8 +8993,9 @@ async function FIN_renderFaturamentoVar(){
         let varCol='';
         if(mesAnt){ if(l.varPct===null) varCol='<td><span class="badge" style="background:var(--verde-claro-bg);color:var(--verde-escuro);">novo</span></td>';
           else { const cor=l.varPct>0.5?'pos':l.varPct<-0.5?'neg':''; varCol=`<td class="${cor}">${l.varPct>0?'+':''}${l.varPct.toFixed(1)}%</td>`; } }
-        // MOTIVO: mostra o salvo (aprovado/manual) ou a sugestão automática; clicar abre aprovar/recusar/editar
-        const chave=FIN_chaveMotivo(l.cliente, mesAtual);
+        // MOTIVO: chave canônica pelo ym do mês de SERVIÇO (defasagem de 1 mês)
+        const _ymServ=FIN_ymServicoDeNome(mesAtual, FIN_anoRefFat());
+        const chave=FIN_chaveMotivo(l.cliente, _ymServ);
         const sug=FIN_estudarMotivoFat(l.cliente, mesAtual, mesAnt, l.varPct);
         window._fatMotivoSugestoes[chave]=sug;
         const salvo=(_motivosFat||{})[chave];
@@ -8975,7 +9011,7 @@ async function FIN_renderFaturamentoVar(){
           motCell=`<span style="color:var(--cinza-400);">+ adicionar</span>`;
         }
         const cliJs=String(l.cliente).replace(/'/g,"\\'");
-        return `<tr><td><b>${l.cliente}</b></td>${mesAnt?`<td style="color:var(--cinza-600);">${finFmtM(l.ant)}</td>`:''}<td><b>${finFmtM(l.atual)}</b></td>${varCol}<td class="clicavel" style="max-width:280px;font-size:12px;" onclick="abrirMotivoFat('${cliJs}','${mesAtual}')">${motCell}</td></tr>`;
+        return `<tr><td><b>${l.cliente}</b></td>${mesAnt?`<td style="color:var(--cinza-600);">${finFmtM(l.ant)}</td>`:''}<td><b>${finFmtM(l.atual)}</b></td>${varCol}<td class="clicavel" style="max-width:280px;font-size:12px;" onclick="abrirMotivoFat('${cliJs}','${_ymServ}','${finRotMes(_ymServ)}')">${motCell}</td></tr>`;
       }).join('')}
       </tbody></table>
       <p style="font-size:11px;color:var(--cinza-500);margin-top:8px;"><i class="ti ti-info-circle"></i> A coluna <b>Motivo</b> sugere automaticamente (feriado, reajuste, queda de coletas, assessoria). Clique pra aprovar, recusar ou editar. O motivo fica salvo no card do cliente.</p>
