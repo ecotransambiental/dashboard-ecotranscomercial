@@ -2003,6 +2003,7 @@ async function renderAbaFaturamento(corpo) {
   const jaTemFat = (typeof FINdados!=='undefined' && FINdados.faturamento && FINdados.faturamento.length);
   const jaTemColetas = (typeof FINdados!=='undefined' && FINdados.coletas && FINdados.coletas.length);
   if ((!jaTemFat || !jaTemColetas) && typeof finCarregarDoSheets==='function') { try { await finCarregarDoSheets(['faturamento','coletas']); } catch(e){} }
+  if (typeof FIN_carregarAuxMotivo==='function') { try { await FIN_carregarAuxMotivo(); } catch(e){} }
   const rc = await buscarDados('Coletas_Mes');
   const normN = s => String(s||'').trim().toUpperCase().replace(/\s+/g,' ');
   // faturamento por mês (casa por nome, robusto) — helper global
@@ -2031,7 +2032,14 @@ async function renderAbaFaturamento(corpo) {
   if (fatItem && fatItem.valores && Object.keys(fatItem.valores).length) {
     html += '<div style="background:var(--verde-claro-bg);color:var(--verde-escuro);border-radius:8px;padding:8px 11px;font-size:11.5px;margin-bottom:8px;"><i class="ti ti-calendar-stats"></i> Meses pelo <b>mês do serviço</b> (defasagem de 1 mês já ajustada).</div>';
     html += '<div style="font-size:12px;font-weight:600;color:var(--cinza-600);margin-bottom:8px;">Faturamento por mês (R$)</div><table class="ficha-tab">';
-    Object.keys(fatItem.valores).forEach(mFat => { const v=num(fatItem.valores[mFat]); html += `<tr><td>${mesServico(mFat)}</td><td><b>${fmtMoeda(v)}</b></td></tr>`; });
+    Object.keys(fatItem.valores).forEach(mFat => {
+      const v=num(fatItem.valores[mFat]);
+      // motivo da variação salvo (aprovado/manual) para este mês faturado
+      const mv = (typeof _motivosFat!=='undefined' && _motivosFat) ? _motivosFat[FIN_chaveMotivo(fichaClienteAtual['CLIENTE'], mFat)] : null;
+      const motTxt = (mv && mv.motivo && (mv.status==='Aprovado'||mv.status==='Manual'))
+        ? `<div style="font-size:11px;color:var(--cinza-600);font-style:italic;margin-top:3px;"><i class="ti ti-clipboard-text" style="font-size:12px;"></i> Motivo: ${mv.motivo}</div>` : '';
+      html += `<tr><td>${mesServico(mFat)}${motTxt}</td><td><b>${fmtMoeda(v)}</b></td></tr>`;
+    });
     html += '</table>';
   } else {
     html += '<div style="font-size:13px;color:var(--cinza-500);padding:10px 0;">Sem faturamento para este cliente. Suba o relatório de Variação em <b>Financeiro › Relatórios</b>.</div>';
@@ -3132,6 +3140,7 @@ function detalheReaj(idx) {
           </div>
           <table class="ficha-tab">
             <tr><td>% de reajuste aplicado</td><td>${pctReaj!=null?pctReaj.toFixed(1).replace('.',',')+'%':'—'}</td></tr>
+            ${(r['% PREVISTO']!=null && r['% PREVISTO']!=='' && pctReaj==null) ? `<tr><td>Reajuste previsto</td><td><b style="color:var(--verde-escuro);">${parseFloat(r['% PREVISTO'])}%</b> em 12 meses da assinatura</td></tr>` : ''}
             <tr><td>Diferença (R$)</td><td>${dif!=null?fmtMoeda(dif):'—'}</td></tr>
             <tr><td>Índice de referência</td><td>${r['ÍNDICE']||'—'}</td></tr>
             <tr><td>Mínima contratual</td><td>${r['MÍN. CONTRATUAL']||'—'}</td></tr>
@@ -3156,23 +3165,33 @@ function abrirFormReajuste(idx) {
   const r = cacheReajustes[idx];
   const valorBase = parseMoedaReaj(r['VALOR REAJUSTADO']) || parseMoedaReaj(r['PREÇO ANTERIOR']) || 0;
   const area = document.getElementById('reaj-acao');
+  // sugere o % previsto do contrato (padrão 30%) já preenchido; a Joyce pode trocar o % OU digitar o novo valor direto
+  const pctPadrao = (r['% PREVISTO']!=null && r['% PREVISTO']!=='' && !isNaN(parseFloat(r['% PREVISTO']))) ? parseFloat(r['% PREVISTO']) : 30;
+  const novoPadrao = Math.round(valorBase * (1 + pctPadrao/100) * 100)/100;
   area.innerHTML = `
     <div style="background:var(--verde-claro-bg);border-radius:10px;padding:16px;">
       <div style="font-size:13px;font-weight:600;color:var(--verde-escuro);margin-bottom:10px;">Propor reajuste para aprovação</div>
+      <div style="display:flex;gap:20px;font-size:13px;margin-bottom:12px;">
+        <div><span style="color:var(--cinza-600);">Valor atual:</span><br><b style="font-size:16px;">${fmtMoeda(valorBase)}</b></div>
+        <div style="align-self:center;color:var(--cinza-400);"><i class="ti ti-arrow-right"></i></div>
+        <div><span style="color:var(--cinza-600);">Diferença:</span><br><b id="reaj-dif" style="font-size:16px;color:var(--verde-escuro);">—</b></div>
+      </div>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
-        <label style="font-size:13px;color:var(--cinza-700);">% de reajuste:</label>
-        <input type="number" id="reaj-pct" step="0.01" placeholder="ex: 4.5" oninput="calcReaj(${valorBase})"
-          style="width:90px;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;font-size:14px;">
+        <label style="font-size:13px;color:var(--cinza-700);width:96px;">% de reajuste:</label>
+        <input type="number" id="reaj-pct" step="0.01" value="${pctPadrao}" oninput="calcReajDoPct(${valorBase})"
+          style="width:110px;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;font-size:14px;">
         <span style="font-size:13px;color:var(--cinza-600);">%</span>
       </div>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-        <label style="font-size:13px;color:var(--cinza-700);">Índice:</label>
-        <input type="text" id="reaj-indice" placeholder="ex: IGP-M" value="${r['ÍNDICE']||''}" style="width:120px;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;font-size:13px;">
+        <label style="font-size:13px;color:var(--cinza-700);width:96px;">Novo valor:</label>
+        <span style="font-size:13px;color:var(--cinza-600);">R$</span>
+        <input type="number" id="reaj-novo-val" step="0.01" value="${novoPadrao.toFixed(2)}" oninput="calcReajDoValor(${valorBase})"
+          style="width:140px;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;font-size:14px;">
       </div>
-      <div style="display:flex;gap:20px;font-size:13px;margin-bottom:14px;">
-        <div><span style="color:var(--cinza-600);">Valor atual:</span><br><b style="font-size:16px;">${fmtMoeda(valorBase)}</b></div>
-        <div style="align-self:center;color:var(--cinza-400);"><i class="ti ti-arrow-right"></i></div>
-        <div><span style="color:var(--cinza-600);">Novo valor:</span><br><b id="reaj-novo" style="font-size:16px;color:var(--verde-escuro);">—</b></div>
+      <div style="font-size:11px;color:var(--cinza-500);margin:-4px 0 12px;"><i class="ti ti-info-circle"></i> Editar o % recalcula o valor; editar o valor recalcula o %. Use pro caso que não for 30%.</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <label style="font-size:13px;color:var(--cinza-700);width:96px;">Índice:</label>
+        <input type="text" id="reaj-indice" placeholder="ex: IGP-M" value="${r['ÍNDICE']||''}" style="width:140px;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;font-size:13px;">
       </div>
       <div class="ficha-botoes">
         <button class="ficha-btn-primario" onclick="solicitarAprovacaoReaj(${idx}, ${valorBase})"><i class="ti ti-send"></i> Solicitar aprovação</button>
@@ -3180,26 +3199,47 @@ function abrirFormReajuste(idx) {
       </div>
       <div style="font-size:11px;color:var(--cinza-500);margin-top:10px;">O reajuste vai para a fila de aprovação do Roberto. Quando ele aprovar, o valor antigo vai pro histórico e o novo passa a valer.</div>
     </div>`;
+  atualizaDifReaj(valorBase);
 }
 
-function calcReaj(base) {
+// edita o % -> recalcula o novo valor
+function calcReajDoPct(base) {
   const pct = parseFloat(document.getElementById('reaj-pct').value);
-  const out = document.getElementById('reaj-novo');
-  if (isNaN(pct)) { out.textContent = '—'; return; }
-  out.textContent = fmtMoeda(Math.round(base * (1 + pct/100) * 100)/100);
+  const val = document.getElementById('reaj-novo-val');
+  if (!isNaN(pct) && base>0) val.value = (Math.round(base * (1 + pct/100) * 100)/100).toFixed(2);
+  atualizaDifReaj(base);
+}
+// edita o novo valor -> recalcula o %
+function calcReajDoValor(base) {
+  const novo = parseFloat(document.getElementById('reaj-novo-val').value);
+  const pctEl = document.getElementById('reaj-pct');
+  if (!isNaN(novo) && base>0) pctEl.value = (Math.round((novo-base)/base*10000)/100);
+  atualizaDifReaj(base);
+}
+function atualizaDifReaj(base) {
+  const novo = parseFloat((document.getElementById('reaj-novo-val')||{}).value);
+  const out = document.getElementById('reaj-dif');
+  if (!out) return;
+  if (isNaN(novo)) { out.textContent = '—'; return; }
+  const dif = Math.round((novo-base)*100)/100;
+  out.textContent = (dif>=0?'+':'') + fmtMoeda(dif);
 }
 
 async function solicitarAprovacaoReaj(idx, base) {
   const r = cacheReajustes[idx];
-  const pct = parseFloat(document.getElementById('reaj-pct').value);
+  let pct = parseFloat(document.getElementById('reaj-pct').value);
+  let novo = parseFloat((document.getElementById('reaj-novo-val')||{}).value);
   const indice = (document.getElementById('reaj-indice')||{}).value||'';
-  if (isNaN(pct)) { alert('Digite o % de reajuste.'); return; }
+  if (isNaN(pct) && isNaN(novo)) { alert('Informe o % ou o novo valor do reajuste.'); return; }
+  // completa o que faltar a partir do que foi informado
+  if (isNaN(novo) && !isNaN(pct) && base>0) novo = Math.round(base*(1+pct/100)*100)/100;
+  if (isNaN(pct) && !isNaN(novo) && base>0) pct = Math.round((novo-base)/base*10000)/100;
   const area = document.getElementById('reaj-acao');
   area.innerHTML = `<div style="text-align:center;padding:16px;color:var(--cinza-500);">Enviando para aprovação...</div>`;
   try {
     const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
       acao:'solicitarReajuste', token: sessaoToken,
-      dados: { cnpj:r['CNPJ'], cliente:r['CLIENTE'], servico:r['TP DE SERVIÇO'], valorAtual:base, percentual:pct, indice }
+      dados: { cnpj:r['CNPJ'], cliente:r['CLIENTE'], servico:r['TP DE SERVIÇO'], valorAtual:base, percentual:pct, valorNovo:novo, indice }
     })});
     const res = await resp.json();
     if (!res.ok) { area.innerHTML = `<div class="sem-acesso">${res.erro}</div>`; return; }
@@ -3211,10 +3251,12 @@ async function solicitarAprovacaoReaj(idx, base) {
 
 function emailReajusteUnico(idx, base) {
   const r = cacheReajustes[idx];
-  const pct = parseFloat(document.getElementById('reaj-pct').value);
+  let pct = parseFloat(document.getElementById('reaj-pct').value);
+  let novo = parseFloat((document.getElementById('reaj-novo-val')||{}).value);
   const indice = (document.getElementById('reaj-indice')||{}).value||'';
-  if (isNaN(pct)) { alert('Digite o % primeiro.'); return; }
-  const novo = Math.round(base*(1+pct/100)*100)/100;
+  if (isNaN(pct) && isNaN(novo)) { alert('Informe o % ou o novo valor primeiro.'); return; }
+  if (isNaN(novo) && !isNaN(pct) && base>0) novo = Math.round(base*(1+pct/100)*100)/100;
+  if (isNaN(pct) && !isNaN(novo) && base>0) pct = Math.round((novo-base)/base*10000)/100;
   const para = DIRETORES_CC.join(',');
   const assunto = encodeURIComponent(`Solicitação de aprovação de reajuste — ${r['CLIENTE']}`);
   const corpo = encodeURIComponent(
@@ -8550,9 +8592,105 @@ async function FIN_reenviarFaturamento(){
   } catch(e) { alert('Erro ao reenviar: '+e.message); }
 }
 
-function FIN_renderFaturamentoVar(){
+// ===== MOTIVO da variação de faturamento (estudo automático + aprovação da Joyce) =====
+// feriados que reduzem dias de coleta: nacionais + estaduais SP + municipais da capital (nacionais + móveis por ano)
+const FIN_FERIADOS = {
+  '2025-01':['Confraternização','Aniversário de SP'], '2025-03':['Carnaval'], '2025-04':['Sexta-feira Santa','Tiradentes'],
+  '2025-05':['Dia do Trabalho'], '2025-06':['Corpus Christi'], '2025-07':['Revolução Constitucionalista (SP)'],
+  '2025-09':['Independência'], '2025-10':['N. Sra. Aparecida'], '2025-11':['Finados','Proclamação da República','Consciência Negra'], '2025-12':['Natal'],
+  '2026-01':['Confraternização','Aniversário de SP'], '2026-02':['Carnaval'], '2026-04':['Sexta-feira Santa','Tiradentes'],
+  '2026-05':['Dia do Trabalho'], '2026-06':['Corpus Christi'], '2026-07':['Revolução Constitucionalista (SP)'],
+  '2026-09':['Independência'], '2026-10':['N. Sra. Aparecida'], '2026-11':['Finados','Proclamação da República','Consciência Negra'], '2026-12':['Natal'],
+};
+const FIN_MES_IDX = {'janeiro':1,'fevereiro':2,'março':3,'marco':3,'abril':4,'maio':5,'junho':6,'julho':7,'agosto':8,'setembro':9,'outubro':10,'novembro':11,'dezembro':12};
+function FIN_feriadosDoMes(ym){ return FIN_FERIADOS[ym] || []; }
+function FIN_anoRefFat(){ const anos=(FINdados.coletas||[]).map(c=>parseInt(String(c.ym||'').slice(0,4))).filter(a=>a>2000); return anos.length?Math.max.apply(null,anos):new Date().getFullYear(); }
+// mês do SERVIÇO (yyyy-mm) a partir do nome do mês FATURADO — aplica a defasagem de 1 mês
+function FIN_ymServicoDeNome(nomeFaturado, ano){ const idx=FIN_MES_IDX[String(nomeFaturado||'').trim().toLowerCase()]; if(!idx) return ''; let m=idx-1, a=ano; if(m<1){ m=12; a=ano-1; } return a+'-'+String(m).padStart(2,'0'); }
+function FIN_normNomeMot(s){ return String(s||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Z0-9 ]/g,'').replace(/\s+/g,' ').trim(); }
+function FIN_chaveMotivo(cliente,mes){ return FIN_normNomeMot(cliente)+'||'+String(mes||'').trim().toUpperCase(); }
+function FIN_qtdeColetasClienteYM(cliente, ym){ const n=FIN_normNomeMot(cliente); return (FINdados.coletas||[]).filter(c=>c.ym===ym && FIN_normNomeMot(c.cliente)===n).reduce((s,c)=>s+(parseFloat(c.qtdeServ)||0),0); }
+
+let _motivosFat=null, _reajFat=null, _assessFat=null;
+window._fatMotivoSugestoes = window._fatMotivoSugestoes || {};
+async function FIN_carregarAuxMotivo(){
+  if(_motivosFat && _reajFat && _assessFat) return;
+  try{ const r=await buscarDados('Fin_Motivos'); _motivosFat={}; if(r.ok) r.linhas.forEach(l=>{ _motivosFat[FIN_chaveMotivo(l['CLIENTE'],l['MES'])]={motivo:l['MOTIVO']||'',status:l['STATUS']||''}; }); }catch(e){ _motivosFat=_motivosFat||{}; }
+  try{ const r=await buscarDados('Reajustes'); _reajFat=(r.ok?r.linhas:[]); }catch(e){ _reajFat=[]; }
+  try{ const r=await buscarDados('Historico_Renovacoes_SP'); _assessFat=(r.ok?r.linhas:[]); }catch(e){ _assessFat=[]; }
+}
+
+// estuda os possíveis motivos da variação de um cliente no mês faturado (retorna string, '' se nada)
+function FIN_estudarMotivoFat(cliente, mesAtualNome, mesAntNome, varPct){
+  const ano=FIN_anoRefFat();
+  const ymServ=FIN_ymServicoDeNome(mesAtualNome, ano);
+  const ymServAnt=mesAntNome ? FIN_ymServicoDeNome(mesAntNome, ano) : '';
+  const nomeN=FIN_normNomeMot(cliente);
+  const rot = ymServ ? finRotMes(ymServ) : mesAtualNome;
+  const motivos=[];
+  // 1) reajuste no mês do serviço
+  const teveReaj=(_reajFat||[]).some(r=>{ if(FIN_normNomeMot(r['CLIENTE'])!==nomeN) return false; const d=parseDataReaj(r['DATA ÚLTIMO REAJUSTE ']||r['DATA ÚLTIMO REAJUSTE']); return d && (d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'))===ymServ; });
+  if(teveReaj) motivos.push('Reajuste aplicado em '+rot);
+  // 2) feriado no mês do serviço (menos dias de coleta)
+  const fer=FIN_feriadosDoMes(ymServ);
+  if(fer.length) motivos.push('Feriado em '+rot+' — menos dias de coleta ('+fer.join(', ')+')');
+  // 3) queda de coletas: só se o faturamento caiu mais de 5% e a quantidade caiu de forma coerente
+  if(varPct!=null && varPct<-5 && ymServ && ymServAnt){
+    const qA=FIN_qtdeColetasClienteYM(cliente, ymServ), qP=FIN_qtdeColetasClienteYM(cliente, ymServAnt);
+    if(qP>0 && qA<qP){ const q=((qA-qP)/qP*100); motivos.push('Menos equipamentos coletados em '+rot+' ('+q.toFixed(0)+'%: '+qP+'→'+qA+')'); }
+  }
+  // 4) assessoria SP Regula/MTR no mês do serviço
+  const ass=(_assessFat||[]).find(a=>{ if(FIN_normNomeMot(a['CLIENTE'])!==nomeN) return false; if(String(a['ASSESSORIA']||'').trim().toLowerCase()!=='sim') return false; const d=parseDataReaj(a['DATA_RENOVACAO']); return d && (d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'))===ymServ; });
+  if(ass) motivos.push('Assessoria SP Regula/MTR em '+rot+(ass['VALOR']?(' (R$ '+ass['VALOR']+')'):''));
+  return motivos.join(' · ');
+}
+
+// modal: clicar no motivo -> aprovar / recusar / editar
+function abrirMotivoFat(cliente, mes){
+  const chave=FIN_chaveMotivo(cliente,mes);
+  const salvo=(_motivosFat||{})[chave];
+  const sugestao=(window._fatMotivoSugestoes||{})[chave]||'';
+  const textoAtual=(salvo && salvo.motivo) ? salvo.motivo : sugestao;
+  const cliJs=String(cliente).replace(/'/g,"\\'").replace(/"/g,'&quot;');
+  const cont=document.getElementById('ficha-container');
+  cont.innerHTML=`
+    <div class="ficha-overlay" onclick="if(event.target===this)fecharFicha()">
+      <div class="ficha" style="width:520px;">
+        <div class="ficha-topo"><button class="fechar" onclick="fecharFicha()"><i class="ti ti-x"></i></button>
+          <div class="nome"><i class="ti ti-clipboard-text"></i> Motivo da variação</div>
+          <div class="cnpj">${cliente} · ${mes}</div></div>
+        <div class="ficha-corpo">
+          ${sugestao?`<div style="background:#eef4fb;color:#2c5282;border-radius:8px;padding:11px 13px;font-size:13px;margin-bottom:12px;"><b><i class="ti ti-bulb"></i> Sugestão automática:</b><br>${sugestao}</div>`:`<div style="font-size:12.5px;color:var(--cinza-500);margin-bottom:12px;">O sistema não encontrou um motivo automático pra este mês. Você pode escrever manualmente abaixo.</div>`}
+          ${salvo && salvo.motivo?`<div style="font-size:12px;color:var(--cinza-600);margin-bottom:10px;">Motivo salvo (${salvo.status||'—'}): <i>"${salvo.motivo}"</i></div>`:''}
+          <label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Motivo</label>
+          <textarea id="motfat-txt" rows="3" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;font-family:var(--fonte-corpo);">${(textoAtual||'').replace(/</g,'&lt;')}</textarea>
+          <div class="ficha-botoes" style="margin-top:14px;flex-wrap:wrap;">
+            ${sugestao?`<button class="ficha-btn-primario" onclick="salvarMotivoFatFront('${cliJs}','${mes}',(window._fatMotivoSugestoes||{})['${chave}']||'','Aprovado')"><i class="ti ti-check"></i> Aprovar sugestão</button>`:''}
+            <button class="ficha-btn-secundario" onclick="salvarMotivoFatFront('${cliJs}','${mes}',document.getElementById('motfat-txt').value,'Manual')"><i class="ti ti-edit"></i> Salvar (editado/manual)</button>
+            <button class="ficha-btn-secundario" style="color:var(--vermelho);border-color:var(--vermelho);" onclick="salvarMotivoFatFront('${cliJs}','${mes}','','Recusado')"><i class="ti ti-x"></i> Recusar</button>
+          </div>
+          <div id="motfat-msg"></div>
+        </div>
+      </div>
+    </div>`;
+}
+async function salvarMotivoFatFront(cliente, mes, motivo, status){
+  const msg=document.getElementById('motfat-msg'); if(msg) msg.innerHTML='<div style="text-align:center;padding:10px;color:var(--cinza-500);">Salvando...</div>';
+  try{
+    const resp=await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'salvarMotivoFat',token:sessaoToken,dados:{cliente,mes,motivo,status}})});
+    const r=await resp.json();
+    if(!r.ok){ if(msg) msg.innerHTML=`<div class="sem-acesso" style="margin-top:8px;">${r.erro||'republique o Apps Script.'}</div>`; return; }
+    if(!_motivosFat)_motivosFat={};
+    _motivosFat[FIN_chaveMotivo(cliente,mes)]={motivo,status};
+    fecharFicha();
+    FIN_renderFaturamentoVar();
+  }catch(e){ if(msg) msg.innerHTML='<div class="sem-acesso" style="margin-top:8px;">Erro de conexão.</div>'; }
+}
+
+async function FIN_renderFaturamentoVar(){
   const p=document.getElementById('p-faturamento');
   if(!FINdados.faturamento.length){ p.innerHTML='<div class="card"><div class="vazio">Suba o relatório de Variação de Faturamento (.xlsx) na aba Relatórios.</div></div>'; return; }
+  await FIN_carregarAuxMotivo();
   // quantos meses cada cliente tem em memória (pra o diagnóstico do botão de reenvio)
   const mesesMem = FINdados.faturamento[0] ? Object.keys(FINdados.faturamento[0].valores||{}).length : 0;
   const meses = window._fatVarMeses || Object.keys(FINdados.faturamento[0].valores);
@@ -8603,14 +8741,32 @@ function FIN_renderFaturamentoVar(){
     <div class="card">
       <h2>Faturamento por cliente${mesAnt?` — ${mesAnt} → ${mesAtual}`:` — ${mesAtual}`}</h2>
       <p style="font-size:12px;color:var(--cinza-500);margin-bottom:8px;">Ordenado por quem mais caiu. Mostrando ${Math.min(linhas.length,300)} de ${linhas.length}.</p>
-      <table><thead><tr><th>Cliente</th>${mesAnt?`<th>${mesAnt}</th>`:''}<th>${mesAtual}</th>${mesAnt?'<th>Variação</th>':''}</tr></thead><tbody>
+      <table><thead><tr><th>Cliente</th>${mesAnt?`<th>${mesAnt}</th>`:''}<th>${mesAtual}</th>${mesAnt?'<th>Variação</th>':''}<th>Motivo</th></tr></thead><tbody>
       ${linhas.slice(0,300).map(l=>{
         let varCol='';
         if(mesAnt){ if(l.varPct===null) varCol='<td><span class="badge" style="background:var(--verde-claro-bg);color:var(--verde-escuro);">novo</span></td>';
           else { const cor=l.varPct>0.5?'pos':l.varPct<-0.5?'neg':''; varCol=`<td class="${cor}">${l.varPct>0?'+':''}${l.varPct.toFixed(1)}%</td>`; } }
-        return `<tr><td><b>${l.cliente}</b></td>${mesAnt?`<td style="color:var(--cinza-600);">${finFmtM(l.ant)}</td>`:''}<td><b>${finFmtM(l.atual)}</b></td>${varCol}</tr>`;
+        // MOTIVO: mostra o salvo (aprovado/manual) ou a sugestão automática; clicar abre aprovar/recusar/editar
+        const chave=FIN_chaveMotivo(l.cliente, mesAtual);
+        const sug=FIN_estudarMotivoFat(l.cliente, mesAtual, mesAnt, l.varPct);
+        window._fatMotivoSugestoes[chave]=sug;
+        const salvo=(_motivosFat||{})[chave];
+        let motCell;
+        if(salvo && salvo.motivo && (salvo.status==='Aprovado'||salvo.status==='Manual')){
+          const badge=salvo.status==='Aprovado'?'<i class="ti ti-circle-check" style="color:var(--verde-medio);"></i>':'<i class="ti ti-edit" style="color:var(--cinza-500);"></i>';
+          motCell=`<span title="${(salvo.motivo||'').replace(/"/g,'&quot;')}">${badge} ${(salvo.motivo||'').slice(0,60)}${(salvo.motivo||'').length>60?'…':''}</span>`;
+        } else if(salvo && salvo.status==='Recusado'){
+          motCell=`<span style="color:var(--cinza-400);">recusado</span>`;
+        } else if(sug){
+          motCell=`<span style="color:var(--cinza-500);font-style:italic;"><i class="ti ti-bulb"></i> ${sug.slice(0,60)}${sug.length>60?'…':''} <span style="color:#2c5282;">(revisar)</span></span>`;
+        } else {
+          motCell=`<span style="color:var(--cinza-400);">+ adicionar</span>`;
+        }
+        const cliJs=String(l.cliente).replace(/'/g,"\\'");
+        return `<tr><td><b>${l.cliente}</b></td>${mesAnt?`<td style="color:var(--cinza-600);">${finFmtM(l.ant)}</td>`:''}<td><b>${finFmtM(l.atual)}</b></td>${varCol}<td class="clicavel" style="max-width:280px;font-size:12px;" onclick="abrirMotivoFat('${cliJs}','${mesAtual}')">${motCell}</td></tr>`;
       }).join('')}
       </tbody></table>
+      <p style="font-size:11px;color:var(--cinza-500);margin-top:8px;"><i class="ti ti-info-circle"></i> A coluna <b>Motivo</b> sugere automaticamente (feriado, reajuste, queda de coletas, assessoria). Clique pra aprovar, recusar ou editar. O motivo fica salvo no card do cliente.</p>
     </div>`;
 }
 
