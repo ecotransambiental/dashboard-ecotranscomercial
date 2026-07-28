@@ -716,7 +716,7 @@ function sair() {
 
 // limpa todos os caches e recarrega a tela atual (pra ver mudanças feitas no Google Sheets)
 function recarregarDados() {
-  cacheClientes = null; cacheFaturamento = null; cacheLeads = null;
+  cacheClientes = null; cacheClientesTodos = null; cacheFaturamento = null; cacheLeads = null;
   kanbanLeads = null; cacheReajustes = null; cacheInad = null;
   cacheFat = null; cacheFatCols = null; cacheCanc = null;
   cacheRGG = null; cacheSIGOR = null; cacheRenov = null;
@@ -783,7 +783,7 @@ function limparCacheBusca(){ for (const k in _cacheDados) delete _cacheDados[k];
 function iniciarApp() {
   // limpar TODOS os caches ao entrar — garante que os dados sejam carregados
   // com o filtro correto para o usuário desta sessão (evita cache de outra sessão)
-  kanbanLeads = null; cacheClientes = null; cacheFaturamento = null; cacheLeads = null;
+  kanbanLeads = null; cacheClientes = null; cacheClientesTodos = null; cacheFaturamento = null; cacheLeads = null;
   cacheReajustes = null; cacheInad = null; cacheFat = null; cacheFatCols = null;
   cacheCanc = null; cacheAgenda = null; window._histEtapas = null;
   if (typeof limparCacheBusca === 'function') limparCacheBusca();
@@ -926,6 +926,16 @@ async function renderConteudo(subId, subNome) {
 
 // ---- Cache de dados carregados (pra busca e ficha) ----
 let cacheClientes = null, cacheFaturamento = null, cacheLeads = null;
+let cacheClientesTodos = null; // TODOS os clientes (sem o filtro de carteira) — usado só na busca de "clientes próximos" do lead
+
+// carrega TODOS os clientes ativos, ignorando o filtro por consultor (a proximidade vale pra qualquer vendedor).
+// O backend não restringe a aba Clientes por perfil, então é seguro.
+async function carregarClientesTodos() {
+  if (cacheClientesTodos) return cacheClientesTodos;
+  const r = await buscarDados('Clientes');
+  cacheClientesTodos = r.ok ? r.linhas : [];
+  return cacheClientesTodos;
+}
 
 async function carregarClientes() {
   if (cacheClientes) return cacheClientes;
@@ -7462,8 +7472,9 @@ async function mostrarClientesProximos(cepLead, idLead) {
     alvo.innerHTML = `<div style="background:var(--cinza-100);border-radius:10px;padding:12px;font-size:12px;color:var(--cinza-500);"><i class="ti ti-map-pin"></i> Preencha o CEP do lead (acima) para ver clientes próximos.</div>`;
     return;
   }
-  await carregarClientes();
-  const lista = (cacheClientes||[]).map(c => {
+  // usa TODOS os clientes (não só os do vendedor) — a proximidade precisa enxergar a base inteira
+  const todosClientes = await carregarClientesTodos();
+  const lista = (todosClientes||[]).map(c => {
     const cc = String(c['CEP']||'').replace(/\D/g,'');
     if (cc.length < 5) return null;
     let nivel = 0;
