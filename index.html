@@ -7073,6 +7073,14 @@ function blocoDeclinadosCoberturas(leadsPeriodo) {
       </div>`;
     });
   } else { html += '<div style="font-size:13px;color:var(--cinza-500);">Nenhuma cobertura no período.</div>'; }
+  // coberturas com proposta enviada registrada (acessível, mas fora dos números)
+  const comProp = coberturas.filter(l=>String(l['PROPOSTA_COBERTURA']||'').toLowerCase()==='sim');
+  if (comProp.length) {
+    html += `<div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--cinza-200);">
+      <div style="font-size:12px;color:#6B5B95;font-weight:600;margin-bottom:6px;"><i class="ti ti-file-check"></i> ${comProp.length} com proposta enviada (clique pra abrir):</div>
+      ${comProp.map(l=>`<div onclick="abrirLead('${String(l['ID_LEAD']||'').replace(/'/g,"\\'")}')" style="cursor:pointer;font-size:12px;padding:3px 0;color:var(--cinza-700);"><i class="ti ti-external-link" style="font-size:12px;"></i> ${l['CLIENTE']||'—'}${l['VALOR_PROPOSTA_COBERTURA']?' · '+fmtMoeda(l['VALOR_PROPOSTA_COBERTURA']):''}${l['DATA_PROPOSTA_COBERTURA']?' · '+fmtDataBR(l['DATA_PROPOSTA_COBERTURA']):''}</div>`).join('')}
+    </div>`;
+  }
   html += '</div></div>';
   return html;
 }
@@ -7412,6 +7420,36 @@ function fcomCalcPeriodo(btn) {
 }
 
 // ---- Abrir detalhes de um lead (clique no card do Kanban) ----
+// converte uma data salva (dd/mm/aaaa ou ISO) para o formato do <input type=date> (aaaa-mm-dd)
+function dataInputVal(v){ const d=parseDataReaj(v); if(!d) return ''; return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+
+// registra a proposta enviada numa COBERTURA — fica salvo, mas o lead continua como Cobertura (fora dos números)
+async function salvarPropostaCobertura(idLead){
+  const num=((document.getElementById('cobprop-num')||{}).value||'').trim();
+  const data=(document.getElementById('cobprop-data')||{}).value||'';
+  const valor=(document.getElementById('cobprop-valor')||{}).value||'';
+  const campos={ PROPOSTA_COBERTURA:'Sim', NUM_PROPOSTA_COBERTURA:num, DATA_PROPOSTA_COBERTURA:(data?fmtDataBR(data):''), VALOR_PROPOSTA_COBERTURA:valor };
+  try{
+    const resp=await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'atualizarLeadCampos',token:sessaoToken,dados:{idLead:String(idLead),campos}})});
+    const r=await resp.json();
+    if(!r.ok){ alert('Erro: '+(r.erro||'verifique se o Apps Script foi republicado.')); return; }
+    const lead=(kanbanLeads||[]).find(x=>String(x['ID_LEAD'])===String(idLead)); if(lead) Object.assign(lead, campos);
+    const av=document.createElement('div'); av.textContent='Proposta de cobertura salva!'; av.style.cssText='position:fixed;bottom:20px;right:20px;background:#6B5B95;color:white;padding:10px 18px;border-radius:8px;font-size:13px;z-index:9999;'; document.body.appendChild(av); setTimeout(()=>av.remove(),2000);
+    abrirLead(idLead);
+  }catch(e){ alert('Erro de conexão.'); }
+}
+async function removerPropostaCobertura(idLead){
+  if(!confirm('Remover o registro de proposta enviada desta cobertura?')) return;
+  const campos={ PROPOSTA_COBERTURA:'Não', NUM_PROPOSTA_COBERTURA:'', DATA_PROPOSTA_COBERTURA:'', VALOR_PROPOSTA_COBERTURA:'' };
+  try{
+    const resp=await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'atualizarLeadCampos',token:sessaoToken,dados:{idLead:String(idLead),campos}})});
+    const r=await resp.json();
+    if(!r.ok){ alert('Erro: '+(r.erro||'republique o Apps Script.')); return; }
+    const lead=(kanbanLeads||[]).find(x=>String(x['ID_LEAD'])===String(idLead)); if(lead) Object.assign(lead, campos);
+    abrirLead(idLead);
+  }catch(e){ alert('Erro de conexão.'); }
+}
+
 function abrirLead(id) {
   const l = (kanbanLeads||[]).find(x => String(x['ID_LEAD'])===String(id));
   if (!l) return;
@@ -7463,6 +7501,18 @@ function abrirLead(id) {
             </div>
             <div style="font-size:11px;color:var(--cinza-500);margin-top:6px;">Ao escolher "Proposta Solicitada", abre a precificação automaticamente.</div>
           </div>
+          ${etapaAtual==='Cobertura' ? `
+          <div style="background:#ede9f3;border:1px solid #d9cfe8;border-radius:10px;padding:12px;margin-bottom:14px;">
+            <label style="font-size:12px;color:#6B5B95;display:block;margin-bottom:4px;font-weight:600;"><i class="ti ti-shield-half"></i> Proposta enviada (cobertura)</label>
+            <div style="font-size:11px;color:var(--cinza-500);margin-bottom:8px;">Registre a proposta que você enviou pra ajudar o parceiro. Fica salvo aqui, mas <b>continua como cobertura e não entra nos números</b>.</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+              <input type="text" id="cobprop-num" value="${(l['NUM_PROPOSTA_COBERTURA']||'').replace(/"/g,'&quot;')}" placeholder="Nº proposta" style="width:110px;padding:7px;border:1.5px solid var(--cinza-300);border-radius:7px;font-size:13px;">
+              <input type="date" id="cobprop-data" value="${dataInputVal(l['DATA_PROPOSTA_COBERTURA'])}" style="padding:7px;border:1.5px solid var(--cinza-300);border-radius:7px;font-size:13px;">
+              <input type="number" step="0.01" id="cobprop-valor" value="${l['VALOR_PROPOSTA_COBERTURA']||''}" placeholder="Valor R$" style="width:120px;padding:7px;border:1.5px solid var(--cinza-300);border-radius:7px;font-size:13px;">
+              <button onclick="salvarPropostaCobertura('${idLead}')" style="padding:7px 12px;border:none;background:#6B5B95;color:white;border-radius:7px;cursor:pointer;font-size:12px;"><i class="ti ti-check"></i> Salvar proposta</button>
+            </div>
+            ${String(l['PROPOSTA_COBERTURA']||'').toLowerCase()==='sim' ? `<div style="margin-top:8px;font-size:12px;color:#6B5B95;"><i class="ti ti-circle-check"></i> Proposta registrada${l['DATA_PROPOSTA_COBERTURA']?' em '+fmtDataBR(l['DATA_PROPOSTA_COBERTURA']):''}${l['VALOR_PROPOSTA_COBERTURA']?' · '+fmtMoeda(l['VALOR_PROPOSTA_COBERTURA']):''}. <span onclick="removerPropostaCobertura('${idLead}')" style="color:var(--vermelho);cursor:pointer;text-decoration:underline;">remover</span></div>` : ''}
+          </div>` : ''}
           ${etapaAtual==='Indicação/Prospecção' ? `
           <div style="background:var(--cinza-100);border-radius:10px;padding:12px;margin-bottom:14px;">
             <label style="font-size:12px;color:var(--cinza-600);display:block;margin-bottom:6px;font-weight:600;">Status (entrada)</label>
