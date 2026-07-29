@@ -7022,7 +7022,7 @@ function calcResultados() {
         <tr><td style="padding:8px 0;color:var(--cinza-700);">Prospecções no período</td><td style="text-align:right;font-weight:600;">${totalProspec}</td></tr>
       </table>
     </div>
-    ${blocoPorConsultor(leadsPeriodo)}
+    ${blocoPorConsultor(leadsPeriodo, ini, fim)}
     ${blocoDeclinadosCoberturas(leadsPeriodo)}
     ${blocoFechamentosComissao()}`;
 }
@@ -7079,16 +7079,18 @@ function blocoDeclinadosCoberturas(leadsPeriodo) {
 
 // desempenho por consultor: tabela resumo + detalhe expansível de cada um.
 // "Leads" conta só fontes PASSIVAS (exclui prospecção e cobertura). Prospecção tem bloco próprio.
-function blocoPorConsultor(leadsPeriodo) {
+function blocoPorConsultor(leadsPeriodo, ini, fim) {
   const val = l => { const v=l['VALOR_R$']; if(v==null||v==='')return 0; if(typeof v==='number')return v; let s=String(v).replace(/[^\d,.-]/g,''); if(s.includes(',')&&s.lastIndexOf(',')>s.lastIndexOf('.'))s=s.replace(/\./g,'').replace(',','.'); return parseFloat(s)||0; };
   const ehProspec = l => String(l['FONTE']||'').toLowerCase().includes('prospec');
+  const ehDeCliente = l => String(l['FONTE']||'').toLowerCase().includes('cliente');
   // leads passivos = tudo menos cobertura e menos prospecção
   const passivos = leadsPeriodo.filter(l=>l['ETAPA']!=='Cobertura' && !ehProspec(l));
   const porCons = {};
   passivos.forEach(l=>{
     const c = l['CONSULTOR']||'Sem consultor';
-    porCons[c] = porCons[c] || {leads:0, proposta:0, fechado:0, declinado:0, contato:0, prospec:0, valor:0, itens:[]};
+    porCons[c] = porCons[c] || {leads:0, cliente:0, proposta:0, fechado:0, declinado:0, contato:0, prospec:0, valor:0, itens:[]};
     const o = porCons[c]; o.leads++;
+    if (ehDeCliente(l)) o.cliente++; // lead cuja fonte é "cliente" (indicação de cliente)
     const e = l['ETAPA'];
     if (e==='Proposta Enviada') o.proposta++;
     else if (e==='Fechado') { o.fechado++; o.valor+=val(l); }
@@ -7099,12 +7101,18 @@ function blocoPorConsultor(leadsPeriodo) {
   });
   const linhas = Object.entries(porCons).sort((a,b)=>b[1].fechado-a[1].fechado || b[1].leads-a[1].leads);
   if (!linhas.length) return '';
+  // guarda os dados pra impressão (tabela grande e bonita)
+  window._desempCons = { ini, fim, linhas: linhas.map(([c,o])=>({consultor:c, leads:o.leads, cliente:o.cliente, proposta:o.proposta, fechado:o.fechado, declinado:o.declinado, valor:o.valor})) };
   let html = `<div style="background:white;border:1px solid var(--cinza-200);border-radius:12px;padding:20px;margin-top:18px;">
-    <h3 style="font-family:var(--fonte-display);font-size:15px;margin:0 0 4px;">Desempenho por consultor (leads recebidos)</h3>
-    <div style="font-size:12px;color:var(--cinza-500);margin-bottom:12px;"><i class="ti ti-info-circle"></i> Só leads que chegaram (Google, indicação, cliente, licitação, SP Regula). Prospecção ativa está no bloco abaixo. Clique num consultor para ver os leads.</div>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
+      <h3 style="font-family:var(--fonte-display);font-size:15px;margin:0 0 4px;">Desempenho por consultor (leads recebidos)</h3>
+      <button onclick="imprimirDesempenhoConsultor()" style="padding:7px 13px;border:1.5px solid var(--verde-medio);background:#fff;color:var(--verde-escuro);border-radius:8px;cursor:pointer;font-size:12.5px;font-weight:600;"><i class="ti ti-printer"></i> Imprimir tabela</button>
+    </div>
+    <div style="font-size:12px;color:var(--cinza-500);margin-bottom:12px;"><i class="ti ti-info-circle"></i> Só leads que chegaram (Google, indicação, cliente, licitação, SP Regula). "De cliente" = leads indicados por clientes. Prospecção ativa está no bloco abaixo. Clique num consultor para ver os leads.</div>
     <table style="width:100%;font-size:13px;border-collapse:collapse;">
       <thead><tr style="border-bottom:2px solid var(--cinza-200);">
         <th style="text-align:left;padding:8px 0;">Consultor</th><th style="text-align:right;">Leads</th>
+        <th style="text-align:right;">De cliente</th>
         <th style="text-align:right;">Proposta</th><th style="text-align:right;">Fechado</th>
         <th style="text-align:right;">Declinado</th><th style="text-align:right;">Valor fechado</th>
       </tr></thead><tbody>`;
@@ -7117,10 +7125,12 @@ function blocoPorConsultor(leadsPeriodo) {
         if(fa!==fb) return fa<fb?-1:1;
         return ordEtapa(a['ETAPA'])-ordEtapa(b['ETAPA']);
       })
-      .map(l=>`<tr style="background:var(--cinza-50);border-bottom:1px solid var(--cinza-100);font-size:12px;"><td style="padding:5px 0 5px 20px;">${l['CLIENTE']||'—'}</td><td colspan="2" style="color:var(--cinza-600);">${rotEtapa(l['ETAPA'])}${l['ETAPA']==='Declinado'&&l['MOTIVO_PERDA']?' · '+l['MOTIVO_PERDA']:''}</td><td colspan="1" style="color:var(--cinza-600);font-size:11px;">${l['FONTE']||''}</td><td colspan="2" style="text-align:right;color:var(--cinza-600);">${val(l)?fmtMoeda(val(l)):'—'}</td></tr>`).join('');
+      .map(l=>`<tr style="background:var(--cinza-50);border-bottom:1px solid var(--cinza-100);font-size:12px;"><td style="padding:5px 0 5px 20px;">${l['CLIENTE']||'—'}</td><td colspan="3" style="color:var(--cinza-600);">${rotEtapa(l['ETAPA'])}${l['ETAPA']==='Declinado'&&l['MOTIVO_PERDA']?' · '+l['MOTIVO_PERDA']:''}</td><td colspan="1" style="color:var(--cinza-600);font-size:11px;">${l['FONTE']||''}</td><td colspan="2" style="text-align:right;color:var(--cinza-600);">${val(l)?fmtMoeda(val(l)):'—'}</td></tr>`).join('');
     html += `<tr style="border-bottom:1px solid var(--cinza-100);cursor:pointer;" onclick="var e=document.getElementById('${detId}');e.style.display=e.style.display==='table-row-group'?'none':'table-row-group';">
         <td style="padding:8px 0;"><i class="ti ti-chevron-right" style="font-size:12px;"></i> ${c}</td>
-        <td style="text-align:right;">${o.leads}</td><td style="text-align:right;">${o.proposta}</td>
+        <td style="text-align:right;">${o.leads}</td>
+        <td style="text-align:right;color:var(--verde-escuro);font-weight:600;">${o.cliente}</td>
+        <td style="text-align:right;">${o.proposta}</td>
         <td style="text-align:right;font-weight:600;color:var(--verde-medio);">${o.fechado}</td>
         <td style="text-align:right;color:var(--vermelho);">${o.declinado}</td>
         <td style="text-align:right;font-weight:600;">${o.valor?fmtMoeda(o.valor):'—'}</td></tr>
@@ -7129,6 +7139,56 @@ function blocoPorConsultor(leadsPeriodo) {
   html += '</tbody></table></div>';
   html += blocoProspeccaoPorConsultor(leadsPeriodo);
   return html;
+}
+
+// imprime a tabela de desempenho por consultor — letras grandes, layout simples e bonito
+function imprimirDesempenhoConsultor() {
+  const d = window._desempCons;
+  if (!d || !d.linhas || !d.linhas.length) { alert('Gere os resultados do período primeiro.'); return; }
+  const per = (d.ini && d.fim) ? `${fmtDataBR(d.ini)} a ${fmtDataBR(d.fim)}` : '';
+  // totais
+  const tot = d.linhas.reduce((a,o)=>({leads:a.leads+o.leads,cliente:a.cliente+o.cliente,proposta:a.proposta+o.proposta,fechado:a.fechado+o.fechado,declinado:a.declinado+o.declinado,valor:a.valor+o.valor}),{leads:0,cliente:0,proposta:0,fechado:0,declinado:0,valor:0});
+  const linhasHtml = d.linhas.map((o,i)=>`
+    <tr style="background:${i%2?'#f3f7f2':'#ffffff'};">
+      <td style="text-align:left;font-weight:600;">${o.consultor}</td>
+      <td>${o.leads}</td>
+      <td style="color:#2d5a3d;font-weight:700;">${o.cliente}</td>
+      <td>${o.proposta}</td>
+      <td style="color:#2e7d32;font-weight:700;">${o.fechado}</td>
+      <td style="color:#b23b3b;">${o.declinado}</td>
+      <td style="font-weight:600;">${o.valor?fmtMoeda(o.valor):'—'}</td>
+    </tr>`).join('');
+  const win = window.open('', '_blank');
+  win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Desempenho por consultor</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@600;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+      *{box-sizing:border-box;}
+      body{font-family:'Inter',Arial,sans-serif;color:#22221e;padding:36px 40px;margin:0;}
+      h1{font-family:'Outfit',sans-serif;color:#2d5a3d;font-size:30px;margin:0 0 4px;}
+      .sub{font-size:16px;color:#6b7280;margin:0 0 22px;}
+      table{width:100%;border-collapse:collapse;font-size:20px;}
+      thead th{background:#2d5a3d;color:#fff;font-family:'Outfit',sans-serif;font-weight:600;padding:14px 12px;text-align:right;font-size:18px;}
+      thead th:first-child{text-align:left;border-top-left-radius:10px;}
+      thead th:last-child{border-top-right-radius:10px;}
+      tbody td{padding:13px 12px;text-align:right;border-bottom:1px solid #e5e7eb;}
+      tbody td:first-child{text-align:left;}
+      tfoot td{padding:15px 12px;text-align:right;font-family:'Outfit',sans-serif;font-weight:700;font-size:21px;border-top:3px solid #2d5a3d;background:#eef4ee;}
+      tfoot td:first-child{text-align:left;}
+      .rodape{margin-top:22px;font-size:13px;color:#9ca3af;}
+      @media print{ body{padding:12px;} .noprint{display:none;} }
+      .btn{margin:0 0 20px;padding:10px 18px;background:#2d5a3d;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-family:'Outfit',sans-serif;}
+    </style></head><body>
+    <button class="btn noprint" onclick="window.print()">🖨️ Imprimir / Salvar PDF</button>
+    <h1>Desempenho por consultor</h1>
+    <p class="sub">Leads recebidos${per?' · período '+per:''}</p>
+    <table>
+      <thead><tr><th>Consultor</th><th>Leads</th><th>De cliente</th><th>Proposta</th><th>Fechado</th><th>Declinado</th><th>Valor fechado</th></tr></thead>
+      <tbody>${linhasHtml}</tbody>
+      <tfoot><tr><td>Total</td><td>${tot.leads}</td><td>${tot.cliente}</td><td>${tot.proposta}</td><td>${tot.fechado}</td><td>${tot.declinado}</td><td>${tot.valor?fmtMoeda(tot.valor):'—'}</td></tr></tfoot>
+    </table>
+    <p class="rodape">Ecotrans Ambiental · gerado pelo dashboard comercial</p>
+    </body></html>`);
+  win.document.close();
 }
 
 // prospecção ATIVA por consultor: quanto prospectou, quantas viraram Proposta Enviada (com %) e quantas fecharam
