@@ -1416,8 +1416,16 @@ function abrirFormAditivo(cnpj, cliente, ehSolicitacao) {
             <input type="number" id="ad-perc" step="0.01" placeholder="ex: 8.5" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;margin-bottom:10px;">
             <label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Valor novo (R$)</label>
             <input type="number" id="ad-valor" step="0.01" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+          <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Data de assinatura do aditivo</label>
+            <input type="date" id="ad-assinatura" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;">
+            <div style="font-size:11px;color:var(--cinza-500);margin-top:4px;">Base do reajuste dos serviços abaixo (12 meses a partir dela).</div></div>
           <div style="margin-bottom:14px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Observação</label>
             <textarea id="ad-obs" rows="2" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;font-family:var(--fonte-corpo);"></textarea></div>
+          ${ehSolicitacao?'':`<div style="background:var(--verde-claro-bg);border-radius:10px;padding:12px;margin-bottom:14px;">
+            <label style="font-size:13px;color:var(--verde-escuro);font-weight:600;display:block;margin-bottom:4px;"><i class="ti ti-package"></i> Serviços do aditivo</label>
+            <div style="font-size:11px;color:var(--cinza-500);margin-bottom:8px;">Cada serviço vai pra aba <b>Serviços</b> do cliente e entra no <b>Reajuste</b> (12 meses a partir da assinatura, 30%).</div>
+            <div id="ad-serv-ed"></div>
+          </div>`}
           <div class="ficha-botoes">
             <button class="ficha-btn-primario" onclick="salvarAditivo('${cnpj}','${cliente.replace(/'/g,'')}',${ehSolicitacao})"><i class="ti ti-check"></i> ${ehSolicitacao?'Enviar solicitação':'Salvar aditivo'}</button>
             <button class="ficha-btn-secundario" onclick="document.getElementById('form-adit-overlay').remove()">Cancelar</button>
@@ -1426,6 +1434,7 @@ function abrirFormAditivo(cnpj, cliente, ehSolicitacao) {
         </div>
       </div>
     </div>`);
+  if(!ehSolicitacao) servEditorRender('ad-serv-ed', []);
 }
 async function salvarAditivo(cnpj, cliente, ehSolicitacao) {
   const vigencia = document.getElementById('ad-vigencia').value;
@@ -1458,6 +1467,17 @@ async function salvarAditivo(cnpj, cliente, ehSolicitacao) {
           dados:{ 'CNPJ': cnpj, 'VENC. ADITIVO': novoVenc, 'VIGENCIA_ATUALIZADA': novoVenc }
         })});
       } catch(e) {}
+    }
+    // serviços do aditivo -> aba Serviços + Reajuste (só em aditivo registrado; base = assinatura, ou hoje)
+    if (!ehSolicitacao) {
+      const servicos = servEditorRows('ad-serv-ed');
+      if (servicos.length) {
+        document.getElementById('ad-msg').innerHTML = `<div style="text-align:center;padding:10px;color:var(--cinza-500);">Criando ${servicos.length} serviço(s)...</div>`;
+        const base = (document.getElementById('ad-assinatura')||{}).value || campos['DATA'];
+        const n = await servCriarLote(cnpj, cliente, servicos, base, '');
+        cacheReajustes = null;
+        if(n){ const av=document.createElement('div'); av.textContent=`${n} serviço(s) enviados pra Serviços + Reajuste!`; av.style.cssText='position:fixed;bottom:20px;right:20px;background:var(--verde-escuro);color:white;padding:10px 18px;border-radius:8px;font-size:13px;z-index:9999;'; document.body.appendChild(av); setTimeout(()=>av.remove(),2200); }
+      }
     }
     document.getElementById('form-adit-overlay').remove();
     const corpo = document.getElementById('ficha-corpo'); if (corpo) renderAbaAditivos(corpo);
@@ -1933,6 +1953,51 @@ function servNorm(s){ return String(s||'').toUpperCase().normalize('NFD').replac
 function servNormKey(s){ return String(s||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/³/g,'3').replace(/²/g,'2').replace(/¹/g,'1').replace(/[^A-Z0-9]/g,''); }
 // equipamento cobrado por peso/tonelada (destinação) — caçamba, roll on, compactadora, brooks ou "/TON"
 function servEhPeso(equip){ return /ca[\u00e7c]amba|roll\s*-?\s*on|compactad|brooks|\/\s*ton|\bton\b/i.test(String(equip||'')); }
+
+// ===== EDITOR DE SERVI\u00c7OS reutiliz\u00e1vel (lead / proposta / contrato / aditivo) =====
+// Renderiza uma lista edit\u00e1vel de {servico, valor} num container, com "adicionar" e total autom\u00e1tico.
+function servEditorLinha(containerId, s){ s=s||{};
+  const reajChk = (s.reajusta===false) ? '' : 'checked';
+  const dataVal = s.data ? (typeof dataInputVal==='function'?dataInputVal(s.data):s.data) : '';
+  return `<div class="serv-ed-linha" style="display:flex;gap:6px;margin-bottom:6px;align-items:center;flex-wrap:wrap;">
+    <input type="text" class="serv-ed-nome" value="${String(s.servico||s.equipamento||'').replace(/"/g,'&quot;')}" placeholder="Servi\u00e7o (ex: Cont\u00eainer 1,1m\u00b3)" style="flex:1;min-width:150px;padding:7px;border:1.5px solid var(--cinza-300);border-radius:7px;font-size:13px;">
+    <span style="font-size:12px;color:var(--cinza-500);">R$</span>
+    <input type="number" step="0.01" class="serv-ed-valor" oninput="servEditorTotal('${containerId}')" value="${s.valor!=null?s.valor:''}" placeholder="0,00" style="width:95px;padding:7px;border:1.5px solid var(--cinza-300);border-radius:7px;font-size:13px;">
+    <label style="font-size:11.5px;color:var(--cinza-600);display:inline-flex;align-items:center;gap:3px;cursor:pointer;white-space:nowrap;" title="Se marcado, vai pra aba Reajustes (12 meses a partir da data). Desmarque para servi\u00e7os eventuais."><input type="checkbox" class="serv-ed-reaj" ${reajChk}> reajusta</label>
+    <input type="date" class="serv-ed-data" value="${dataVal}" title="Data-base do reajuste (in\u00edcio)" style="padding:6px;border:1.5px solid var(--cinza-300);border-radius:7px;font-size:12px;">
+    <button type="button" title="Remover" onclick="this.closest('.serv-ed-linha').remove();servEditorTotal('${containerId}')" style="border:none;background:none;color:var(--vermelho);cursor:pointer;font-size:18px;line-height:1;">&times;</button>
+  </div>`;
+}
+function servEditorRender(containerId, lista){
+  const cont=document.getElementById(containerId); if(!cont) return;
+  lista=(Array.isArray(lista)&&lista.length)?lista:[{servico:'',valor:''}];
+  cont.innerHTML=`<div id="${containerId}-rows">${lista.map(s=>servEditorLinha(containerId,s)).join('')}</div>
+    <button type="button" onclick="servEditorAdd('${containerId}')" style="margin-top:2px;padding:5px 10px;border:1.5px dashed var(--verde-medio);background:#fff;color:var(--verde-escuro);border-radius:7px;font-size:12px;cursor:pointer;"><i class="ti ti-plus"></i> Adicionar servi\u00e7o</button>
+    <span style="font-size:12.5px;color:var(--cinza-600);margin-left:10px;">Total: <b id="${containerId}-total">R$ 0,00</b></span>`;
+  servEditorTotal(containerId);
+}
+function servEditorAdd(containerId){ const rows=document.getElementById(containerId+'-rows'); if(!rows) return; const d=document.createElement('div'); d.innerHTML=servEditorLinha(containerId,{}); rows.appendChild(d.firstElementChild); }
+function servEditorRows(containerId){ const rows=document.getElementById(containerId+'-rows'); if(!rows) return [];
+  return [...rows.querySelectorAll('.serv-ed-linha')].map(l=>({
+    servico:(l.querySelector('.serv-ed-nome').value||'').trim(),
+    valor:(l.querySelector('.serv-ed-valor').value||'').trim(),
+    reajusta: !!(l.querySelector('.serv-ed-reaj') && l.querySelector('.serv-ed-reaj').checked),
+    data: (l.querySelector('.serv-ed-data') && l.querySelector('.serv-ed-data').value) || ''
+  })).filter(s=>s.servico||s.valor);
+}
+function servEditorTotal(containerId){ const tot=servEditorRows(containerId).reduce((a,s)=>a+(parseFloat(String(s.valor).replace(',','.'))||0),0); const el=document.getElementById(containerId+'-total'); if(el) el.textContent=fmtMoeda(tot); return tot; }
+// cria no backend, um a um, os servi\u00e7os de uma lista (com reajuste a partir de dataBase). Retorna quantos criou.
+async function servCriarLote(cnpj, cliente, servicos, dataBase, indice){
+  let n=0;
+  for(const s of (servicos||[])){
+    if(!s.servico) continue;
+    const vai = (s.reajusta!==false); // por serviço: eventuais podem ser desmarcados
+    const dataServ = s.data || dataBase || ''; // data-base do reajuste do serviço
+    const campos={ cnpj:cnpjLimpo(cnpj), cliente, equipamento:s.servico, valor:s.valor||'', dataInicio:(vai?dataServ:''), indice:indice||'', vaiReajuste:vai };
+    try{ const resp=await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'novoServico',token:sessaoToken,dados:{campos}})}); const r=await resp.json(); if(r&&r.ok) n++; }catch(e){}
+  }
+  return n;
+}
 // casa um equipamento (chave) contra a lista de coletas do cliente (já filtrada)
 function _servCasaEquip(cs, eq){ if(!eq) return cs; const f=cs.filter(c=>{const e=servNormKey(c.equip); return e===eq||e.includes(eq)||eq.includes(e);}); return f.length?f:cs; }
 function servResiduoDasColetas(cs, equip){
@@ -3076,7 +3141,9 @@ async function salvarClienteDeLead(cnpjLead, tipo, permitirDuplicado) {
     if (typeof limparCacheBusca==='function') limparCacheBusca();
     if (tipo === 'contrato') {
       await carregarClientes();
-      abrirFormContrato(campos['CLIENTE'], campos['CNPJ']);
+      // leva o rascunho de serviços do lead (se houver) pro form do contrato
+      let preServ=[]; try{ const ld=(kanbanLeads||[]).find(x=>cnpjLimpo(x['CNPJ'])===cnpjLimpo(cnpjLead)||String(x['CLIENTE']||'')===campos['CLIENTE']); if(ld) preServ=JSON.parse(ld['SERVICOS_PROPOSTA']||'[]'); }catch(e){}
+      abrirFormContrato(campos['CLIENTE'], campos['CNPJ'], preServ);
     } else if (tipo === 'eventual') {
       document.getElementById('cl-msg').innerHTML = '<div style="background:var(--verde-ok-bg);border-radius:8px;padding:10px;margin-top:10px;color:var(--verde-ok);font-size:13px;"><i class="ti ti-circle-check"></i> Cliente criado como Eventual!</div>';
       setTimeout(fecharFicha, 1800);
@@ -3105,7 +3172,10 @@ function abrirModalProposta(idLead) {
             <input type="text" id="pp-numero" placeholder="ex: 6592/2026" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
           <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Data de envio *</label>
             <input type="date" id="pp-data" value="${hoje}" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
-          <div style="margin-bottom:14px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Valor da proposta (R$) *</label>
+          <div style="margin-bottom:10px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Serviços da proposta</label>
+            <div id="pp-serv-ed"></div>
+            <div style="font-size:11px;color:var(--cinza-500);margin-top:4px;">A soma dos serviços preenche o valor total abaixo.</div></div>
+          <div style="margin-bottom:14px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Valor total da proposta (R$) *</label>
             <input type="number" id="pp-valor" step="0.01" placeholder="ex: 1500.00" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
           <div class="ficha-botoes">
             <button class="ficha-btn-primario" onclick="confirmarProposta('${String(idLead).replace(/'/g,'')}')"><i class="ti ti-check"></i> Confirmar</button>
@@ -3115,12 +3185,19 @@ function abrirModalProposta(idLead) {
         </div>
       </div>
     </div>`);
+  { let preServ=[]; try{ preServ=JSON.parse((lead&&lead['SERVICOS_PROPOSTA'])||'[]'); }catch(e){} servEditorRender('pp-serv-ed', preServ); }
 }
 async function confirmarProposta(idLead) {
   const numero = document.getElementById('pp-numero').value;
   const data = document.getElementById('pp-data').value;
-  const valor = document.getElementById('pp-valor').value;
-  if (!numero || !data || !valor) { document.getElementById('pp-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Preencha número, data e valor.</div>'; return; }
+  const servicos = servEditorRows('pp-serv-ed');
+  const totalServ = servEditorTotal('pp-serv-ed');
+  // se há serviços, a soma vira o valor total; senão usa o que foi digitado
+  let valor = document.getElementById('pp-valor').value;
+  if (servicos.length && totalServ>0) { valor = totalServ; document.getElementById('pp-valor').value = totalServ; }
+  if (!numero || !data || !valor) { document.getElementById('pp-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Preencha número, data e valor (ou os serviços).</div>'; return; }
+  // salva os serviços da proposta no lead (rascunho — vira oficial quando fechar o contrato)
+  try { await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'atualizarLeadCampos',token:sessaoToken,dados:{idLead:String(idLead),campos:{SERVICOS_PROPOSTA:JSON.stringify(servicos)}}})}); const it=(kanbanLeads||[]).find(x=>String(x['ID_LEAD'])===String(idLead)); if(it) it['SERVICOS_PROPOSTA']=JSON.stringify(servicos); } catch(e){}
   const overlay = document.getElementById('modal-prop-overlay');
   if (overlay) overlay.remove();
   await mudarEtapaLead(idLead, 'Proposta Enviada', null, { numero, data, valor });
@@ -6370,7 +6447,7 @@ function filtraContratos() {
   res.innerHTML = html + '</div>';
 }
 
-async function abrirFormContrato(clientePre, cnpjPre) {
+async function abrirFormContrato(clientePre, cnpjPre, preServicos) {
   await carregarClientes();
   const cont = document.getElementById('ficha-container');
   cont.innerHTML = `
@@ -6411,6 +6488,11 @@ async function abrirFormContrato(clientePre, cnpjPre) {
               <select id="nc-fislurb" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"><option value="Não">Não</option><option value="Sim">Sim</option></select></div>
           </div>
           <div style="font-size:11px;color:var(--cinza-500);margin-top:8px;"><i class="ti ti-info-circle"></i> Se marcar "Sim", o cliente entra automaticamente na aba <b>Financeiro › Taxa FISLURB</b> pra Joyce lançar o valor anual.</div>
+          <div style="background:var(--verde-claro-bg);border-radius:10px;padding:12px;margin-top:12px;">
+            <label style="font-size:13px;color:var(--verde-escuro);font-weight:600;display:block;margin-bottom:4px;"><i class="ti ti-package"></i> Serviços do contrato</label>
+            <div style="font-size:11px;color:var(--cinza-500);margin-bottom:8px;">Cada serviço vai pra aba <b>Serviços</b> do cliente e entra no <b>Reajuste</b> (12 meses a partir da assinatura, 30%).</div>
+            <div id="nc-serv-ed"></div>
+          </div>
           <div class="ficha-botoes" style="margin-top:14px;">
             <button class="ficha-btn-primario" onclick="salvarContrato()"><i class="ti ti-check"></i> Salvar contrato</button>
             <button class="ficha-btn-secundario" onclick="fecharFicha()">Cancelar</button>
@@ -6419,6 +6501,7 @@ async function abrirFormContrato(clientePre, cnpjPre) {
         </div>
       </div>
     </div>`;
+  servEditorRender('nc-serv-ed', Array.isArray(preServicos)?preServicos:[]);
 }
 function preencherCnpjContrato() {
   const nome = document.getElementById('nc-cliente').value;
@@ -6442,14 +6525,24 @@ async function salvarContrato() {
   };
   const num = document.getElementById('nc-num').value;
   if (num) campos['Nº CTO'] = num;
+  // serviços informados no contrato (vão virar 1 linha de reajuste cada)
+  const servicos = servEditorRows('nc-serv-ed');
   document.getElementById('nc-msg').innerHTML = '<div style="text-align:center;padding:10px;color:var(--cinza-500);">Criando...</div>';
   try {
-    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({ acao:'novoContrato', token: sessaoToken, dados:{ campos } })});
+    // temServicos avisa o backend pra NÃO criar a linha de reajuste genérica (evita duplicar)
+    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({ acao:'novoContrato', token: sessaoToken, dados:{ campos, temServicos: servicos.length>0 } })});
     const r = await resp.json();
     if (!r.ok) { document.getElementById('nc-msg').innerHTML=`<div class="sem-acesso">${r.erro}</div>`; return; }
     cacheContratos = null;
-    document.getElementById('nc-msg').innerHTML = '<div style="background:var(--verde-ok-bg);border-radius:8px;padding:10px;margin-top:10px;color:var(--verde-ok);font-size:13px;"><i class="ti ti-circle-check"></i> Contrato criado!</div>';
-    setTimeout(()=>{ fecharFicha(); renderContratos(document.getElementById('area-conteudo')); }, 1500);
+    // serviços do contrato -> aba Serviços + Reajuste (base = assinatura)
+    let nServ = 0;
+    if (servicos.length) {
+      document.getElementById('nc-msg').innerHTML = `<div style="text-align:center;padding:10px;color:var(--cinza-500);">Criando ${servicos.length} serviço(s)...</div>`;
+      nServ = await servCriarLote(campos['CNPJ'], cliente, servicos, campos['ASS. CTO'], campos['ÍNDICE']);
+      cacheReajustes = null;
+    }
+    document.getElementById('nc-msg').innerHTML = `<div style="background:var(--verde-ok-bg);border-radius:8px;padding:10px;margin-top:10px;color:var(--verde-ok);font-size:13px;"><i class="ti ti-circle-check"></i> Contrato criado!${nServ?` ${nServ} serviço(s) enviados pra aba Serviços + Reajuste.`:''}</div>`;
+    setTimeout(()=>{ fecharFicha(); renderContratos(document.getElementById('area-conteudo')); }, 1600);
   } catch(e) { document.getElementById('nc-msg').innerHTML='<div class="sem-acesso">Erro de conexão.</div>'; }
 }
 
@@ -7477,8 +7570,10 @@ async function salvarPropostaCobertura(idLead){
   try{
     const resp=await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'atualizarLeadCampos',token:sessaoToken,dados:{idLead:String(idLead),campos}})});
     const r=await resp.json();
-    if(!r.ok){ alert('Erro: '+(r.erro||'verifique se o Apps Script foi republicado.')); return; }
-    const lead=(kanbanLeads||[]).find(x=>String(x['ID_LEAD'])===String(idLead)); if(lead) Object.assign(lead, campos);
+    if(!r.ok){ alert('Não salvou: '+(r.erro||'verifique se o Apps Script foi republicado.')); return; }
+    // recarrega os leads DO SERVIDOR pra refletir exatamente o que ficou gravado
+    const it=(kanbanLeads||[]).find(x=>String(x['ID_LEAD'])===String(idLead)); if(it) Object.assign(it, campos);
+    kanbanLeads=null; if(typeof carregarLeads==='function'){ try{ await carregarLeads(); }catch(e){} }
     const av=document.createElement('div'); av.textContent='Proposta de cobertura salva!'; av.style.cssText='position:fixed;bottom:20px;right:20px;background:#6B5B95;color:white;padding:10px 18px;border-radius:8px;font-size:13px;z-index:9999;'; document.body.appendChild(av); setTimeout(()=>av.remove(),2000);
     abrirLead(idLead);
   }catch(e){ alert('Erro de conexão.'); }
@@ -7490,7 +7585,8 @@ async function removerPropostaCobertura(idLead){
     const resp=await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'atualizarLeadCampos',token:sessaoToken,dados:{idLead:String(idLead),campos}})});
     const r=await resp.json();
     if(!r.ok){ alert('Erro: '+(r.erro||'republique o Apps Script.')); return; }
-    const lead=(kanbanLeads||[]).find(x=>String(x['ID_LEAD'])===String(idLead)); if(lead) Object.assign(lead, campos);
+    const it=(kanbanLeads||[]).find(x=>String(x['ID_LEAD'])===String(idLead)); if(it) Object.assign(it, campos);
+    kanbanLeads=null; if(typeof carregarLeads==='function'){ try{ await carregarLeads(); }catch(e){} }
     abrirLead(idLead);
   }catch(e){ alert('Erro de conexão.'); }
 }
@@ -7545,6 +7641,12 @@ function abrirLead(id) {
               <button onclick="mudarEtapaPeloSeletor('${idLead}')" style="padding:9px 14px;border:none;background:var(--verde-medio);color:white;border-radius:8px;cursor:pointer;font-size:13px;white-space:nowrap;"><i class="ti ti-check"></i> Aplicar</button>
             </div>
             <div style="font-size:11px;color:var(--cinza-500);margin-top:6px;">Ao escolher "Proposta Solicitada", abre a precificação automaticamente.</div>
+          </div>
+          <div style="background:var(--cinza-100);border-radius:10px;padding:12px;margin-bottom:14px;">
+            <label style="font-size:12px;color:var(--cinza-600);display:block;margin-bottom:6px;font-weight:600;"><i class="ti ti-package"></i> Serviços da proposta (rascunho)</label>
+            <div style="font-size:11px;color:var(--cinza-500);margin-bottom:8px;">Liste os serviços e o valor de cada um. Fica salvo no lead; quando virar contrato, eu levo pra aba Serviços + Reajuste automaticamente.</div>
+            <div id="lead-serv-ed"></div>
+            <button onclick="salvarServicosPropostaLead('${idLead}')" style="margin-top:8px;padding:7px 12px;border:none;background:var(--verde-medio);color:white;border-radius:7px;cursor:pointer;font-size:12px;"><i class="ti ti-check"></i> Salvar serviços</button>
           </div>
           ${etapaAtual==='Cobertura' ? `
           <div style="background:#ede9f3;border:1px solid #d9cfe8;border-radius:10px;padding:12px;margin-bottom:14px;">
@@ -7612,10 +7714,25 @@ function abrirLead(id) {
         </div>
       </div>
     </div>`;
+  // editor de serviços da proposta (rascunho)
+  { let preServ=[]; try{ preServ=JSON.parse(l['SERVICOS_PROPOSTA']||'[]'); }catch(e){} servEditorRender('lead-serv-ed', preServ); }
   // carregar histórico de atividades do lead (por cliente)
   carregarHistoricoLead(l['CLIENTE'], cnpjOuVazio);
   // mostrar clientes próximos (mesma região de CEP)
   mostrarClientesProximos(l['CEP'], idLead);
+}
+
+// salva os serviços da proposta (rascunho) no lead
+async function salvarServicosPropostaLead(idLead){
+  const servicos=servEditorRows('lead-serv-ed');
+  const campos={ SERVICOS_PROPOSTA: JSON.stringify(servicos) };
+  try{
+    const resp=await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'atualizarLeadCampos',token:sessaoToken,dados:{idLead:String(idLead),campos}})});
+    const r=await resp.json();
+    if(!r.ok){ alert('Não salvou: '+(r.erro||'republique o Apps Script.')); return; }
+    const it=(kanbanLeads||[]).find(x=>String(x['ID_LEAD'])===String(idLead)); if(it) it['SERVICOS_PROPOSTA']=campos.SERVICOS_PROPOSTA;
+    const av=document.createElement('div'); av.textContent='Serviços da proposta salvos!'; av.style.cssText='position:fixed;bottom:20px;right:20px;background:var(--verde-escuro);color:white;padding:10px 18px;border-radius:8px;font-size:13px;z-index:9999;'; document.body.appendChild(av); setTimeout(()=>av.remove(),2000);
+  }catch(e){ alert('Erro de conexão.'); }
 }
 
 // mostra clientes ativos na mesma região do CEP do lead
