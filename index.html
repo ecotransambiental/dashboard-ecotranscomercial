@@ -1604,20 +1604,45 @@ async function imprimirFichaCliente(cnpj) {
   const reajustes = (rr.ok?rr.linhas:[]).filter(x=>cnpjLimpo(x['CNPJ'])===alvo);
   const fatur = (rf.ok?rf.linhas:[]).filter(x=>cnpjLimpo(x['CNPJ'])===alvo);
   const equip = (re.ok?re.linhas:[]).filter(x=>cnpjLimpo(x['CNPJ'])===alvo);
+  // MESMAS fontes do card: faturamento (Fin_Faturamento, por nome, todos os meses) e coletas (Fin_Coletas, por CNPJ)
+  if (typeof FIN_garantirSheetJS==='function'){ try{ await new Promise(r=>FIN_garantirSheetJS(r)); }catch(e){} }
+  if (typeof finCarregarDoSheets==='function'){ try{ await finCarregarDoSheets(['faturamento','coletas']); }catch(e){} }
+  const fatValores = (typeof faturamentoDoCliente==='function') ? faturamentoDoCliente(c['CLIENTE'], c['CNPJ']) : null;
+  const coletasMes = (typeof coletasDoCliente==='function') ? coletasDoCliente(c['CNPJ']) : null;
+  const _MN=['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+  const _MNC=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  const mesServPrint=nm=>{const i=_MN.indexOf(String(nm||'').trim().toLowerCase().replace('marco','março'));return i<0?nm:_MNC[(i-1+12)%12];};
+  const rotColetaPrint=m=>{const ab=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];const mm=String(m).match(/^(\d{4})-(\d{2})/);return mm?ab[+mm[2]-1]+'/'+mm[1].slice(-2):m;};
 
   const tab = (titulo, linhas) => `<h2 style="color:#2d5a3d;font-size:15px;border-bottom:2px solid #8bc34a;padding-bottom:4px;margin:18px 0 8px;">${titulo}</h2>${linhas}`;
   let contratosHtml = contratos.length ? contratos.map(ct=>`<table class="t"><tr><td>Nº Contrato</td><td>${ct['Nº CTO']||'—'}</td></tr><tr><td>Assinatura</td><td>${fmtDataBR(ct['ASS. CTO'])}</td></tr><tr><td>Vencimento</td><td>${fmtDataBR(ct['VENC.'])}</td></tr><tr><td>Período</td><td>${ct['PERÍODO']||'—'}</td></tr><tr><td>Aditivo (ass/venc)</td><td>${fmtDataBR(ct['ASS. ADITIVO'])} / ${fmtDataBR(ct['VENC. ADITIVO'])}</td></tr><tr><td>Índice</td><td>${ct['ÍNDICE']||'—'}</td></tr><tr><td>Multa</td><td>${ct['MULTA']||'—'}</td></tr></table>`).join('') : '<p style="color:#999;">Sem contratos.</p>';
   let reajHtml = reajustes.length ? `<table class="t"><tr style="background:#f0f7ec;"><th>Serviço</th><th>Anterior</th><th>Reajustado</th><th>%</th><th>Índice</th><th>Data</th></tr>${reajustes.map(r=>{
       const ant=parseMoedaReaj(r['PREÇO ANTERIOR']); const novo=parseMoedaReaj(r['VALOR REAJUSTADO']);
-      let pct=null; if(r['ALIQUOTA']!=null&&r['ALIQUOTA']!=='')pct=parseFloat(r['ALIQUOTA'])*100; else if(ant!=null&&ant!==0&&novo!=null)pct=(novo-ant)/ant*100;
+      let pct=null;
+      if(ant!=null&&ant!==0&&novo!=null) pct=(novo-ant)/ant*100;                 // cálculo real (mais confiável)
+      else { const a=parseFloat(String(r['ALIQUOTA']||'').replace(',','.')); if(!isNaN(a)) pct=a*100; }
+      if(pct!=null&&isNaN(pct)) pct=null;
       const pctTxt=pct!=null?`${pct.toFixed(1).replace('.',',')}%`:'—';
       return `<tr><td>${r['TP DE SERVIÇO']||'—'}</td><td>${fmtMoeda(r['PREÇO ANTERIOR'])}</td><td>${fmtMoeda(r['VALOR REAJUSTADO'])}</td><td>${pctTxt}</td><td>${r['ÍNDICE']||'—'}</td><td>${fmtDataBR(r['DATA ÚLTIMO REAJUSTE ']||r['DATA ÚLTIMO REAJUSTE'])}</td></tr>`;
     }).join('')}</table>` : '<p style="color:#999;">Sem reajustes.</p>';
-  let equipHtml = equip.length ? `<table class="t"><tr style="background:#f0f7ec;"><th>Equipamento</th><th>Valor</th></tr>${equip.map(e=>`<tr><td>${e['EQUIPAMENTO']||e['DESCRIÇÃO']||e['TIPO']||'—'}</td><td>${fmtMoeda(e['VALOR']||e['VALOR_UNIT']||e['PREÇO'])}</td></tr>`).join('')}</table>` : '<p style="color:#999;">Sem equipamentos cadastrados.</p>';
-  // formata valor: colunas de COLETAS/quantidade ficam como número; resto como R$
-  const ehColeta = k => /COLETA|QTD|QUANT|QUANTIDADE/i.test(String(k));
-  const fmtFat = (k,v) => ehColeta(k) ? (v!=null&&v!==''?String(v).replace(/\.0+$/,''):'—') : fmtMoeda(v);
-  let fatHtml = fatur.length ? `<table class="t">${Object.keys(fatur[0]).filter(k=>!['CNPJ','CLIENTE'].includes(k) && fatur[0][k]).slice(0,8).map(k=>`<tr><td>${k}</td><td>${fmtFat(k, fatur[0][k])}</td></tr>`).join('')}</table>` : '<p style="color:#999;">Sem faturamento.</p>';
+  // Equipamentos e valores: mesmos serviços/valores do card (vêm dos Reajustes); cai no Valores_Equipamento se não houver
+  const equipDosReaj = reajustes.filter(r=>String(r['TP DE SERVIÇO']||'').trim() && servNormKey(r['TP DE SERVIÇO']).indexOf('CONTRATONOVO')<0);
+  let equipHtml;
+  if (equipDosReaj.length) {
+    equipHtml = `<table class="t"><tr style="background:#f0f7ec;"><th>Equipamento / Serviço</th><th>Valor atual</th></tr>${equipDosReaj.map(r=>{const v=parseMoedaReaj(r['VALOR REAJUSTADO'])||parseMoedaReaj(r['PREÇO ANTERIOR']);return `<tr><td>${r['TP DE SERVIÇO']}</td><td>${v!=null?fmtMoeda(v):'—'}</td></tr>`;}).join('')}</table>`;
+  } else if (equip.length) {
+    equipHtml = `<table class="t"><tr style="background:#f0f7ec;"><th>Equipamento</th><th>Valor</th></tr>${equip.map(e=>`<tr><td>${e['EQUIPAMENTO']||e['DESCRIÇÃO']||e['TIPO']||'—'}</td><td>${fmtMoeda(e['VALOR']||e['VALOR_UNIT']||e['PREÇO'])}</td></tr>`).join('')}</table>`;
+  } else { equipHtml = '<p style="color:#999;">Sem equipamentos cadastrados.</p>'; }
+  // Faturamento: do Fin_Faturamento (por nome), TODOS os meses, exibido pelo mês do serviço (igual ao card)
+  let fatHtml;
+  if (fatValores && Object.keys(fatValores).length) {
+    fatHtml = `<table class="t"><tr style="background:#f0f7ec;"><th>Mês (serviço)</th><th>Faturado</th></tr>${Object.keys(fatValores).map(mF=>`<tr><td>${mesServPrint(mF)}</td><td>${fmtMoeda(fatValores[mF])}</td></tr>`).join('')}</table>`;
+  } else { fatHtml = '<p style="color:#999;">Sem faturamento.</p>'; }
+  // Coletas por mês (Fin_Coletas, por CNPJ) — mesma fonte do card
+  let coletasHtml;
+  if (coletasMes && Object.keys(coletasMes).length) {
+    coletasHtml = `<table class="t"><tr style="background:#f0f7ec;"><th>Mês</th><th>Equipamentos coletados</th></tr>${Object.keys(coletasMes).sort().map(m=>`<tr><td>${rotColetaPrint(m)}</td><td>${coletasMes[m]}</td></tr>`).join('')}</table>`;
+  } else { coletasHtml = '<p style="color:#999;">Sem coletas registradas.</p>'; }
 
   const win = window.open('', '_blank');
   win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Ficha ${c['CLIENTE']||''}</title>
@@ -1629,11 +1654,12 @@ async function imprimirFichaCliente(cnpj) {
     </div>
     <h2 style="color:#2d5a3d;font-size:17px;margin:10px 0 4px;">${c['CLIENTE']||'—'}</h2>
     <div style="color:#666;margin-bottom:8px;">${c['CNPJ']||''} · ${c['TIPO']||'Contrato'} · Consultor: ${c['CONSULTOR']||'—'}</div>
-    <table class="t"><tr><td>Contato</td><td>${c['CONTATO']||'—'}</td></tr><tr><td>E-mail</td><td>${c['EMAIL']||'—'}</td></tr><tr><td>Telefone</td><td>${c['TELEFONE']||'—'}</td></tr><tr><td>Assessoria</td><td>${c['ASSESSORIA']||'—'}</td></tr>${c['FREQUENCIA_COLETA']?`<tr><td>Frequência de coleta</td><td>${c['FREQUENCIA_COLETA']}</td></tr>`:''}${c['MINIMA_COLETA']?`<tr><td>Mínima de coleta</td><td>${c['MINIMA_COLETA']}</td></tr>`:''}</table>
+    <table class="t"><tr><td>Contato</td><td>${c['CONTATO']||'—'}</td></tr><tr><td>E-mail</td><td>${c['EMAIL']||'—'}</td></tr><tr><td>Telefone</td><td>${c['TELEFONE']||'—'}</td></tr>${(function(){const e=c['ENDERECO']||c['ENDEREÇO']||c['Endereco']||c['Endereço']||c['LOGRADOURO']||c['END']||'';return (e||c['CEP'])?`<tr><td>Endereço</td><td>${e||'—'}${c['CEP']?' · CEP '+c['CEP']:''}</td></tr>`:'';})()}<tr><td>Assessoria</td><td>${c['ASSESSORIA']||'—'}</td></tr>${c['FREQUENCIA_COLETA']?`<tr><td>Frequência de coleta</td><td>${c['FREQUENCIA_COLETA']}</td></tr>`:''}${c['MINIMA_COLETA']?`<tr><td>Mínima de coleta</td><td>${c['MINIMA_COLETA']}</td></tr>`:''}</table>
     ${tab('Contrato', contratosHtml)}
     ${tab('Reajustes', reajHtml)}
     ${tab('Equipamentos e valores', equipHtml)}
-    ${tab('Faturamento', fatHtml)}
+    ${tab('Faturamento por mês', fatHtml)}
+    ${tab('Coletas por mês', coletasHtml)}
     <script>setTimeout(function(){window.print();},400);<\/script>
     </body></html>`);
   win.document.close();
@@ -1903,19 +1929,22 @@ function cnpjLimpo(v){ return String(v||'').replace(/\D/g,''); }
 function servNorm(s){ return String(s||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim(); }
 
 // resíduo mais frequente nas coletas do cliente (opcionalmente filtrando pelo equipamento)
-function servResiduoDasColetas(cnpj, equip){
-  const alvo=cnpjLimpo(cnpj), eq=servNorm(equip);
-  let cs=(typeof FINdados!=='undefined'?FINdados.coletas:[]||[]).filter(c=>cnpjLimpo(c.cnpj)===alvo && c.residuo);
-  if(eq){ const f=cs.filter(c=>{const e=servNorm(c.equip); return e===eq||e.includes(eq)||eq.includes(e);}); if(f.length) cs=f; }
+// chave forte de equipamento pra dedup/casamento: só letras/números (unifica "5M³/TON" com "5M3 TON")
+function servNormKey(s){ return String(s||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/³/g,'3').replace(/²/g,'2').replace(/¹/g,'1').replace(/[^A-Z0-9]/g,''); }
+// equipamento cobrado por peso/tonelada (destinação) — caçamba, roll on, compactadora, brooks ou "/TON"
+function servEhPeso(equip){ return /ca[\u00e7c]amba|roll\s*-?\s*on|compactad|brooks|\/\s*ton|\bton\b/i.test(String(equip||'')); }
+// casa um equipamento (chave) contra a lista de coletas do cliente (já filtrada)
+function _servCasaEquip(cs, eq){ if(!eq) return cs; const f=cs.filter(c=>{const e=servNormKey(c.equip); return e===eq||e.includes(eq)||eq.includes(e);}); return f.length?f:cs; }
+function servResiduoDasColetas(cs, equip){
+  cs=(cs||[]).filter(c=>c.residuo);
+  cs=_servCasaEquip(cs, servNormKey(equip));
   if(!cs.length) return '';
   const cont={}; cs.forEach(c=>{cont[c.residuo]=(cont[c.residuo]||0)+1;});
   return Object.entries(cont).sort((a,b)=>b[1]-a[1])[0][0];
 }
 // frequência derivada das coletas: dias da semana do mês mais recente, ex "2x na semana - seg, qui"
-function servFreqDasColetas(cnpj, equip){
-  const alvo=cnpjLimpo(cnpj), eq=servNorm(equip);
-  let cs=(typeof FINdados!=='undefined'?FINdados.coletas:[]||[]).filter(c=>cnpjLimpo(c.cnpj)===alvo);
-  if(eq){ const f=cs.filter(c=>{const e=servNorm(c.equip); return e===eq||e.includes(eq)||eq.includes(e);}); if(f.length) cs=f; }
+function servFreqDasColetas(cs, equip){
+  cs=_servCasaEquip((cs||[]), servNormKey(equip));
   if(!cs.length) return '';
   const yms=[...new Set(cs.map(c=>c.ym))].sort(); const ymR=yms[yms.length-1];
   const doMes=cs.filter(c=>c.ym===ymR);
@@ -1926,20 +1955,23 @@ function servFreqDasColetas(cnpj, equip){
   if(doMes.length<=2 && wds.length<=1) return 'Mensal / sob demanda';
   return `${wds.length}x na semana - ${wds.map(w=>nomes[w]).join(', ')}`;
 }
-// monta serviços sugeridos a partir dos Reajustes (tipo/valor) + Coletas (resíduo/frequência)
-function servDerivar(cnpj, cliente, reajLinhas){
-  const out=[], vistos=new Set();
+// monta serviços sugeridos a partir dos Reajustes (tipo/valor) + Coletas do cliente (resíduo/frequência)
+// coletasCli = coletas JÁ filtradas por este cliente (evita varrer a base inteira)
+function servDerivar(cliente, reajLinhas, coletasCli){
+  const out=[], vistos=new Set(); coletasCli=coletasCli||[];
   (reajLinhas||[]).forEach(r=>{
     const eq=String(r['TP DE SERVIÇO']||'').trim();
-    if(!eq || servNorm(eq).indexOf('CONTRATO NOVO')>=0) return;
-    const k=servNorm(eq); if(vistos.has(k)) return; vistos.add(k);
-    out.push({ equipamento:eq, residuo:servResiduoDasColetas(cnpj,eq), frequencia:servFreqDasColetas(cnpj,eq),
-      valor:parseMoedaReaj(r['VALOR REAJUSTADO'])||parseMoedaReaj(r['PREÇO ANTERIOR'])||'', dataInicio:'', indice:r['ÍNDICE']||'' });
+    if(!eq || servNormKey(eq).indexOf('CONTRATONOVO')>=0) return;
+    const k=servNormKey(eq); if(!k || vistos.has(k)) return; vistos.add(k);
+    const v=parseMoedaReaj(r['VALOR REAJUSTADO'])||parseMoedaReaj(r['PREÇO ANTERIOR'])||'';
+    const peso=servEhPeso(eq); // por tonelada => o valor é de destinação; a coleta fica pra completar
+    out.push({ equipamento:eq, residuo:servResiduoDasColetas(coletasCli,eq), frequencia:servFreqDasColetas(coletasCli,eq),
+      valor: peso?'':v, destinacao: peso?v:'', dataInicio:'', indice:r['ÍNDICE']||'' });
   });
-  const alvo=cnpjLimpo(cnpj);
-  const equipsCol=[...new Set((typeof FINdados!=='undefined'?FINdados.coletas:[]||[]).filter(c=>cnpjLimpo(c.cnpj)===alvo).map(c=>c.equip).filter(Boolean))];
-  equipsCol.forEach(eq=>{ const k=servNorm(eq); if(vistos.has(k)) return; vistos.add(k);
-    out.push({ equipamento:eq, residuo:servResiduoDasColetas(cnpj,eq), frequencia:servFreqDasColetas(cnpj,eq), valor:'', dataInicio:'', indice:'' }); });
+  // equipamentos das coletas que ainda não apareceram (dedup pela chave forte)
+  const equipsCol=[...new Set(coletasCli.map(c=>c.equip).filter(Boolean))];
+  equipsCol.forEach(eq=>{ const k=servNormKey(eq); if(!k || vistos.has(k)) return; vistos.add(k);
+    out.push({ equipamento:eq, residuo:servResiduoDasColetas(coletasCli,eq), frequencia:servFreqDasColetas(coletasCli,eq), valor:'', destinacao:'', dataInicio:'', indice:'' }); });
   return out;
 }
 
@@ -1947,29 +1979,35 @@ async function renderAbaServicos(corpo){
   corpo.innerHTML = `<div style="text-align:center;color:var(--cinza-500);padding:20px;">Carregando serviços...</div>`;
   const cnpj=fichaClienteAtual['CNPJ'], cliente=fichaClienteAtual['CLIENTE'];
   const alvo=cnpjLimpo(cnpj), nomeN=servNorm(cliente);
-  // garante coletas carregadas (pra derivar resíduo/frequência)
-  if(typeof FIN_garantirSheetJS==='function'){ try{ await new Promise(r=>FIN_garantirSheetJS(r)); }catch(e){} }
-  if(typeof finCarregarDoSheets==='function'){ try{ await finCarregarDoSheets(['coletas']); }catch(e){} }
-  const rs=await buscarDados('Servicos_Cliente');
-  const salvos=(rs.ok?rs.linhas:[]).filter(s=>cnpjLimpo(s['CNPJ'])===alvo || servNorm(s['CLIENTE'])===nomeN);
-  const rr=await buscarDados('Reajustes');
-  const reaj=dedupReajustes(rr.ok?rr.linhas:[]).filter(c=>cnpjLimpo(c['CNPJ'])===alvo || servNorm(c['CLIENTE'])===nomeN);
-  const jaSalvo=new Set(salvos.map(s=>servNorm(s['EQUIPAMENTO'])));
-  const derivados=servDerivar(cnpj,cliente,reaj).filter(d=>!jaSalvo.has(servNorm(d.equipamento)));
+  // Serviços salvos + Reajustes (rápido) — defensivo: a aba Servicos_Cliente pode ainda não existir
+  let salvos=[], reaj=[];
+  try { const rs=await buscarDados('Servicos_Cliente'); salvos=((rs&&rs.ok)?rs.linhas:[]).filter(s=>cnpjLimpo(s['CNPJ'])===alvo || servNorm(s['CLIENTE'])===nomeN); } catch(e){}
+  try { const rr=await buscarDados('Reajustes'); reaj=dedupReajustes((rr&&rr.ok)?rr.linhas:[]).filter(c=>cnpjLimpo(c['CNPJ'])===alvo || servNorm(c['CLIENTE'])===nomeN); } catch(e){}
+  // coletas do cliente: usa só o que já está em cache; NÃO trava esperando a base inteira de coletas.
+  // Se ainda não carregou, dispara o carregamento em 2º plano e re-renderiza a aba quando terminar.
+  const coletasCli=((typeof FINdados!=='undefined'&&FINdados.coletas)?FINdados.coletas:[]).filter(c=>cnpjLimpo(c.cnpj)===alvo);
+  const coletasProntas=(typeof FINdados!=='undefined'&&FINdados.coletas&&FINdados.coletas.length>0);
+  if(!coletasProntas && typeof finCarregarDoSheets==='function' && !window._servLoadColetas){
+    window._servLoadColetas=true;
+    finCarregarDoSheets(['coletas']).then(()=>{ window._servLoadColetas=false; const c=document.getElementById('ficha-corpo'); if(c && document.getElementById('serv-tabela')) renderAbaServicos(c); }).catch(()=>{ window._servLoadColetas=false; });
+  }
+  const jaSalvo=new Set(salvos.map(s=>servNormKey(s['EQUIPAMENTO'])));
+  const derivados=servDerivar(cliente,reaj,coletasCli).filter(d=>!jaSalvo.has(servNormKey(d.equipamento)));
   const cliJs=(cliente||'').replace(/'/g,"\\'");
   let html=`<button class="ficha-btn-primario" style="margin-bottom:14px;" onclick="abrirFormServico('${alvo}','${cliJs}')"><i class="ti ti-plus"></i> Adicionar serviço</button>`;
   if(!salvos.length && !derivados.length){ corpo.innerHTML=html+`<div style="text-align:center;color:var(--cinza-500);padding:24px;font-size:13px;">Nenhum serviço cadastrado ainda para este cliente.</div>`; return; }
   const vfmt=v=>{ const n=parseMoedaReaj(v); return (n!=null&&n!=='')?fmtMoeda(n):'—'; };
-  html+=`<table class="ficha-tab"><thead><tr style="color:var(--cinza-600);font-weight:600;"><td>Equipamento</td><td>Resíduo</td><td>Frequência</td><td>Valor</td><td>Início</td><td>Reajuste</td><td></td></tr></thead><tbody>`;
+  if(!coletasProntas) html+=`<div style="font-size:11px;color:var(--cinza-500);margin-bottom:8px;"><i class="ti ti-loader"></i> Carregando coletas em segundo plano para sugerir resíduo/frequência…</div>`;
+  html+=`<table id="serv-tabela" class="ficha-tab"><thead><tr style="color:var(--cinza-600);font-weight:600;"><td>Equipamento</td><td>Resíduo</td><td>Frequência</td><td>Valor coleta</td><td>Destinação (R$/t)</td><td>Início</td><td>Reajuste</td><td></td></tr></thead><tbody>`;
   salvos.forEach(s=>{
     const rj=String(s['VAI_REAJUSTE']||'').toLowerCase()==='sim';
     const badge=rj?`<span style="background:var(--verde-claro-bg);color:var(--verde-escuro);border-radius:5px;padding:1px 7px;font-size:11px;font-weight:600;">sim</span>`:`<span style="color:var(--cinza-400);font-size:11px;">não</span>`;
     const extra=(s['NUM_PROPOSTA']||s['TEMPO_LOCACAO'])?`<div style="font-size:10.5px;color:var(--cinza-500);">${s['NUM_PROPOSTA']?('Prop. '+s['NUM_PROPOSTA']):''}${s['NUM_PROPOSTA']&&s['TEMPO_LOCACAO']?' · ':''}${s['TEMPO_LOCACAO']?('Locação: '+s['TEMPO_LOCACAO']):''}</div>`:'';
-    html+=`<tr><td><b>${s['EQUIPAMENTO']||'—'}</b>${extra}</td><td>${s['RESIDUO']||'—'}</td><td>${s['FREQUENCIA']||'—'}</td><td>${vfmt(s['VALOR'])}</td><td>${s['DATA_INICIO']?fmtDataBR(s['DATA_INICIO']):'—'}</td><td>${badge}</td><td style="color:var(--verde-medio);font-size:11px;"><i class="ti ti-check"></i> salvo</td></tr>`;
+    html+=`<tr><td><b>${s['EQUIPAMENTO']||'—'}</b>${extra}</td><td>${s['RESIDUO']||'—'}</td><td>${s['FREQUENCIA']||'—'}</td><td>${vfmt(s['VALOR'])}</td><td>${vfmt(s['VALOR_DESTINACAO'])}</td><td>${s['DATA_INICIO']?fmtDataBR(s['DATA_INICIO']):'—'}</td><td>${badge}</td><td style="color:var(--verde-medio);font-size:11px;"><i class="ti ti-check"></i> salvo</td></tr>`;
   });
   derivados.forEach(d=>{
     const preJson=JSON.stringify(d).replace(/'/g,"&#39;").replace(/"/g,'&quot;');
-    html+=`<tr style="background:#fffdf5;"><td><b>${d.equipamento||'—'}</b></td><td>${d.residuo||'—'}</td><td>${d.frequencia||'—'}</td><td>${vfmt(d.valor)}</td><td>—</td><td>—</td><td><button class="ficha-btn-secundario" style="padding:4px 9px;font-size:11px;" onclick='abrirFormServico("${alvo}","${(cliente||'').replace(/"/g,'&quot;')}", JSON.parse(this.getAttribute("data-pre")))' data-pre="${preJson}"><i class="ti ti-plus"></i> revisar e salvar</button></td></tr>`;
+    html+=`<tr style="background:#fffdf5;"><td><b>${d.equipamento||'—'}</b></td><td>${d.residuo||'—'}</td><td>${d.frequencia||'—'}</td><td>${vfmt(d.valor)}</td><td>${vfmt(d.destinacao)}</td><td>—</td><td>—</td><td><button class="ficha-btn-secundario" style="padding:4px 9px;font-size:11px;" onclick='abrirFormServico("${alvo}","${(cliente||'').replace(/"/g,'&quot;')}", JSON.parse(this.getAttribute("data-pre")))' data-pre="${preJson}"><i class="ti ti-plus"></i> revisar e salvar</button></td></tr>`;
   });
   html+=`</tbody></table>`;
   if(derivados.length) html+=`<p style="font-size:11px;color:var(--cinza-500);margin-top:8px;">As linhas em amarelo são <b>sugestões</b> montadas a partir de Reajustes + Coletas. Clique em "revisar e salvar" pra confirmar e completar resíduo/frequência.</p>`;
@@ -1988,7 +2026,8 @@ function abrirFormServico(cnpj, cliente, pre){
         <div><label style="font-size:12px;color:var(--cinza-700);">Equipamento</label><input id="sv-equip" oninput="servToggleLoc()" value="${g(pre.equipamento)}" placeholder="ex: Caçamba 5m³" style="width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
         <div><label style="font-size:12px;color:var(--cinza-700);">Resíduo</label><input id="sv-residuo" value="${g(pre.residuo)}" placeholder="ex: Madeira" style="width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
         <div><label style="font-size:12px;color:var(--cinza-700);">Frequência</label><input id="sv-freq" value="${g(pre.frequencia)}" placeholder="ex: 2x na semana - seg, qui" style="width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
-        <div><label style="font-size:12px;color:var(--cinza-700);">Valor (R$)</label><input id="sv-valor" type="number" step="0.01" value="${g(pre.valor)}" style="width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+        <div><label style="font-size:12px;color:var(--cinza-700);">Valor coleta (R$)</label><input id="sv-valor" type="number" step="0.01" value="${g(pre.valor)}" style="width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+        <div id="sv-dest-wrap" style="display:none;"><label style="font-size:12px;color:var(--cinza-700);">Destinação (R$/tonelada)</label><input id="sv-dest" type="number" step="0.01" value="${g(pre.destinacao)}" placeholder="ex: 208,00" style="width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
         <div><label style="font-size:12px;color:var(--cinza-700);">Data de início</label><input id="sv-inicio" type="date" value="${g(pre.dataInicio)}" style="width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
         <div><label style="font-size:12px;color:var(--cinza-700);">Índice (reajuste)</label><input id="sv-indice" value="${g(pre.indice)}" placeholder="ex: IGP-M" style="width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
         <div><label style="font-size:12px;color:var(--cinza-700);">Nº da proposta (opcional)</label><input id="sv-proposta" value="${g(pre.numProposta)}" placeholder="ex: 543/24" style="width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
@@ -2006,12 +2045,13 @@ function abrirFormServico(cnpj, cliente, pre){
   servToggleLoc();
 }
 
-// mostra o campo "tempo de locação" só quando o equipamento for caçamba ou caixa roll on
+// mostra "tempo de locação" (caçamba/roll on) e "destinação R$/t" (equipamentos por peso) conforme o equipamento
 function servToggleLoc(){
   const eq=((document.getElementById('sv-equip')||{}).value)||'';
-  const wrap=document.getElementById('sv-loc-wrap');
-  if(!wrap) return;
-  wrap.style.display = /ca[çc]amba|roll\s*-?\s*on/i.test(eq) ? '' : 'none';
+  const loc=document.getElementById('sv-loc-wrap');
+  if(loc) loc.style.display = /ca[çc]amba|roll\s*-?\s*on/i.test(eq) ? '' : 'none';
+  const dest=document.getElementById('sv-dest-wrap');
+  if(dest) dest.style.display = (typeof servEhPeso==='function' && servEhPeso(eq)) ? '' : 'none';
 }
 
 async function salvarServico(cnpj, cliente){
@@ -2023,10 +2063,13 @@ async function salvarServico(cnpj, cliente){
   if(vaiReaj && !inicio){ msg.innerHTML='<div class="sem-acesso" style="margin-top:10px;">Pra enviar ao reajuste, informe a data de início.</div>'; return; }
   const locWrap=document.getElementById('sv-loc-wrap');
   const tempoLoc=(locWrap && locWrap.style.display!=='none') ? ((document.getElementById('sv-loc')||{}).value||'').trim() : '';
+  const destWrap=document.getElementById('sv-dest-wrap');
+  const valorDest=(destWrap && destWrap.style.display!=='none') ? ((document.getElementById('sv-dest')||{}).value||'').trim() : '';
   const campos={ cnpj:cnpjLimpo(cnpj), cliente, equipamento:equip,
     residuo:(document.getElementById('sv-residuo').value||'').trim(),
     frequencia:(document.getElementById('sv-freq').value||'').trim(),
     valor:document.getElementById('sv-valor').value||'',
+    valorDestinacao:valorDest,
     dataInicio:inicio, indice:(document.getElementById('sv-indice').value||'').trim(),
     numProposta:((document.getElementById('sv-proposta')||{}).value||'').trim(),
     tempoLocacao:tempoLoc,
@@ -2090,8 +2133,9 @@ async function renderAbaReajustes(corpo) {
     const ant = parseMoedaReaj(c['PREÇO ANTERIOR']);
     const novo = parseMoedaReaj(c['VALOR REAJUSTADO']);
     let pct = null;
-    if (c['ALIQUOTA']!=null && c['ALIQUOTA']!=='') pct = parseFloat(c['ALIQUOTA'])*100;
-    else if (ant!=null && ant!==0 && novo!=null) pct = (novo-ant)/ant*100;
+    if (ant!=null && ant!==0 && novo!=null) pct = (novo-ant)/ant*100;              // cálculo real (mais confiável)
+    else { const a=parseFloat(String(c['ALIQUOTA']||'').replace(',','.')); if(!isNaN(a)) pct = a*100; }
+    if (pct!=null && isNaN(pct)) pct = null;
     const pctTxt = pct!=null ? `<span style="background:var(--verde-claro-bg);color:var(--verde-escuro);border-radius:5px;padding:1px 7px;font-size:12px;font-weight:600;">${pct.toFixed(1).replace('.',',')}%</span>` : '';
     const btnEditar = podeEditarReajuste()
       ? `<button onclick='abrirEditarReajuste(${JSON.stringify(c).replace(/'/g,"&#39;")})' title="Editar %" style="background:none;border:none;color:var(--verde-medio);cursor:pointer;font-size:15px;margin-left:6px;"><i class="ti ti-edit"></i></button>`
@@ -3741,7 +3785,7 @@ async function atualizarSino() {
   // preço: Roberto (e diretoria) vê pedidos aguardando; Danielly vê os já precificados
   const vePedidosPreco = ['roberto','mafe','andrea'].includes(id);
   const vePrecificados = (id === 'danielly');
-  // follow-ups da semana: todos veem (cada um filtra os seus pelo CRM)
+  // follow-ups da semana: cada um vê APENAS os seus (filtrado por consultor mais abaixo)
   const veFollowUps = true;
   const btn = document.getElementById('btn-sino');
   if (!veInad && !veSolicitacoes && !vePedidosPreco && !vePrecificados && !veFollowUps) { btn.style.display='none'; return; }
@@ -3792,6 +3836,7 @@ async function atualizarSino() {
           .map(a=>({id:'fuc-'+(a['CNPJ']||'')+'-'+(a['DATA_AGENDADA']||''), cnpj:a['CNPJ'], cliente:a['CLIENTE'], data:a['DATA_AGENDADA'], consultor:a['REGISTRADO_POR']||'', origem:'Carteira'}));
       } catch(e){}
       const fus = fusLead.concat(fusCart)
+        .filter(a=>ehMeuRegistro(a.consultor))   // avisa APENAS o consultor do caso (cada um vê só os seus)
         .filter(a=>!avisoEstaLido(a.id))
         .sort((a,b)=>(parseDataReaj(a.data)||0)-(parseDataReaj(b.data)||0));
       window._avisosFU = fus;
