@@ -1956,19 +1956,24 @@ function servEhPeso(equip){ return /ca[\u00e7c]amba|roll\s*-?\s*on|compactad|bro
 
 // ===== EDITOR DE SERVI\u00c7OS reutiliz\u00e1vel (lead / proposta / contrato / aditivo) =====
 // Renderiza uma lista edit\u00e1vel de {servico, valor} num container, com "adicionar" e total autom\u00e1tico.
+window._servEdOpts = window._servEdOpts || {};
 function servEditorLinha(containerId, s){ s=s||{};
+  const opts=(window._servEdOpts||{})[containerId]||{};
+  const showData = opts.showData!==false; // proposta/lead escondem a data (reajuste tem data no contrato)
   const reajChk = (s.reajusta===false) ? '' : 'checked';
   const dataVal = s.data ? (typeof dataInputVal==='function'?dataInputVal(s.data):s.data) : '';
+  const dataInput = showData ? `<input type="date" class="serv-ed-data" value="${dataVal}" title="Data-base do reajuste (in\u00edcio)" style="padding:6px;border:1.5px solid var(--cinza-300);border-radius:7px;font-size:12px;">` : '';
   return `<div class="serv-ed-linha" style="display:flex;gap:6px;margin-bottom:6px;align-items:center;flex-wrap:wrap;">
     <input type="text" class="serv-ed-nome" value="${String(s.servico||s.equipamento||'').replace(/"/g,'&quot;')}" placeholder="Servi\u00e7o (ex: Cont\u00eainer 1,1m\u00b3)" style="flex:1;min-width:150px;padding:7px;border:1.5px solid var(--cinza-300);border-radius:7px;font-size:13px;">
     <span style="font-size:12px;color:var(--cinza-500);">R$</span>
     <input type="number" step="0.01" class="serv-ed-valor" oninput="servEditorTotal('${containerId}')" value="${s.valor!=null?s.valor:''}" placeholder="0,00" style="width:95px;padding:7px;border:1.5px solid var(--cinza-300);border-radius:7px;font-size:13px;">
-    <label style="font-size:11.5px;color:var(--cinza-600);display:inline-flex;align-items:center;gap:3px;cursor:pointer;white-space:nowrap;" title="Se marcado, vai pra aba Reajustes (12 meses a partir da data). Desmarque para servi\u00e7os eventuais."><input type="checkbox" class="serv-ed-reaj" ${reajChk}> reajusta</label>
-    <input type="date" class="serv-ed-data" value="${dataVal}" title="Data-base do reajuste (in\u00edcio)" style="padding:6px;border:1.5px solid var(--cinza-300);border-radius:7px;font-size:12px;">
+    <label style="font-size:11.5px;color:var(--cinza-600);display:inline-flex;align-items:center;gap:3px;cursor:pointer;white-space:nowrap;" title="Se marcado, vai pra aba Reajustes. Desmarque para servi\u00e7os eventuais."><input type="checkbox" class="serv-ed-reaj" ${reajChk}> reajusta</label>
+    ${dataInput}
     <button type="button" title="Remover" onclick="this.closest('.serv-ed-linha').remove();servEditorTotal('${containerId}')" style="border:none;background:none;color:var(--vermelho);cursor:pointer;font-size:18px;line-height:1;">&times;</button>
   </div>`;
 }
-function servEditorRender(containerId, lista){
+function servEditorRender(containerId, lista, opts){
+  window._servEdOpts[containerId]=opts||{};
   const cont=document.getElementById(containerId); if(!cont) return;
   lista=(Array.isArray(lista)&&lista.length)?lista:[{servico:'',valor:''}];
   cont.innerHTML=`<div id="${containerId}-rows">${lista.map(s=>servEditorLinha(containerId,s)).join('')}</div>
@@ -2067,8 +2072,14 @@ async function renderAbaServicos(corpo){
   salvos.forEach(s=>{
     const rj=String(s['VAI_REAJUSTE']||'').toLowerCase()==='sim';
     const badge=rj?`<span style="background:var(--verde-claro-bg);color:var(--verde-escuro);border-radius:5px;padding:1px 7px;font-size:11px;font-weight:600;">sim</span>`:`<span style="color:var(--cinza-400);font-size:11px;">não</span>`;
-    const extra=(s['NUM_PROPOSTA']||s['TEMPO_LOCACAO'])?`<div style="font-size:10.5px;color:var(--cinza-500);">${s['NUM_PROPOSTA']?('Prop. '+s['NUM_PROPOSTA']):''}${s['NUM_PROPOSTA']&&s['TEMPO_LOCACAO']?' · ':''}${s['TEMPO_LOCACAO']?('Locação: '+s['TEMPO_LOCACAO']):''}</div>`:'';
-    html+=`<tr><td><b>${s['EQUIPAMENTO']||'—'}</b>${extra}</td><td>${s['RESIDUO']||'—'}</td><td>${s['FREQUENCIA']||'—'}</td><td>${vfmt(s['VALOR'])}</td><td>${vfmt(s['VALOR_DESTINACAO'])}</td><td>${s['DATA_INICIO']?fmtDataBR(s['DATA_INICIO']):'—'}</td><td>${badge}</td><td style="color:var(--verde-medio);font-size:11px;"><i class="ti ti-check"></i> salvo</td></tr>`;
+    // detalhes embaixo do equipamento: mínima, tipo de preço fechado, proposta, locação
+    const minTxt = s['MINIMA_QTD'] ? `Mín: ${s['MINIMA_QTD']} ${s['MINIMA_UNIDADE']||''} ${s['MINIMA_PERIODO']||''}`.trim() : (s['MINIMA_OBS']?('Mín: '+s['MINIMA_OBS']):'');
+    const modTxt = String(s['MODELO_PRECO']||'')==='fechado' ? `fechado até ${s['QTD_FECHADO']||'?'}` : '';
+    const det=[minTxt, modTxt, s['NUM_PROPOSTA']?('Prop. '+s['NUM_PROPOSTA']):'', s['TEMPO_LOCACAO']?('Locação: '+s['TEMPO_LOCACAO']):''].filter(Boolean).join(' · ');
+    const extra=det?`<div style="font-size:10.5px;color:var(--cinza-500);">${det}</div>`:'';
+    const preEdit={ id:s['ID'], equipamento:s['EQUIPAMENTO'], residuo:s['RESIDUO'], frequencia:s['FREQUENCIA'], valor:s['VALOR'], valorDestinacao:s['VALOR_DESTINACAO'], destinacao:s['VALOR_DESTINACAO'], modeloPreco:s['MODELO_PRECO'], qtdFechado:s['QTD_FECHADO'], minimaQtd:s['MINIMA_QTD'], minimaUnidade:s['MINIMA_UNIDADE'], minimaPeriodo:s['MINIMA_PERIODO'], minimaObs:s['MINIMA_OBS'], dataInicio:s['DATA_INICIO'], indice:s['INDICE'], numProposta:s['NUM_PROPOSTA'], tempoLocacao:s['TEMPO_LOCACAO'], vaiReajuste:rj };
+    const preJsonE=JSON.stringify(preEdit).replace(/'/g,"&#39;").replace(/"/g,'&quot;');
+    html+=`<tr><td><b>${s['EQUIPAMENTO']||'—'}</b>${extra}</td><td>${s['RESIDUO']||'—'}</td><td>${s['FREQUENCIA']||'—'}</td><td>${vfmt(s['VALOR'])}</td><td>${vfmt(s['VALOR_DESTINACAO'])}</td><td>${s['DATA_INICIO']?fmtDataBR(s['DATA_INICIO']):'—'}</td><td>${badge}</td><td><button class="ficha-btn-secundario" style="padding:4px 9px;font-size:11px;" onclick='abrirFormServico("${alvo}","${(cliente||'').replace(/"/g,'&quot;')}", JSON.parse(this.getAttribute("data-pre")))' data-pre="${preJsonE}"><i class="ti ti-edit"></i> editar</button></td></tr>`;
   });
   derivados.forEach(d=>{
     const preJson=JSON.stringify(d).replace(/'/g,"&#39;").replace(/"/g,'&quot;');
@@ -2082,69 +2093,106 @@ async function renderAbaServicos(corpo){
 function abrirFormServico(cnpj, cliente, pre){
   pre=pre||{};
   const g=(v)=>String(v==null?'':v).replace(/"/g,'&quot;');
+  const inp='width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;';
+  const modelo=pre.modeloPreco||'';
+  const unidades=['tonelada','equipamento','contêiner','caçamba','saco','m³'];
+  const periodos=['por coleta','por mês'];
+  const optUn=`<option value="">—</option>`+unidades.map(u=>`<option ${pre.minimaUnidade===u?'selected':''}>${u}</option>`).join('');
+  const optPer=`<option value="">—</option>`+periodos.map(p=>`<option ${pre.minimaPeriodo===p?'selected':''}>${p}</option>`).join('');
+  const reajChk=(pre.vaiReajuste===false||String(pre.vaiReajuste||'').toLowerCase()==='não')?'':'checked';
   const corpo=document.getElementById('ficha-corpo');
   corpo.innerHTML=`
     <button class="ficha-btn-secundario" style="margin-bottom:12px;" onclick="renderAbaServicos(document.getElementById('ficha-corpo'))"><i class="ti ti-arrow-left"></i> Voltar</button>
     <div style="background:var(--verde-claro-bg);border-radius:10px;padding:16px;">
-      <div style="font-weight:600;color:var(--verde-escuro);margin-bottom:12px;"><i class="ti ti-package"></i> Serviço — ${cliente}</div>
+      <div style="font-weight:600;color:var(--verde-escuro);margin-bottom:12px;"><i class="ti ti-package"></i> ${pre.id?'Editar serviço':'Serviço'} — ${cliente}</div>
+      ${pre.id?`<input type="hidden" id="sv-id" value="${g(pre.id)}">`:''}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-        <div><label style="font-size:12px;color:var(--cinza-700);">Equipamento</label><input id="sv-equip" oninput="servToggleLoc()" value="${g(pre.equipamento)}" placeholder="ex: Caçamba 5m³" style="width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
-        <div><label style="font-size:12px;color:var(--cinza-700);">Resíduo</label><input id="sv-residuo" value="${g(pre.residuo)}" placeholder="ex: Madeira" style="width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
-        <div><label style="font-size:12px;color:var(--cinza-700);">Frequência</label><input id="sv-freq" value="${g(pre.frequencia)}" placeholder="ex: 2x na semana - seg, qui" style="width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
-        <div><label style="font-size:12px;color:var(--cinza-700);">Valor coleta (R$)</label><input id="sv-valor" type="number" step="0.01" value="${g(pre.valor)}" style="width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
-        <div id="sv-dest-wrap" style="display:none;"><label style="font-size:12px;color:var(--cinza-700);">Destinação (R$/tonelada)</label><input id="sv-dest" type="number" step="0.01" value="${g(pre.destinacao)}" placeholder="ex: 208,00" style="width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
-        <div><label style="font-size:12px;color:var(--cinza-700);">Data de início</label><input id="sv-inicio" type="date" value="${g(pre.dataInicio)}" style="width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
-        <div><label style="font-size:12px;color:var(--cinza-700);">Índice (reajuste)</label><input id="sv-indice" value="${g(pre.indice)}" placeholder="ex: IGP-M" style="width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
-        <div><label style="font-size:12px;color:var(--cinza-700);">Nº da proposta (opcional)</label><input id="sv-proposta" value="${g(pre.numProposta)}" placeholder="ex: 543/24" style="width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
-        <div id="sv-loc-wrap" style="display:none;"><label style="font-size:12px;color:var(--cinza-700);">Tempo de locação</label><input id="sv-loc" value="${g(pre.tempoLocacao)}" placeholder="ex: 5 dias / 30 dias" style="width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+        <div><label style="font-size:12px;color:var(--cinza-700);">Equipamento</label><input id="sv-equip" oninput="servFormAdapta()" value="${g(pre.equipamento)}" placeholder="ex: Caçamba 5m³" style="${inp}"></div>
+        <div><label style="font-size:12px;color:var(--cinza-700);">Resíduo</label><input id="sv-residuo" value="${g(pre.residuo)}" placeholder="ex: Classe I - Amianto" style="${inp}"></div>
+        <div><label style="font-size:12px;color:var(--cinza-700);">Frequência</label><input id="sv-freq" value="${g(pre.frequencia)}" placeholder="ex: Por solicitação / 2x sem" style="${inp}"></div>
+        <div id="sv-loc-wrap" style="display:none;"><label style="font-size:12px;color:var(--cinza-700);">Tempo de locação</label><input id="sv-loc" value="${g(pre.tempoLocacao)}" placeholder="ex: 5 dias" style="${inp}"></div>
       </div>
-      <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px;cursor:pointer;">
-        <input type="checkbox" id="sv-reaj" checked> Enviar para a aba <b>Reajustes</b> (reajuste em 12 meses a partir do início)
-      </label>
-      <div style="font-size:11px;color:var(--cinza-500);margin-top:4px;">Serve também para clientes eventuais — é só deixar marcado. Se marcar, informe a data de início.</div>
+      <div style="margin-top:12px;border-top:1px dashed var(--cinza-300);padding-top:10px;">
+        <div style="font-size:12px;font-weight:600;color:var(--verde-escuro);margin-bottom:6px;"><i class="ti ti-cash"></i> Preço</div>
+        <div id="sv-peso-wrap" style="display:none;grid-template-columns:1fr 1fr;gap:10px;">
+          <div><label style="font-size:12px;color:var(--cinza-700);">Transporte (R$/caixa coletada)</label><input id="sv-transporte" type="number" step="0.01" value="${g(pre.valor)}" style="${inp}"></div>
+          <div><label style="font-size:12px;color:var(--cinza-700);">Destinação (R$/tonelada)</label><input id="sv-dest" type="number" step="0.01" value="${g(pre.destinacao||pre.valorDestinacao)}" style="${inp}"></div>
+        </div>
+        <div id="sv-modelo-wrap" style="display:none;">
+          <label style="font-size:12px;color:var(--cinza-700);">Tipo de preço</label>
+          <select id="sv-modelo" onchange="servFormAdapta()" style="${inp}">
+            <option value="unitario" ${modelo==='unitario'?'selected':''}>Unitário (R$ por equipamento)</option>
+            <option value="fechado" ${modelo==='fechado'?'selected':''}>Fechado (valor para até X equipamentos)</option>
+          </select>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px;">
+            <div><label id="sv-unit-lbl" style="font-size:12px;color:var(--cinza-700);">Valor unitário (R$)</label><input id="sv-unit" type="number" step="0.01" value="${g(pre.valor)}" style="${inp}"></div>
+            <div id="sv-fechado-wrap" style="display:none;"><label style="font-size:12px;color:var(--cinza-700);">Para até (qtde de equip.)</label><input id="sv-qtdfechado" type="number" value="${g(pre.qtdFechado)}" placeholder="ex: 20" style="${inp}"></div>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:12px;border-top:1px dashed var(--cinza-300);padding-top:10px;">
+        <div style="font-size:12px;font-weight:600;color:var(--verde-escuro);margin-bottom:6px;"><i class="ti ti-target"></i> Mínima</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <input id="sv-min-qtd" type="number" step="0.01" value="${g(pre.minimaQtd)}" placeholder="qtde" style="width:90px;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;">
+          <select id="sv-min-un" style="padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;">${optUn}</select>
+          <select id="sv-min-per" style="padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;">${optPer}</select>
+        </div>
+        <input id="sv-min-obs" value="${g(pre.minimaObs)}" placeholder="observação da mínima (opcional)" style="${inp}margin-top:8px;">
+      </div>
+      <div style="margin-top:12px;border-top:1px dashed var(--cinza-300);padding-top:10px;">
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;font-weight:600;color:var(--verde-escuro);"><input type="checkbox" id="sv-reaj" ${reajChk}> <i class="ti ti-trending-up"></i> Enviar/manter na aba Reajustes</label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px;">
+          <div><label style="font-size:12px;color:var(--cinza-700);">Índice</label><input id="sv-indice" value="${g(pre.indice)}" placeholder="ex: IGP-M" style="${inp}"></div>
+          <div><label style="font-size:12px;color:var(--cinza-700);">Data de início (base do reajuste)</label><input id="sv-inicio" type="date" value="${pre.dataInicio?(typeof dataInputVal==='function'?dataInputVal(pre.dataInicio):pre.dataInicio):''}" style="${inp}"></div>
+        </div>
+      </div>
+      <div style="margin-top:10px;"><label style="font-size:12px;color:var(--cinza-700);">Nº da proposta (opcional)</label><input id="sv-proposta" value="${g(pre.numProposta)}" placeholder="ex: 543/24" style="${inp}"></div>
       <div class="ficha-botoes" style="margin-top:14px;">
-        <button class="ficha-btn-primario" onclick="salvarServico('${cnpj}','${(cliente||'').replace(/'/g,"\\'")}')"><i class="ti ti-check"></i> Salvar serviço</button>
+        <button class="ficha-btn-primario" onclick="salvarServico('${cnpj}','${(cliente||'').replace(/'/g,"\\'")}')"><i class="ti ti-check"></i> ${pre.id?'Salvar alterações':'Salvar serviço'}</button>
       </div>
       <div id="sv-msg"></div>
     </div>`;
-  servToggleLoc();
+  servFormAdapta();
 }
 
-// mostra "tempo de locação" (caçamba/roll on) e "destinação R$/t" (equipamentos por peso) conforme o equipamento
-function servToggleLoc(){
+// adapta o formulário: preço por peso (transporte+destinação) vs unitário/fechado; locação; label do valor
+function servFormAdapta(){
   const eq=((document.getElementById('sv-equip')||{}).value)||'';
-  const loc=document.getElementById('sv-loc-wrap');
-  if(loc) loc.style.display = /ca[çc]amba|roll\s*-?\s*on/i.test(eq) ? '' : 'none';
-  const dest=document.getElementById('sv-dest-wrap');
-  if(dest) dest.style.display = (typeof servEhPeso==='function' && servEhPeso(eq)) ? '' : 'none';
+  const peso=(typeof servEhPeso==='function' && servEhPeso(eq));
+  const pesoWrap=document.getElementById('sv-peso-wrap'); if(pesoWrap) pesoWrap.style.display = peso?'grid':'none';
+  const modeloWrap=document.getElementById('sv-modelo-wrap'); if(modeloWrap) modeloWrap.style.display = peso?'none':'block';
+  const loc=document.getElementById('sv-loc-wrap'); if(loc) loc.style.display = /ca[çc]amba|roll\s*-?\s*on/i.test(eq)?'':'none';
+  const modelo=(document.getElementById('sv-modelo')||{}).value;
+  const fechadoWrap=document.getElementById('sv-fechado-wrap'); if(fechadoWrap) fechadoWrap.style.display = (modelo==='fechado')?'':'none';
+  const unitLbl=document.getElementById('sv-unit-lbl'); if(unitLbl) unitLbl.textContent = (modelo==='fechado')?'Valor fechado (R$)':'Valor unitário (R$)';
 }
 
 async function salvarServico(cnpj, cliente){
   const msg=document.getElementById('sv-msg');
-  const equip=(document.getElementById('sv-equip').value||'').trim();
+  const gv=id=>((document.getElementById(id)||{}).value||'').trim();
+  const equip=gv('sv-equip');
   if(!equip){ msg.innerHTML='<div class="sem-acesso" style="margin-top:10px;">Informe o equipamento.</div>'; return; }
   const vaiReaj=document.getElementById('sv-reaj').checked;
-  const inicio=document.getElementById('sv-inicio').value;
+  const inicio=gv('sv-inicio');
   if(vaiReaj && !inicio){ msg.innerHTML='<div class="sem-acesso" style="margin-top:10px;">Pra enviar ao reajuste, informe a data de início.</div>'; return; }
+  const peso=(typeof servEhPeso==='function' && servEhPeso(equip));
+  let valor='', valorDest='', modeloPreco='', qtdFechado='';
+  if(peso){ valor=gv('sv-transporte'); valorDest=gv('sv-dest'); modeloPreco='peso'; }
+  else { modeloPreco=gv('sv-modelo')||'unitario'; valor=gv('sv-unit'); if(modeloPreco==='fechado') qtdFechado=gv('sv-qtdfechado'); }
   const locWrap=document.getElementById('sv-loc-wrap');
-  const tempoLoc=(locWrap && locWrap.style.display!=='none') ? ((document.getElementById('sv-loc')||{}).value||'').trim() : '';
-  const destWrap=document.getElementById('sv-dest-wrap');
-  const valorDest=(destWrap && destWrap.style.display!=='none') ? ((document.getElementById('sv-dest')||{}).value||'').trim() : '';
-  const campos={ cnpj:cnpjLimpo(cnpj), cliente, equipamento:equip,
-    residuo:(document.getElementById('sv-residuo').value||'').trim(),
-    frequencia:(document.getElementById('sv-freq').value||'').trim(),
-    valor:document.getElementById('sv-valor').value||'',
-    valorDestinacao:valorDest,
-    dataInicio:inicio, indice:(document.getElementById('sv-indice').value||'').trim(),
-    numProposta:((document.getElementById('sv-proposta')||{}).value||'').trim(),
-    tempoLocacao:tempoLoc,
-    vaiReajuste:vaiReaj };
+  const tempoLoc=(locWrap && locWrap.style.display!=='none') ? gv('sv-loc') : '';
+  const idEl=document.getElementById('sv-id');
+  const campos={ id: idEl?idEl.value:'', cnpj:cnpjLimpo(cnpj), cliente, equipamento:equip,
+    residuo:gv('sv-residuo'), frequencia:gv('sv-freq'),
+    valor, valorDestinacao:valorDest, modeloPreco, qtdFechado,
+    minimaQtd:gv('sv-min-qtd'), minimaUnidade:gv('sv-min-un'), minimaPeriodo:gv('sv-min-per'), minimaObs:gv('sv-min-obs'),
+    dataInicio:inicio, indice:gv('sv-indice'), numProposta:gv('sv-proposta'), tempoLocacao:tempoLoc, vaiReajuste:vaiReaj };
   msg.innerHTML='<div style="text-align:center;padding:10px;color:var(--cinza-500);">Salvando...</div>';
   try{
     const resp=await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'novoServico',token:sessaoToken,dados:{campos}})});
     const r=await resp.json();
     if(!r.ok){ msg.innerHTML=`<div class="sem-acesso" style="margin-top:10px;">${r.erro||'Erro. Confirme que o Apps Script foi republicado.'}</div>`; return; }
-    cacheReajustes=null; // se foi pra reajuste, recarrega
+    cacheReajustes=null;
     renderAbaServicos(document.getElementById('ficha-corpo'));
   }catch(e){ msg.innerHTML='<div class="sem-acesso" style="margin-top:10px;">Erro de conexão.</div>'; }
 }
@@ -3185,7 +3233,7 @@ function abrirModalProposta(idLead) {
         </div>
       </div>
     </div>`);
-  { let preServ=[]; try{ preServ=JSON.parse((lead&&lead['SERVICOS_PROPOSTA'])||'[]'); }catch(e){} servEditorRender('pp-serv-ed', preServ); }
+  { let preServ=[]; try{ preServ=JSON.parse((lead&&lead['SERVICOS_PROPOSTA'])||'[]'); }catch(e){} servEditorRender('pp-serv-ed', preServ, {showData:false}); }
 }
 async function confirmarProposta(idLead) {
   const numero = document.getElementById('pp-numero').value;
@@ -3781,6 +3829,7 @@ async function renderInadimplencia(area) {
         <option value="todos" ${filtro==='todos'?'selected':''}>Todos (${lista.length})</option>
         ${INAD_STATUS.map(s=>`<option value="${s}" ${filtro===s?'selected':''}>${s} (${cont[s]||0})</option>`).join('')}
       </select>
+      ${podeEnviar ? `<button class="ficha-btn-primario" style="margin-left:auto;padding:8px 14px;border:none;border-radius:8px;font-size:12.5px;cursor:pointer;" onclick="enviarTodosInad()"><i class="ti ti-mail-forward"></i> Enviar todos à diretoria</button>` : ''}
     </div>
     <div class="grid-cards">`;
   if (!listaF.length) html += `<div style="grid-column:1/-1;color:var(--cinza-500);font-size:13px;padding:20px;text-align:center;">Nenhum caso com status "${filtro}".</div>`;
@@ -3845,6 +3894,33 @@ CNPJ: ${cnpj||'—'}
 Valor em aberto: ${fmtMoeda(valor)}
 Dias de atraso: ${dias||'—'}
 ${obs?`Observação: ${obs}`:''}
+
+Atenciosamente,
+${usuarioAtual.nome}
+Ecotrans Ambiental`);
+  window.location.href = `mailto:${para}?subject=${assunto}&body=${corpo}`;
+}
+
+// envia TODOS os inadimplentes num único e-mail pra diretoria (relação consolidada)
+function enviarTodosInad(){
+  const lista=(cacheInad||[]);
+  if(!lista.length){ alert('Não há inadimplentes para enviar.'); return; }
+  const total=lista.reduce((s,l)=>s+(parseFloat(l['VALOR_ABERTO'])||0),0);
+  const linhas=lista
+    .slice().sort((a,b)=>(parseFloat(b['VALOR_ABERTO'])||0)-(parseFloat(a['VALOR_ABERTO'])||0))
+    .map((l,i)=>{ const st=(String(l['STATUS_CASO']||'').trim()||'Em andamento');
+      return `${i+1}. ${l['CLIENTE']||'—'} — CNPJ ${l['CNPJ']||'—'} — Em aberto: ${fmtMoeda(l['VALOR_ABERTO'])} — Atraso: ${l['DIAS_ATRASO']||'—'}d${l['VENCIMENTO']?` — Venc: ${fmtDataBR(l['VENCIMENTO'])}`:''} — Status: ${st}${l['OBS']?` — Obs: ${l['OBS']}`:''}`;
+    }).join('\n');
+  const para=DIRETORES_CC.join(',');
+  const assunto=encodeURIComponent(`Inadimplência — relação de ${lista.length} cliente(s)`);
+  const corpo=encodeURIComponent(
+`Prezados,
+
+Segue a relação atualizada de clientes inadimplentes:
+
+${linhas}
+
+Total em aberto: ${fmtMoeda(total)} (${lista.length} cliente(s))
 
 Atenciosamente,
 ${usuarioAtual.nome}
@@ -7715,7 +7791,7 @@ function abrirLead(id) {
       </div>
     </div>`;
   // editor de serviços da proposta (rascunho)
-  { let preServ=[]; try{ preServ=JSON.parse(l['SERVICOS_PROPOSTA']||'[]'); }catch(e){} servEditorRender('lead-serv-ed', preServ); }
+  { let preServ=[]; try{ preServ=JSON.parse(l['SERVICOS_PROPOSTA']||'[]'); }catch(e){} servEditorRender('lead-serv-ed', preServ, {showData:false}); }
   // carregar histórico de atividades do lead (por cliente)
   carregarHistoricoLead(l['CLIENTE'], cnpjOuVazio);
   // mostrar clientes próximos (mesma região de CEP)
