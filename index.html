@@ -956,8 +956,20 @@ function faturamentoDoCliente(cliente, cnpj){
   const lista = (typeof FINdados!=='undefined' && FINdados.faturamento) ? FINdados.faturamento : [];
   if(!lista.length) return null;
   const alvo = _finNormNome(cliente);
+  if(!alvo) return null;
   let item = lista.find(x=>_finNormNome(x.cliente)===alvo);
-  if(!item && alvo) item = lista.find(x=>{ const n=_finNormNome(x.cliente); return n && (n.includes(alvo)||alvo.includes(n)); });
+  if(!item) item = lista.find(x=>{ const n=_finNormNome(x.cliente); return n && (n.includes(alvo)||alvo.includes(n)); });
+  // casamento por TOKENS: compartilham as 2 primeiras palavras significativas (>=3 letras)
+  if(!item){
+    const toks = a => a.split(' ').filter(w=>w.length>=3);
+    const ta = toks(alvo);
+    if(ta.length){
+      const p2 = ta.slice(0,2);
+      item = lista.find(x=>{ const nt=toks(_finNormNome(x.cliente)); return p2.length && p2.every((w,i)=>nt[i]===w); });
+      // reserva: mesmo 1º token forte + pelo menos mais um token em comum
+      if(!item) item = lista.find(x=>{ const nt=toks(_finNormNome(x.cliente)); return nt[0]===ta[0] && ta.slice(1).some(w=>nt.includes(w)); });
+    }
+  }
   return item ? item.valores : null;
 }
 
@@ -1402,6 +1414,8 @@ function abrirFormAditivo(cnpj, cliente, ehSolicitacao) {
         <div class="ficha-topo"><button class="fechar" onclick="document.getElementById('form-adit-overlay').remove()"><i class="ti ti-x"></i></button>
           <div class="nome"><i class="ti ti-file-plus"></i> ${titulo}</div><div class="cnpj">${cliente}</div></div>
         <div class="ficha-corpo">
+          <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Número do aditivo</label>
+            <input type="text" id="ad-numero" placeholder="ex: 3 (3º aditivo)" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
           <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Vigência *</label>
             <input type="text" id="ad-vigencia" placeholder="ex: 12 meses a partir de 01/07/2026" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
           <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Novo vencimento do contrato (com o aditivo)</label>
@@ -1441,8 +1455,11 @@ async function salvarAditivo(cnpj, cliente, ehSolicitacao) {
   if (!vigencia) { document.getElementById('ad-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Informe a vigência.</div>'; return; }
   const temValor = document.getElementById('ad-temvalor').value==='Sim';
   const novoVenc = document.getElementById('ad-novovenc').value; // AAAA-MM-DD ou ''
+  const numAdit = (document.getElementById('ad-numero')||{}).value || '';
+  const assAdit = (document.getElementById('ad-assinatura')||{}).value || '';
   const campos = {
-    'CNPJ': cnpj, 'CLIENTE': cliente, 'VIGENCIA': vigencia,
+    'CNPJ': cnpj, 'CLIENTE': cliente, 'NUMERO_ADITIVO': numAdit, 'VIGENCIA': vigencia,
+    'ASS_ADITIVO': assAdit ? fmtDataBR(assAdit) : '',
     'MULTA': document.getElementById('ad-multa').value,
     'ALTERA_VALOR': temValor ? 'Sim' : 'Não',
     'PERCENTUAL': temValor ? document.getElementById('ad-perc').value : '',
@@ -1458,15 +1475,18 @@ async function salvarAditivo(cnpj, cliente, ehSolicitacao) {
     const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({ acao:'novoRegistro', token: sessaoToken, dados:{ aba:'Aditivos', campos } })});
     const r = await resp.json();
     if (!r.ok) { document.getElementById('ad-msg').innerHTML=`<div class="sem-acesso">${r.erro||'verifique se o Apps Script foi republicado.'}</div>`; return; }
-    // se é um aditivo registrado (não solicitação) e informou novo vencimento, atualiza o contrato
-    // pra vigência refletir o aditivo (evita o contrato constar como vencido)
-    if (!ehSolicitacao && novoVenc) {
-      try {
-        await fetch(API_URL, { method:'POST', body: JSON.stringify({
-          acao:'salvar', token: sessaoToken, aba:'Contratos',
-          dados:{ 'CNPJ': cnpj, 'VENC. ADITIVO': novoVenc, 'VIGENCIA_ATUALIZADA': novoVenc }
-        })});
-      } catch(e) {}
+    // aditivo registrado: grava no contrato o nº do aditivo, a assinatura e (se houver) o NOVO vencimento.
+    // Regra: se informou novo vencimento, ele SUBSTITUI o vencimento na regra; se em branco, mantém o do contrato.
+    if (!ehSolicitacao) {
+      const cAdit = { 'CNPJ': cnpj };
+      if (novoVenc) { cAdit['VENC. ADITIVO'] = novoVenc; cAdit['VIGENCIA_ATUALIZADA'] = novoVenc; }
+      if (assAdit) cAdit['ASS. ADITIVO'] = fmtDataBR(assAdit);
+      if (numAdit) cAdit['NUMERO_ADITIVO'] = numAdit;
+      if (Object.keys(cAdit).length > 1) {
+        try {
+          await fetch(API_URL, { method:'POST', body: JSON.stringify({ acao:'salvar', token: sessaoToken, aba:'Contratos', dados: cAdit })});
+        } catch(e) {}
+      }
     }
     // serviços do aditivo -> aba Serviços + Reajuste (só em aditivo registrado; base = assinatura, ou hoje)
     if (!ehSolicitacao) {
@@ -2209,21 +2229,86 @@ async function renderAbaContratos(corpo) {
   if (!lista.length) { corpo.innerHTML = btnAdd + `<div style="text-align:center;color:var(--cinza-500);padding:24px;font-size:13px;">Nenhum contrato para este cliente.</div>`; return; }
   let html = btnAdd;
   lista.forEach(c => {
+    // vencimento EFETIVO: se tem aditivo com nova data, ela substitui a do contrato (regra pedida pela Mafe)
+    const vencEfet = c['VENC. ADITIVO'] || c['VIGENCIA_ATUALIZADA'] || c['VENC.'];
+    const dVenc = (typeof parseDataReaj==='function') ? parseDataReaj(vencEfet) : null;
+    let badge='';
+    if (dVenc) {
+      const dias = Math.round((dVenc - new Date(new Date().toDateString()))/(1000*60*60*24));
+      if (dias < 0) badge = `<span class="tag" style="background:#fdecea;color:#b23b3b;margin-left:6px;">Vencido</span>`;
+      else if (dias <= 90) badge = `<span class="tag" style="background:#FAEEDA;color:#BA7517;margin-left:6px;">A vencer (${dias}d)</span>`;
+      else badge = `<span class="tag tag-contrato" style="margin-left:6px;">Vigente</span>`;
+    }
+    const usouAditivo = (c['VENC. ADITIVO'] || c['VIGENCIA_ATUALIZADA']) && String(vencEfet)!==String(c['VENC.']);
+    const editBtn = ehGestao ? `<button class="ficha-btn-secundario" style="float:right;padding:3px 10px;font-size:11px;" onclick='editarContrato(JSON.parse(this.getAttribute("data-c")))' data-c="${JSON.stringify(c).replace(/'/g,"&#39;").replace(/"/g,'&quot;')}"><i class="ti ti-edit"></i> editar</button>` : '';
     html += `<div style="border:1px solid var(--cinza-200);border-radius:10px;padding:14px;margin-bottom:10px;">
-      <div style="font-weight:600;color:var(--cinza-900);margin-bottom:8px;">Contrato ${c['Nº CTO']||'—'} ${c['STATUS']?`<span class="tag tag-contrato" style="margin-left:6px;">${c['STATUS']}</span>`:''}</div>
+      <div style="font-weight:600;color:var(--cinza-900);margin-bottom:8px;">${editBtn}Contrato ${c['Nº CTO']||'—'} ${badge}</div>
       <table class="ficha-tab">
         <tr><td>Assinatura</td><td>${fmtDataBR(c['ASS. CTO'])}</td></tr>
-        <tr><td>Vencimento</td><td>${fmtDataBR(c['VENC.'])}</td></tr>
+        <tr><td>Vencimento</td><td>${fmtDataBR(c['VENC.'])}${usouAditivo?` <span style="color:var(--cinza-500);font-size:11px;">→ vale ${fmtDataBR(vencEfet)} (aditivo)</span>`:''}</td></tr>
         <tr><td>Período</td><td>${c['PERÍODO']||'—'}</td></tr>
         <tr><td>Renovação automática</td><td>${c['RENOVAÇÃO AUTOMÁTICA']||'—'}</td></tr>
+        <tr><td>Multa</td><td>${c['MULTA']||'—'}</td></tr>
         <tr><td>Índice</td><td>${c['ÍNDICE']||'—'}</td></tr>
+        <tr><td>Status</td><td>${c['STATUS']||'—'}</td></tr>
         <tr><td>Último reajuste</td><td>${fmtDataBR(c['DATA ÚLTIMO REAJUSTE'])}</td></tr>
-        ${(c['ASS. ADITIVO']||c['VENC. ADITIVO'])?`<tr><td>Aditivo</td><td>ass. ${fmtDataBR(c['ASS. ADITIVO'])} · venc. ${fmtDataBR(c['VENC. ADITIVO'])}</td></tr>`:''}
+        ${(c['ASS. ADITIVO']||c['VENC. ADITIVO']||c['NUMERO_ADITIVO'])?`<tr><td>Aditivo</td><td>${c['NUMERO_ADITIVO']?('nº '+c['NUMERO_ADITIVO']+' · '):''}ass. ${fmtDataBR(c['ASS. ADITIVO'])} · venc. ${fmtDataBR(c['VENC. ADITIVO'])}</td></tr>`:''}
         ${(c['MINIMA_EQUIP_QTD']||c['MINIMA_EQUIP_TIPO'])?`<tr><td>Mínima contratual</td><td>${c['MINIMA_EQUIP_QTD']||''} ${c['MINIMA_EQUIP_TIPO']||''}</td></tr>`:''}
       </table>
     </div>`;
   });
   corpo.innerHTML = html;
+}
+
+// editar um contrato existente (atualiza a mesma linha por Nº CTO)
+function editarContrato(c){
+  c=c||{};
+  const g=v=>String(v==null?'':v).replace(/"/g,'&quot;');
+  const di=v=>{ const d=(typeof parseDataReaj==='function')?parseDataReaj(v):null; return d?`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`:''; };
+  const inp='width:100%;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;';
+  const cont=document.getElementById('ficha-container');
+  cont.insertAdjacentHTML('beforeend', `
+    <div class="ficha-overlay" id="edit-cto-overlay" onclick="if(event.target===this)document.getElementById('edit-cto-overlay').remove()" style="z-index:650;">
+      <div class="ficha" style="width:520px;">
+        <div class="ficha-topo"><button class="fechar" onclick="document.getElementById('edit-cto-overlay').remove()"><i class="ti ti-x"></i></button>
+          <div class="nome"><i class="ti ti-edit"></i> Editar contrato ${c['Nº CTO']||''}</div><div class="cnpj">${fichaClienteAtual['CLIENTE']||''}</div></div>
+        <div class="ficha-corpo">
+          <input type="hidden" id="ec-num" value="${g(c['Nº CTO'])}">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div><label style="font-size:12px;color:var(--cinza-700);">Assinatura</label><input type="date" id="ec-ass" value="${di(c['ASS. CTO'])}" style="${inp}"></div>
+            <div><label style="font-size:12px;color:var(--cinza-700);">Vencimento</label><input type="date" id="ec-venc" value="${di(c['VENC.'])}" style="${inp}"></div>
+            <div><label style="font-size:12px;color:var(--cinza-700);">Período</label><input id="ec-periodo" value="${g(c['PERÍODO'])}" style="${inp}"></div>
+            <div><label style="font-size:12px;color:var(--cinza-700);">Renovação automática</label><input id="ec-renov" value="${g(c['RENOVAÇÃO AUTOMÁTICA'])}" style="${inp}"></div>
+            <div><label style="font-size:12px;color:var(--cinza-700);">Multa</label><input id="ec-multa" value="${g(c['MULTA'])}" style="${inp}"></div>
+            <div><label style="font-size:12px;color:var(--cinza-700);">Índice</label><input id="ec-indice" value="${g(c['ÍNDICE'])}" style="${inp}"></div>
+            <div><label style="font-size:12px;color:var(--cinza-700);">Status</label><input id="ec-status" value="${g(c['STATUS'])}" style="${inp}"></div>
+            <div><label style="font-size:12px;color:var(--cinza-700);">Mínima — tipo</label><input id="ec-mintipo" value="${g(c['MINIMA_EQUIP_TIPO'])}" style="${inp}"></div>
+            <div><label style="font-size:12px;color:var(--cinza-700);">Mínima — qtde</label><input id="ec-minqtd" value="${g(c['MINIMA_EQUIP_QTD'])}" style="${inp}"></div>
+          </div>
+          <div class="ficha-botoes" style="margin-top:14px;">
+            <button class="ficha-btn-primario" onclick="salvarEdicaoContrato()"><i class="ti ti-check"></i> Salvar alterações</button>
+            <button class="ficha-btn-secundario" onclick="document.getElementById('edit-cto-overlay').remove()">Cancelar</button>
+          </div>
+          <div id="ec-msg"></div>
+        </div>
+      </div>
+    </div>`);
+}
+async function salvarEdicaoContrato(){
+  const msg=document.getElementById('ec-msg'); const gv=id=>((document.getElementById(id)||{}).value||'').trim();
+  const gd=id=>{ const v=gv(id); return v?fmtDataBR(v):''; };
+  const numCto=gv('ec-num');
+  const campos={ 'ASS. CTO':gd('ec-ass'), 'VENC.':gd('ec-venc'), 'PERÍODO':gv('ec-periodo'),
+    'RENOVAÇÃO AUTOMÁTICA':gv('ec-renov'), 'MULTA':gv('ec-multa'), 'ÍNDICE':gv('ec-indice'), 'STATUS':gv('ec-status'),
+    'MINIMA_EQUIP_TIPO':gv('ec-mintipo'), 'MINIMA_EQUIP_QTD':gv('ec-minqtd') };
+  msg.innerHTML='<div style="text-align:center;padding:10px;color:var(--cinza-500);">Salvando...</div>';
+  try{
+    const resp=await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'atualizarContrato',token:sessaoToken,dados:{numCto, cnpj:cnpjLimpo(fichaClienteAtual['CNPJ']), campos}})});
+    const r=await resp.json();
+    if(!r.ok){ msg.innerHTML=`<div class="sem-acesso" style="margin-top:8px;">${r.erro||'Erro. Republique o Apps Script.'}</div>`; return; }
+    document.getElementById('edit-cto-overlay').remove();
+    const corpo=document.getElementById('ficha-corpo'); if(corpo) renderAbaContratos(corpo);
+  }catch(e){ msg.innerHTML='<div class="sem-acesso" style="margin-top:8px;">Erro de conexão.</div>'; }
 }
 
 async function renderAbaReajustes(corpo) {
@@ -7667,9 +7752,18 @@ async function removerPropostaCobertura(idLead){
   }catch(e){ alert('Erro de conexão.'); }
 }
 
-function abrirLead(id) {
-  const l = (kanbanLeads||[]).find(x => String(x['ID_LEAD'])===String(id));
-  if (!l) return;
+async function abrirLead(id) {
+  let l = (kanbanLeads||[]).find(x => String(x['ID_LEAD'])===String(id));
+  // não achou no cache (lead recém-criado, cache antigo etc.) -> recarrega do servidor e tenta de novo
+  if (!l && id && String(id).trim()) {
+    try { await carregarLeads(true); } catch(e){}
+    l = (kanbanLeads||[]).find(x => String(x['ID_LEAD'])===String(id));
+  }
+  if (!l) {
+    // último recurso: casa pelo nome (leads sem ID_LEAD gravado na planilha)
+    if (id && String(id).trim()) { const alvo=String(id).trim().toUpperCase(); l = (kanbanLeads||[]).find(x => String(x['CLIENTE']||'').trim().toUpperCase()===alvo); }
+    if (!l) { alert('Não consegui abrir este lead. Ele pode ter sido criado sem ID. Atualize a página (Ctrl+Shift+R) e, se persistir, me avise.'); return; }
+  }
   const cont = document.getElementById('ficha-container');
   const linha = (rotulo, valor) => valor ? `<tr><td style="padding:7px 0;color:var(--cinza-600);white-space:nowrap;padding-right:14px;">${rotulo}</td><td style="padding:7px 0;color:var(--cinza-900);">${valor}</td></tr>` : '';
   // etapas possíveis para o seletor (inclui Prospecção)
