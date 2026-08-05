@@ -3158,10 +3158,16 @@ async function mudarEtapaLead(idLead, novaEtapa, motivoPerda, dadosProposta) {
       fecharFicha();
       abrirFormPrecoLead(lead);
     }
-    // se virou "Fechado", SEMPRE oferece criar o cliente (contrato ou eventual)
+    // se virou "Fechado":
+    //  - fonte "Cliente" (recompra) -> NÃO cria card novo; abre o card do cliente existente e adiciona um serviço
+    //  - demais fontes -> cria o cliente (contrato/eventual/pendente)
     if (novaEtapa === 'Fechado') {
       fecharFicha();
-      abrirCriarClienteDeLead(lead);
+      if (String(lead['FONTE']||'').trim().toLowerCase() === 'cliente') {
+        abrirServicoDeLeadCliente(lead);
+      } else {
+        abrirCriarClienteDeLead(lead);
+      }
     }
   } catch(e) {
     lead['ETAPA'] = etapaAntiga; aplicarKanban();
@@ -3275,6 +3281,49 @@ function abrirCriarClienteDeLead(lead) {
       </div>
     </div>`;
 }
+// RECOMPRA (lead com fonte "Cliente"): não cria cliente novo — abre o card do cliente que já existe
+// e já abre o formulário de NOVO SERVIÇO, pré-preenchido com os dados do lead (resíduo, frequência,
+// data de início das coletas). Ao salvar, o serviço entra no card e (se marcado) vai pra aba Reajustes.
+async function abrirServicoDeLeadCliente(lead) {
+  if (!cacheClientes) await carregarClientes();
+  const alvo = cnpjLimpo(lead['CNPJ']);
+  let c = (alvo && alvo.length >= 11) ? (cacheClientes||[]).find(x => cnpjLimpo(x['CNPJ']) === alvo) : null;
+  if (!c) c = (cacheClientes||[]).find(x => servNorm(x['CLIENTE']) === servNorm(lead['CLIENTE']));
+  if (!c) {
+    // não encontrou o cliente já cadastrado — cai no fluxo normal de criação de cliente
+    alert('Não encontrei este cliente já cadastrado na carteira. Vou abrir o cadastro de cliente.');
+    abrirCriarClienteDeLead(lead);
+    return;
+  }
+  // rascunho de serviços que veio do lead (se a consultora preencheu na proposta)
+  let preServ = []; try { preServ = JSON.parse(lead['SERVICOS_PROPOSTA'] || '[]'); } catch(e) {}
+  const base = preServ.length ? preServ[0] : {};
+  const pre = {
+    equipamento: base.equipamento || base.servico || '',
+    residuo: base.residuo || lead['RESIDUO'] || '',
+    frequencia: base.frequencia || lead['FREQUENCIA'] || '',
+    valor: base.valor || '',
+    dataInicio: lead['DATA_INICIO_COLETAS'] || '',
+    numProposta: lead['N_PROPOSTA'] || ''
+  };
+  // abre a ficha do cliente existente e ativa a aba Serviços
+  await abrirFicha(c['CNPJ'], c['CLIENTE']);
+  let abaServ = null;
+  document.querySelectorAll('.ficha-aba').forEach(a => { if (a.textContent.trim() === 'Serviços') abaServ = a; });
+  if (abaServ) { document.querySelectorAll('.ficha-aba').forEach(a => a.classList.remove('ativa')); abaServ.classList.add('ativa'); }
+  // abre o formulário de serviço já preenchido
+  abrirFormServico(cnpjLimpo(c['CNPJ']), c['CLIENTE'], pre);
+  const corpo = document.getElementById('ficha-corpo');
+  if (corpo) {
+    const aviso = document.createElement('div');
+    aviso.style.cssText = 'background:var(--verde-claro-bg);border-radius:8px;padding:10px;margin-top:10px;color:var(--verde-escuro);font-size:12px;';
+    aviso.innerHTML = preServ.length > 1
+      ? `<i class="ti ti-info-circle"></i> Recompra de cliente já existente. Este lead tinha <b>${preServ.length} serviços</b> rascunhados — salve este e use "Adicionar serviço" para os demais.`
+      : `<i class="ti ti-info-circle"></i> Recompra de cliente já existente: o serviço será adicionado neste card (sem criar cliente novo).`;
+    corpo.appendChild(aviso);
+  }
+}
+
 async function salvarClienteDeLead(cnpjLead, tipo, permitirDuplicado) {
   const TIPOS = { contrato:'Contrato', eventual:'Eventual', pendente:'Contratual - pendente' };
   const campos = {
@@ -6513,6 +6562,17 @@ async function salvarLead() {
   let todos = [];
   try { const rt = await buscarDados('CRM_Leads'); todos = rt.ok ? rt.linhas : []; } catch(e) {}
   const ehRecompraCliente = document.getElementById('nl-fonte').value === 'Cliente';
+  // TRAVA da recompra: fonte "Cliente" exige selecionar um cliente EXISTENTE na busca (vincula o card).
+  // Sem esse vínculo, ao fechar o lead não dá pra saber em qual card adicionar o serviço.
+  if (ehRecompraCliente) {
+    if (!cacheClientes) { try { await carregarClientes(); } catch(e){} }
+    const vinculado = (cnpjL && cnpjL.length >= 11 && (cacheClientes||[]).some(c => cnpjLimpo(c['CNPJ']) === cnpjL))
+                   || (cacheClientes||[]).some(c => String(c['CLIENTE']||'').trim().toUpperCase() === String(cliente||'').trim().toUpperCase());
+    if (!vinculado) {
+      document.getElementById('nl-msg').innerHTML = '<div class="sem-acesso" style="margin-top:10px;"><i class="ti ti-ban"></i> Fonte <b>"Cliente"</b> é recompra: selecione o cliente na <b>busca acima</b> para vincular ao card que já existe. Digite o nome e clique no cliente na lista.</div>';
+      return;
+    }
+  }
   // 1) CNPJ igual -> BLOQUEIA (não deixa prospectar o mesmo cliente)
   //    EXCEÇÃO: fonte "Cliente" é recompra de um cliente que já existe — aí é permitido.
   if (cnpjL && !ehRecompraCliente) {
