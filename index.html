@@ -973,6 +973,25 @@ function faturamentoDoCliente(cliente, cnpj){
   return item ? item.valores : null;
 }
 
+// FALLBACK do faturamento: quando o cliente não está no relatório de Variação, puxa da Contas a Receber
+// (emitidos), por CNPJ, agrupando o valor por MÊS de EMISSÃO. Retorna {mesNome: valor} (mês faturado).
+function faturamentoReceberDoCliente(cnpj){
+  const alvo=String(cnpj||'').replace(/\D/g,''); if(!alvo) return null;
+  const lista=(typeof FINdados!=='undefined' && FINdados.receber) ? FINdados.receber : [];
+  const MESNOME=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  const porMes={};
+  lista.forEach(r=>{
+    if(String(r.cnpj||'').replace(/\D/g,'')!==alvo) return;
+    if(String(r.situacao||'').toLowerCase().includes('cancel')) return;
+    const ym = r._mesEmissao || (typeof finYmDeData==='function'?finYmDeData(r.emissao):'');
+    const m = String(ym||'').match(/(\d{4})-(\d{2})/); if(!m) return;
+    const nome = MESNOME[parseInt(m[2],10)-1];
+    const val = (r.valor!=null && r.valor!=='') ? r.valor : 0;
+    porMes[nome]=(porMes[nome]||0)+(parseFloat(val)||0);
+  });
+  return Object.keys(porMes).length ? porMes : null;
+}
+
 // coletas de UM cliente por mês (retorna {mes: quantidade}). Casa por CNPJ.
 function coletasDoCliente(cnpj){
   try { if(typeof finCarregar==='function' && (!FINdados.coletas||!FINdados.coletas.length)) finCarregar(); } catch(e){}
@@ -1647,7 +1666,13 @@ async function imprimirFichaCliente(cnpj) {
   // MESMAS fontes do card: faturamento (Fin_Faturamento, por nome, todos os meses) e coletas (Fin_Coletas, por CNPJ)
   if (typeof FIN_garantirSheetJS==='function'){ try{ await new Promise(r=>FIN_garantirSheetJS(r)); }catch(e){} }
   if (typeof finCarregarDoSheets==='function'){ try{ await finCarregarDoSheets(['faturamento','coletas']); }catch(e){} }
-  const fatValores = (typeof faturamentoDoCliente==='function') ? faturamentoDoCliente(c['CLIENTE'], c['CNPJ']) : null;
+  let fatValores = (typeof faturamentoDoCliente==='function') ? faturamentoDoCliente(c['CLIENTE'], c['CNPJ']) : null;
+  let fatFonteReceberP = false;
+  if(!fatValores){
+    const temReceber = (typeof FINdados!=='undefined' && FINdados.receber && FINdados.receber.length);
+    if(!temReceber && typeof finCarregarDoSheets==='function'){ try{ await finCarregarDoSheets(['receber']); }catch(e){} }
+    if(typeof faturamentoReceberDoCliente==='function'){ const fr=faturamentoReceberDoCliente(c['CNPJ']); if(fr){ fatValores=fr; fatFonteReceberP=true; } }
+  }
   const coletasMes = (typeof coletasDoCliente==='function') ? coletasDoCliente(c['CNPJ']) : null;
   const _MN=['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
   const _MNC=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
@@ -1676,7 +1701,7 @@ async function imprimirFichaCliente(cnpj) {
   // Faturamento: do Fin_Faturamento (por nome), TODOS os meses, exibido pelo mês do serviço (igual ao card)
   let fatHtml;
   if (fatValores && Object.keys(fatValores).length) {
-    fatHtml = `<table class="t"><tr style="background:#f0f7ec;"><th>Mês (serviço)</th><th>Faturado</th></tr>${Object.keys(fatValores).map(mF=>`<tr><td>${mesServPrint(mF)}</td><td>${fmtMoeda(fatValores[mF])}</td></tr>`).join('')}</table>`;
+    fatHtml = (fatFonteReceberP?'<p style="color:#8a5a00;font-size:11px;margin:0 0 4px;">Fonte: Contas a Receber (notas emitidas por CNPJ).</p>':'') + `<table class="t"><tr style="background:#f0f7ec;"><th>Mês (serviço)</th><th>Faturado</th></tr>${Object.keys(fatValores).map(mF=>`<tr><td>${mesServPrint(mF)}</td><td>${fmtMoeda(fatValores[mF])}</td></tr>`).join('')}</table>`;
   } else { fatHtml = '<p style="color:#999;">Sem faturamento.</p>'; }
   // Coletas por mês (Fin_Coletas, por CNPJ) — mesma fonte do card
   let coletasHtml;
@@ -2414,7 +2439,17 @@ async function renderAbaFaturamento(corpo) {
   const rc = await buscarDados('Coletas_Mes');
   const normN = s => String(s||'').trim().toUpperCase().replace(/\s+/g,' ');
   // faturamento por mês (casa por nome, robusto) — helper global
-  const fatValores = (typeof faturamentoDoCliente==='function') ? faturamentoDoCliente(fichaClienteAtual['CLIENTE'], fichaClienteAtual['CNPJ']) : null;
+  let fatValores = (typeof faturamentoDoCliente==='function') ? faturamentoDoCliente(fichaClienteAtual['CLIENTE'], fichaClienteAtual['CNPJ']) : null;
+  let fatFonteReceber = false;
+  // FALLBACK: cliente não está no relatório de Variação -> puxa de Contas a Receber por CNPJ
+  if(!fatValores){
+    const temReceber = (typeof FINdados!=='undefined' && FINdados.receber && FINdados.receber.length);
+    if(!temReceber && typeof finCarregarDoSheets==='function'){ try{ await finCarregarDoSheets(['receber']); }catch(e){} }
+    if(typeof faturamentoReceberDoCliente==='function'){
+      const fr = faturamentoReceberDoCliente(fichaClienteAtual['CNPJ']);
+      if(fr){ fatValores = fr; fatFonteReceber = true; }
+    }
+  }
   const fatItem = fatValores ? { valores: fatValores } : null;
   const MESES_NOME = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
   function mesServico(nomeFaturado){ const base=String(nomeFaturado).trim().toLowerCase().replace('marco','março'); const idx=['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'].indexOf(base); return idx===-1?nomeFaturado:MESES_NOME[(idx-1+12)%12]; }
@@ -2438,6 +2473,7 @@ async function renderAbaFaturamento(corpo) {
   // R$ faturado por mês (do Fin_Faturamento), exibido pelo MÊS DO SERVIÇO (defasagem de 1 mês)
   if (fatItem && fatItem.valores && Object.keys(fatItem.valores).length) {
     html += '<div style="background:var(--verde-claro-bg);color:var(--verde-escuro);border-radius:8px;padding:8px 11px;font-size:11.5px;margin-bottom:8px;"><i class="ti ti-calendar-stats"></i> Meses pelo <b>mês do serviço</b> (defasagem de 1 mês já ajustada).</div>';
+    if (fatFonteReceber) { html += '<div style="background:#fff7e6;color:#8a5a00;border:1px solid #ffe0a3;border-radius:8px;padding:8px 11px;font-size:11.5px;margin-bottom:8px;"><i class="ti ti-info-circle"></i> Este cliente não está no relatório de Variação. Valores vindos de <b>Contas a Receber</b> (notas emitidas por CNPJ).</div>'; }
     html += '<div style="font-size:12px;font-weight:600;color:var(--cinza-600);margin-bottom:8px;">Faturamento por mês (R$)</div><table class="ficha-tab">';
     Object.keys(fatItem.valores).forEach(mFat => {
       const v=num(fatItem.valores[mFat]);
@@ -5216,13 +5252,14 @@ async function renderRegulaVisao(area) {
   await carregarSP();
   if (!cacheRenov) { const r = await buscarDados('Historico_Renovacoes_SP'); cacheRenov = r.ok?r.linhas:[]; }
 
-  const rggInfo = cacheRGG.map(d => ({...d, _dias: diasAteVencer(d['DATA_VALIDADE']), _ef: rggStatusEfetivo(d)}));
-  const total = cacheRGG.length;
+  const rggInfo = cacheRGG.filter(d=>!d['CANCELADO']).map(d => ({...d, _dias: diasAteVencer(d['DATA_VALIDADE']), _ef: rggStatusEfetivo(d)}));
+  const sigorAtivo = cacheSIGOR.filter(d=>!d['CANCELADO']);   // clientes cancelados não contam
+  const total = rggInfo.length;
   const vencidos = rggInfo.filter(d=>d._ef==='vencido').length;
   const v30 = rggInfo.filter(d=>d._dias!=null && d._dias>=0 && d._dias<=30).length;
   const v60 = rggInfo.filter(d=>d._dias!=null && d._dias>30 && d._dias<=60).length;
   const pendentes = rggInfo.filter(d=>d._ef==='pendente').length;
-  const irregSigor = cacheSIGOR.filter(d=>String(d['STATUS']||'').toLowerCase().includes('irregular')).length;
+  const irregSigor = sigorAtivo.filter(d=>String(d['STATUS']||'').toLowerCase().includes('irregular')).length;
 
   // receita de assessoria
   function valorNum(v){ if(v==null||v==='')return 0; if(typeof v==='number')return v; let s=String(v).replace(/[^\d,.-]/g,''); if(s.includes(',')&&s.lastIndexOf(',')>s.lastIndexOf('.'))s=s.replace(/\./g,'').replace(',','.'); const n=parseFloat(s); return isNaN(n)?0:n; }
@@ -5231,7 +5268,7 @@ async function renderRegulaVisao(area) {
   const receita30 = cacheRenov.filter(r=>{ if(!String(r['ASSESSORIA']).toLowerCase().includes('sim'))return false; const d=parseDataReaj(r['DATA_RENOVACAO']); return d && (agora-d.getTime())/(1000*60*60*24)<=30; }).reduce((s,r)=>s+valorNum(r['VALOR']),0);
 
   const casosCriticos = rggInfo.filter(d=>d._ef==='vencido' || d._ef==='pendente')
-    .concat(cacheSIGOR.filter(d=>String(d['STATUS']||'').toLowerCase().includes('irregular')).map(d=>({...d,_sigor:true})));
+    .concat(sigorAtivo.filter(d=>String(d['STATUS']||'').toLowerCase().includes('irregular')).map(d=>({...d,_sigor:true})));
   const vencendo60 = rggInfo.filter(d=>d._dias!=null && d._dias>=0 && d._dias<=60).sort((a,b)=>a._dias-b._dias);
 
   // gráfico de distribuição (barras horizontais simples)
@@ -5276,7 +5313,7 @@ async function renderRegulaVisao(area) {
     const sigor = d._sigor;
     const c = sigor ? {cls:'venc',pill:'pill-venc',txt:'Irregular'} : classifVenc(d._dias);
     html += `<div class="reaj-card ${c.cls}" style="cursor:default;">
-      <div class="reaj-topo"><div style="min-width:0;"><div class="reaj-nome">${d['CLIENTE']||'—'}</div><div class="reaj-cnpj">${sigor?'SIGOR/MTR':'SP Regula'} · ${d['CONSULTOR']||'—'}</div></div>
+      <div class="reaj-topo"><div style="min-width:0;"><div class="reaj-nome" onclick="abrirFicha('${String(d['CNPJ']||'').replace(/'/g,'')}','${String(d['CLIENTE']||'').replace(/'/g,'')}')" style="cursor:pointer;" title="Abrir ficha do cliente">${d['CLIENTE']||'—'}</div><div class="reaj-cnpj">${sigor?'SIGOR/MTR':'SP Regula'} · ${d['CONSULTOR']||'—'}</div></div>
       <span class="reaj-pill ${c.pill}">${sigor?'Irregular':(d._ef==='pendente'?'Sem cadastro':c.txt)}</span></div>
       <button class="ficha-btn-primario" style="width:100%;margin-top:10px;padding:8px;border:none;border-radius:8px;cursor:pointer;font-size:12px;" onclick="abrirEmailAlerta('${sigor?'sigor':'rgg'}','${String(d['ID']||'').replace(/'/g,'')}')"><i class="ti ti-mail"></i> Enviar e-mail de alerta</button>
     </div>`;
@@ -5287,7 +5324,7 @@ async function renderRegulaVisao(area) {
     vencendo60.slice(0,30).forEach(d => {
       const c = classifVenc(d._dias);
       html += `<div class="reaj-card ${c.cls}" style="cursor:default;">
-        <div class="reaj-topo"><div style="min-width:0;"><div class="reaj-nome">${d['CLIENTE']||'—'}</div><div class="reaj-cnpj">vence ${fmtDataBR(d['DATA_VALIDADE'])} · ${d['CONSULTOR']||'—'}</div></div>
+        <div class="reaj-topo"><div style="min-width:0;"><div class="reaj-nome" onclick="abrirFicha('${String(d['CNPJ']||'').replace(/'/g,'')}','${String(d['CLIENTE']||'').replace(/'/g,'')}')" style="cursor:pointer;" title="Abrir ficha do cliente">${d['CLIENTE']||'—'}</div><div class="reaj-cnpj">vence ${fmtDataBR(d['DATA_VALIDADE'])} · ${d['CONSULTOR']||'—'}</div></div>
         <span class="reaj-pill ${c.pill}">${c.txt}</span></div>
         <button class="ficha-btn-primario" style="width:100%;margin-top:10px;padding:8px;border:none;border-radius:8px;cursor:pointer;font-size:12px;" onclick="abrirEmailAlerta('rgg','${String(d['ID']||'').replace(/'/g,'')}')"><i class="ti ti-mail"></i> Enviar e-mail de alerta</button>
       </div>`;
@@ -5324,9 +5361,16 @@ async function renderRegula(area, tipo) {
     <div class="barra-busca">
       <i class="ti ti-search"></i>
       <input type="text" id="reg-busca" placeholder="Buscar por cliente, consultor ou responsável..." oninput="filtraRegula('${tipo}')">
-      <span class="contagem">${dados.length} cadastros</span>
+      <span class="contagem">${dados.filter(d=>!d['CANCELADO']).length} cadastros</span>
     </div>
     <div class="filtros">${tipo==='rgg'?filtrosRGG:filtrosSIGOR}</div>
+    ${tipo==='rgg'?`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0 4px;font-size:12px;color:var(--cinza-600);">
+      <i class="ti ti-calendar-event"></i> Vence entre:
+      <input type="date" id="reg-de" onchange="filtraRegula('rgg')" style="padding:5px 7px;border:1.5px solid var(--cinza-300);border-radius:7px;font-size:12px;">
+      <span>e</span>
+      <input type="date" id="reg-ate" onchange="filtraRegula('rgg')" style="padding:5px 7px;border:1.5px solid var(--cinza-300);border-radius:7px;font-size:12px;">
+      <button class="filtro-chip" onclick="document.getElementById('reg-de').value='';document.getElementById('reg-ate').value='';filtraRegula('rgg')">Limpar datas</button>
+    </div>`:''}
     <div id="reg-resultado"></div>`;
   window._regFiltro = 'todos';
   filtraRegula(tipo);
@@ -5339,11 +5383,22 @@ function filtraRegula(tipo) {
   const termo = ((document.getElementById('reg-busca')||{}).value||'').toLowerCase();
   const f = window._regFiltro||'todos';
 
-  let lista = dados.map(d => {
+  let lista = dados.filter(d => !d['CANCELADO']).map(d => {   // clientes cancelados saem do SP Regula/SIGOR
     const dias = tipo==='rgg' ? diasAteVencer(d['DATA_VALIDADE']) : null;
     return { ...d, _dias: dias, _c: classifVenc(dias), _ef: tipo==='rgg'?rggStatusEfetivo(d):null };
   });
   if (termo) lista = lista.filter(d => `${d['CLIENTE']||''} ${d['CONSULTOR']||''} ${d['RESPONSAVEL_CLIENTE']||''}`.toLowerCase().includes(termo));
+
+  // filtro por PERÍODO DE VENCIMENTO (só RGG, que tem DATA_VALIDADE): mostra quem vence entre De e Até
+  if (tipo==='rgg') {
+    const deEl = document.getElementById('reg-de'), ateEl = document.getElementById('reg-ate');
+    const de = deEl && deEl.value ? deEl.value : '';   // yyyy-mm-dd
+    const ate = ateEl && ateEl.value ? ateEl.value : '';
+    if (de || ate) {
+      const toISO = v => { const m = String(v||'').match(/(\d{2})\/(\d{2})\/(\d{4})/); if(m) return `${m[3]}-${m[2]}-${m[1]}`; const i = String(v||'').match(/(\d{4})-(\d{2})-(\d{2})/); return i?`${i[1]}-${i[2]}-${i[3]}`:''; };
+      lista = lista.filter(d => { const iso = toISO(d['DATA_VALIDADE']); if(!iso) return false; return (!de || iso>=de) && (!ate || iso<=ate); });
+    }
+  }
 
   if (tipo==='rgg') {
     if (f==='venc') lista = lista.filter(d=>d._ef==='vencido');
@@ -5375,7 +5430,7 @@ function filtraRegula(tipo) {
       const cardCls = ef==='em_renovacao'?'ok':ef==='pendente'?'ok':d._c.cls;
       const jaEnviado = d['ALERTA_ENVIADO_EM'] ? fmtDataBR(d['ALERTA_ENVIADO_EM']) : null;
       html += `<div class="reaj-card ${cardCls}" style="cursor:default;">
-        <div class="reaj-topo"><div style="min-width:0;"><div class="reaj-nome">${d['CLIENTE']||'—'}</div><div class="reaj-cnpj">${d['RESPONSAVEL_CLIENTE']||''}${d['CONSULTOR']?' · '+d['CONSULTOR']:''}</div></div>
+        <div class="reaj-topo"><div style="min-width:0;"><div class="reaj-nome" onclick="abrirFicha('${String(d['CNPJ']||'').replace(/'/g,'')}','${String(d['CLIENTE']||'').replace(/'/g,'')}')" style="cursor:pointer;" title="Abrir ficha do cliente">${d['CLIENTE']||'—'}</div><div class="reaj-cnpj">${d['RESPONSAVEL_CLIENTE']||''}${d['CONSULTOR']?' · '+d['CONSULTOR']:''}</div></div>
         <span class="reaj-pill ${pillCls}">${pillTxt}</span></div>
         <div class="reaj-linhas"><div><span>Validade</span><b>${fmtDataBR(d['DATA_VALIDADE'])}</b></div><div><span>Consultor</span><b style="font-size:12px;">${d['CONSULTOR']||'—'}</b></div></div>
         ${jaEnviado?`<div style="font-size:11px;color:var(--verde-ok);margin-top:8px;"><i class="ti ti-mail-check"></i> Alerta enviado em ${jaEnviado}</div>`:''}
@@ -5391,7 +5446,7 @@ function filtraRegula(tipo) {
       const stAtual = String(d['STATUS']||'').trim();
       const OPCOES_SIT = ['Regular','Regular - Eventual','Irregular','Em análise'];
       html += `<div class="reaj-card ${irreg?'venc':'ok'}" style="cursor:default;">
-        <div class="reaj-topo"><div style="min-width:0;"><div class="reaj-nome">${d['CLIENTE']||'—'}</div><div class="reaj-cnpj">${d['RESPONSAVEL_CLIENTE']||''}${d['CONSULTOR']?' · '+d['CONSULTOR']:''}</div></div>
+        <div class="reaj-topo"><div style="min-width:0;"><div class="reaj-nome" onclick="abrirFicha('${String(d['CNPJ']||'').replace(/'/g,'')}','${String(d['CLIENTE']||'').replace(/'/g,'')}')" style="cursor:pointer;" title="Abrir ficha do cliente">${d['CLIENTE']||'—'}</div><div class="reaj-cnpj">${d['RESPONSAVEL_CLIENTE']||''}${d['CONSULTOR']?' · '+d['CONSULTOR']:''}</div></div>
         <span class="reaj-pill ${irreg?'pill-venc':'pill-ok'}">${d['STATUS']||'—'}</span></div>
         <div class="reaj-linhas"><div><span>Plataforma</span><b style="font-size:13px;">${d['PLATAFORMA']||'Sigor'}</b></div><div><span>Consultor</span><b style="font-size:12px;">${d['CONSULTOR']||'—'}</b></div></div>
         ${jaEnviado?`<div style="font-size:11px;color:var(--verde-ok);margin-top:8px;"><i class="ti ti-mail-check"></i> Alerta enviado em ${jaEnviado}</div>`:''}
@@ -5492,7 +5547,7 @@ function abrirEmailAlerta(tipo, id) {
   // destinatários — normaliza qualquer separador (/ , espaço) para ";"
   const para = normalizarEmails(d['CONTATO_EMAIL'] || '');
   const consultorEmail = (DADOS_CONSULTORES[d['CONSULTOR']]||{}).email || '';
-  const cc = normalizarEmails([consultorEmail, ...DIRETORES_CC].filter(Boolean).join(';'));
+  const cc = normalizarEmails([consultorEmail, ...DIRETORES_CC, 'fernanda.conte@ecotransambiental.com.br'].filter(Boolean).join(';'));
 
   // modal de pré-visualização + botão abrir e-mail
   const cont = document.getElementById('ficha-container');
@@ -5525,10 +5580,12 @@ function dispararMailto(para, cc, assunto, btn) {
   const id = btn.getAttribute('data-id');
   const link = `mailto:${decodeURIComponent(para)}?cc=${decodeURIComponent(cc)}&subject=${assunto}&body=${corpo}`;
   window.location.href = link;
-  // marcar alerta enviado (visual; persistência exige ação no Apps Script - opcional)
+  // marcar alerta enviado — em memória + PERSISTE na planilha (sobrevive ao recarregar)
   const dados = tipo==='rgg' ? cacheRGG : cacheSIGOR;
   const d = dados.find(x=>String(x['ID'])===String(id));
-  if (d) d['ALERTA_ENVIADO_EM'] = new Date().toISOString();
+  const hojeBR = new Date().toLocaleDateString('pt-BR');
+  if (d) d['ALERTA_ENVIADO_EM'] = hojeBR;
+  try { fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'marcarAlertaRegula',token:sessaoToken,dados:{tipo,id:String(id),data:hojeBR}})}); } catch(e){}
   setTimeout(fecharFicha, 500);
 }
 
