@@ -5275,12 +5275,14 @@ function classifVenc(dias) {
 // status RGG -> precisa de e-mail / renovar?
 function rggPrecisaAcao(d) {
   const st = String(d['STATUS']||'').toLowerCase();
-  if (st.includes('renova')) return false; // Em renovação não recebe
+  if (st.includes('renova')) return false;   // Em renovação não recebe
+  if (st.includes('proposta')) return false; // Proposta já solicitada não recebe alerta
   return true;
 }
 function rggStatusEfetivo(d) {
   const st = String(d['STATUS']||'').toLowerCase();
   if (st.includes('pendente')) return 'pendente';
+  if (st.includes('proposta')) return 'proposta_solicitada';
   if (st.includes('renova')) return 'em_renovacao';
   const dias = diasAteVencer(d['DATA_VALIDADE']);
   if (dias != null && dias < 0) return 'vencido';
@@ -5398,7 +5400,8 @@ async function renderRegula(area, tipo) {
     <span class="filtro-chip" id="rgf-60" onclick="setFiltroReg('${tipo}','60',this)">31-60d</span>
     <span class="filtro-chip" id="rgf-vig" onclick="setFiltroReg('${tipo}','vigente',this)">Vigentes</span>
     <span class="filtro-chip" id="rgf-pend" onclick="setFiltroReg('${tipo}','pendente',this)">Sem cadastro</span>
-    <span class="filtro-chip" id="rgf-renov" onclick="setFiltroReg('${tipo}','renov',this)">Em renovação</span>`;
+    <span class="filtro-chip" id="rgf-renov" onclick="setFiltroReg('${tipo}','renov',this)">Em renovação</span>
+    <span class="filtro-chip" id="rgf-prop" onclick="setFiltroReg('${tipo}','proposta',this)">Proposta solicitada</span>`;
   const filtrosSIGOR = `
     <span class="filtro-chip ativo" id="rgf-todos" onclick="setFiltroReg('${tipo}','todos',this)">Todos</span>
     <span class="filtro-chip" id="rgf-irreg" onclick="setFiltroReg('${tipo}','irregular',this)">Irregulares</span>
@@ -5456,6 +5459,7 @@ function filtraRegula(tipo) {
     else if (f==='vigente') lista = lista.filter(d=>d._ef==='vigente' && (d._dias==null||d._dias>60));
     else if (f==='pendente') lista = lista.filter(d=>d._ef==='pendente');
     else if (f==='renov') lista = lista.filter(d=>d._ef==='em_renovacao');
+    else if (f==='proposta') lista = lista.filter(d=>d._ef==='proposta_solicitada');
     lista.sort((a,b)=>(a._dias==null?99999:a._dias)-(b._dias==null?99999:b._dias));
   } else {
     const st = x => String(x['STATUS']||'').toLowerCase();
@@ -5471,21 +5475,25 @@ function filtraRegula(tipo) {
   lista.slice(0,200).forEach(d => {
     if (tipo==='rgg') {
       const ef = d._ef;
-      const podeEmail = ef==='vencido'||ef==='pendente'|| (d._dias!=null && d._dias>=0 && d._dias<=60);
-      const podeRenovar = ef==='vencido'||ef==='pendente'|| (d._dias!=null && d._dias>=0 && d._dias<=60);
       const emRenov = ef==='em_renovacao';
-      const pillTxt = ef==='pendente'?'Sem cadastro':ef==='em_renovacao'?'Em renovação':ef==='vencido'?'Vencido':d._c.txt;
-      const pillCls = ef==='pendente'?'pill-ok':ef==='em_renovacao'?'pill-r60':d._c.pill;
-      const cardCls = ef==='em_renovacao'?'ok':ef==='pendente'?'ok':d._c.cls;
+      const propSolic = ef==='proposta_solicitada';
+      const podeEmail = !propSolic && (ef==='vencido'||ef==='pendente'|| (d._dias!=null && d._dias>=0 && d._dias<=60));
+      const podeRenovar = ef==='vencido'||ef==='pendente'||propSolic|| (d._dias!=null && d._dias>=0 && d._dias<=60);
+      const pillTxt = ef==='pendente'?'Sem cadastro':propSolic?'Proposta solicitada':ef==='em_renovacao'?'Em renovação':ef==='vencido'?'Vencido':d._c.txt;
+      const pillCls = ef==='pendente'?'pill-ok':(propSolic||ef==='em_renovacao')?'pill-r60':d._c.pill;
+      const cardCls = (propSolic||ef==='em_renovacao')?'ok':ef==='pendente'?'ok':d._c.cls;
       const jaEnviado = d['ALERTA_ENVIADO_EM'] ? fmtDataBR(d['ALERTA_ENVIADO_EM']) : null;
+      const valProp = d['VALOR_PROPOSTA'] ? fmtMoeda(d['VALOR_PROPOSTA']) : null;
       html += `<div class="reaj-card ${cardCls}" style="cursor:default;">
         <div class="reaj-topo"><div style="min-width:0;"><div class="reaj-nome" onclick="abrirFicha('${String(d['CNPJ']||'').replace(/'/g,'')}','${String(d['CLIENTE']||'').replace(/'/g,'')}')" style="cursor:pointer;" title="Abrir ficha do cliente">${d['CLIENTE']||'—'}</div><div class="reaj-cnpj">${d['RESPONSAVEL_CLIENTE']||''}${d['CONSULTOR']?' · '+d['CONSULTOR']:''}</div></div>
         <span class="reaj-pill ${pillCls}">${pillTxt}</span></div>
         <div class="reaj-linhas"><div><span>Validade</span><b>${fmtDataBR(d['DATA_VALIDADE'])}</b></div><div><span>Consultor</span><b style="font-size:12px;">${d['CONSULTOR']||'—'}</b></div></div>
+        ${propSolic&&valProp?`<div style="font-size:11px;color:#8a6d00;margin-top:8px;"><i class="ti ti-file-dollar"></i> Proposta: <b>${valProp}</b></div>`:''}
         ${jaEnviado?`<div style="font-size:11px;color:var(--verde-ok);margin-top:8px;"><i class="ti ti-mail-check"></i> Alerta enviado em ${jaEnviado}</div>`:''}
         <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;">
           ${podeEmail?`<button class="ficha-btn-secundario" style="flex:1;padding:7px;border-radius:7px;cursor:pointer;font-size:12px;" onclick="abrirEmailAlerta('rgg','${String(d['ID']||'').replace(/'/g,'')}')"><i class="ti ti-mail"></i> Alerta</button>`:''}
           ${emRenov?`<span style="flex:1;padding:7px;border-radius:7px;font-size:12px;text-align:center;background:var(--amarelo-bg);color:#8a6d00;"><i class="ti ti-clock"></i> Em renovação</span>`:`<button class="ficha-btn-secundario" style="flex:1;padding:7px;border-radius:7px;cursor:pointer;font-size:12px;border-color:#8a6d00;color:#8a6d00;" onclick="marcarEmRenovacao('${String(d['ID']||'').replace(/'/g,'')}')"><i class="ti ti-clock"></i> Em renovação</button>`}
+          ${propSolic?`<span style="flex:1;padding:7px;border-radius:7px;font-size:12px;text-align:center;background:var(--amarelo-bg);color:#8a6d00;" title="Clique para editar o valor" onclick="abrirModalPropostaRegula('${String(d['ID']||'').replace(/'/g,'')}')"><i class="ti ti-file-dollar"></i> Proposta ${valProp||''}</span>`:`<button class="ficha-btn-secundario" style="flex:1;padding:7px;border-radius:7px;cursor:pointer;font-size:12px;border-color:#8a6d00;color:#8a6d00;" onclick="abrirModalPropostaRegula('${String(d['ID']||'').replace(/'/g,'')}')"><i class="ti ti-file-dollar"></i> Proposta solicitada</button>`}
           ${podeRenovar?`<button class="ficha-btn-primario" style="flex:1;padding:7px;border:none;border-radius:7px;cursor:pointer;font-size:12px;" onclick="abrirModalRenovar('${String(d['ID']||'').replace(/'/g,'')}')"><i class="ti ti-refresh"></i> Renovar</button>`:''}
         </div>
       </div>`;
@@ -5563,6 +5571,52 @@ async function marcarEmRenovacao(id) {
     av.style.cssText = 'position:fixed;bottom:20px;right:20px;background:#8a6d00;color:white;padding:10px 18px;border-radius:8px;font-size:13px;z-index:9999;';
     document.body.appendChild(av); setTimeout(()=>av.remove(), 2200);
   } catch(e) { alert('Erro de conexão.'); }
+}
+
+// abre modal para registrar/editar a PROPOSTA solicitada (assessoria SP Regula) + valor
+function abrirModalPropostaRegula(id) {
+  const d = (cacheRGG||[]).find(x=>String(x['ID'])===String(id));
+  if (!d) return;
+  const cont = document.getElementById('ficha-container');
+  cont.innerHTML = `
+    <div class="ficha-overlay" onclick="if(event.target===this)fecharFicha()">
+      <div class="ficha" style="width:440px;">
+        <div class="ficha-topo" style="background:linear-gradient(135deg,#BA7517,#925a10);">
+          <button class="fechar" onclick="fecharFicha()"><i class="ti ti-x"></i></button>
+          <div class="nome"><i class="ti ti-file-dollar"></i> Proposta solicitada</div>
+          <div class="cnpj">${d['CLIENTE']||''}</div></div>
+        <div class="ficha-corpo">
+          <div style="font-size:13px;color:var(--cinza-600);margin-bottom:12px;">Registre a proposta de assessoria solicitada. Enquanto estiver nesse status, o cadastro não gera alerta.</div>
+          <div style="margin-bottom:14px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Valor da proposta (R$)</label>
+            <input type="text" id="pr-valor" value="${d['VALOR_PROPOSTA']?String(d['VALOR_PROPOSTA']).replace(/"/g,'&quot;'):''}" placeholder="ex: 1.500,00" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+          <div class="ficha-botoes">
+            <button class="ficha-btn-primario" onclick="salvarPropostaRegula('${String(id).replace(/'/g,'')}')"><i class="ti ti-check"></i> Salvar</button>
+            <button class="ficha-btn-secundario" onclick="fecharFicha()">Cancelar</button>
+          </div>
+          <div id="pr-msg"></div>
+        </div>
+      </div>
+    </div>`;
+}
+async function salvarPropostaRegula(id) {
+  const d = (cacheRGG||[]).find(x=>String(x['ID'])===String(id));
+  if (!d) return;
+  const valor = (document.getElementById('pr-valor')||{}).value || '';
+  const msg = document.getElementById('pr-msg');
+  msg.innerHTML = '<div style="font-size:13px;color:var(--cinza-500);margin-top:10px;"><i class="ti ti-loader"></i> Salvando...</div>';
+  try {
+    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
+      acao:'salvar', aba:'Clientes_RGG', token: sessaoToken, dados: Object.assign({}, d, { STATUS:'Proposta solicitada', VALOR_PROPOSTA: valor })
+    })});
+    const r = await resp.json();
+    if (!r.ok) { msg.innerHTML = `<div class="sem-acesso" style="margin-top:10px;">${r.erro||'verifique se o Apps Script foi republicado.'}</div>`; return; }
+    d['STATUS']='Proposta solicitada'; d['VALOR_PROPOSTA']=valor;
+    fecharFicha();
+    renderRegula(document.getElementById('area-conteudo'), 'rgg');
+    const av = document.createElement('div'); av.textContent = 'Proposta registrada!';
+    av.style.cssText='position:fixed;bottom:20px;right:20px;background:#8a6d00;color:white;padding:10px 18px;border-radius:8px;font-size:13px;z-index:9999;';
+    document.body.appendChild(av); setTimeout(()=>av.remove(), 2200);
+  } catch(e){ msg.innerHTML='<div class="sem-acesso" style="margin-top:10px;">Erro de conexão.</div>'; }
 }
 
 function abrirEmailAlerta(tipo, id) {
