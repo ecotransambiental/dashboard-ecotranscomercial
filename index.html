@@ -1646,6 +1646,11 @@ async function excluirContato(id, nomeContato, cnpj, nomeCliente) {
 async function imprimirFichaCliente(cnpj) {
   const alvo = cnpjLimpo(cnpj);
   const c = fichaClienteAtual;
+  // ABRIR A JANELA JÁ, dentro do clique (antes dos awaits) — senão o navegador bloqueia o popup
+  // porque os carregamentos (faturamento, contratos...) fazem o popup "perder" o gesto do usuário.
+  let win = null;
+  try { win = window.open('', '_blank'); } catch(e) {}
+  if (win) { try { win.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Gerando ficha…</title></head><body style="font-family:Arial,sans-serif;padding:40px;color:#2d5a3d;">Gerando a ficha do cliente…</body></html>'); } catch(e){} }
   // registrar a impressão (vai pro relatório) — sem bloquear a impressão se falhar
   try {
     fetch(API_URL, { method:'POST', body: JSON.stringify({
@@ -1709,8 +1714,7 @@ async function imprimirFichaCliente(cnpj) {
     coletasHtml = `<table class="t"><tr style="background:#f0f7ec;"><th>Mês</th><th>Equipamentos coletados</th></tr>${Object.keys(coletasMes).sort().map(m=>`<tr><td>${rotColetaPrint(m)}</td><td>${coletasMes[m]}</td></tr>`).join('')}</table>`;
   } else { coletasHtml = '<p style="color:#999;">Sem coletas registradas.</p>'; }
 
-  const win = window.open('', '_blank');
-  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Ficha ${c['CLIENTE']||''}</title>
+  const htmlDoc = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Ficha ${c['CLIENTE']||''}</title>
     <style>body{font-family:Arial,sans-serif;color:#222;padding:30px;font-size:13px;} h1{color:#2d5a3d;font-size:20px;margin:0;} .t{width:100%;border-collapse:collapse;margin-bottom:8px;} .t td,.t th{border:1px solid #ddd;padding:5px 8px;text-align:left;font-size:12px;} .t td:first-child{color:#666;width:38%;}</style>
     </head><body>
     <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #8bc34a;padding-bottom:12px;margin-bottom:8px;">
@@ -1725,9 +1729,26 @@ async function imprimirFichaCliente(cnpj) {
     ${tab('Equipamentos e valores', equipHtml)}
     ${tab('Faturamento por mês', fatHtml)}
     ${tab('Coletas por mês', coletasHtml)}
-    <script>setTimeout(function(){window.print();},400);<\/script>
-    </body></html>`);
-  win.document.close();
+    </body></html>`;
+  if (win && !win.closed) {
+    // usa a janela que já abrimos no clique
+    try { win.document.open(); win.document.write(htmlDoc); win.document.close();
+      setTimeout(function(){ try { win.focus(); win.print(); } catch(e){} }, 400);
+    } catch(e) { imprimirViaIframe(htmlDoc); }
+  } else {
+    // popup foi bloqueado -> imprime por iframe oculto (sem popup)
+    imprimirViaIframe(htmlDoc);
+  }
+}
+
+// imprime um documento HTML sem abrir popup: injeta um iframe oculto e chama print nele
+function imprimirViaIframe(html) {
+  const ifr = document.createElement('iframe');
+  ifr.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+  document.body.appendChild(ifr);
+  const doc = ifr.contentWindow.document;
+  doc.open(); doc.write(html); doc.close();
+  setTimeout(function(){ try { ifr.contentWindow.focus(); ifr.contentWindow.print(); } catch(e){} setTimeout(function(){ ifr.remove(); }, 2000); }, 500);
 }
 
 // formulário para registrar um reajuste direto da ficha do cliente
