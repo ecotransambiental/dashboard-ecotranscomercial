@@ -2026,16 +2026,44 @@ window._servEdOpts = window._servEdOpts || {};
 function servEditorLinha(containerId, s){ s=s||{};
   const opts=(window._servEdOpts||{})[containerId]||{};
   const showData = opts.showData!==false; // proposta/lead escondem a data (reajuste tem data no contrato)
+  const rico = !!opts.rico;
   const reajChk = (s.reajusta===false) ? '' : 'checked';
   const dataVal = s.data ? (typeof dataInputVal==='function'?dataInputVal(s.data):s.data) : '';
   const dataInput = showData ? `<input type="date" class="serv-ed-data" value="${dataVal}" title="Data-base do reajuste (in\u00edcio)" style="padding:6px;border:1.5px solid var(--cinza-300);border-radius:7px;font-size:12px;">` : '';
-  return `<div class="serv-ed-linha" style="display:flex;gap:6px;margin-bottom:6px;align-items:center;flex-wrap:wrap;">
-    <input type="text" class="serv-ed-nome" value="${String(s.servico||s.equipamento||'').replace(/"/g,'&quot;')}" placeholder="Servi\u00e7o (ex: Cont\u00eainer 1,1m\u00b3)" style="flex:1;min-width:150px;padding:7px;border:1.5px solid var(--cinza-300);border-radius:7px;font-size:13px;">
-    <span style="font-size:12px;color:var(--cinza-500);">R$</span>
-    <input type="number" step="0.01" class="serv-ed-valor" oninput="servEditorTotal('${containerId}')" value="${s.valor!=null?s.valor:''}" placeholder="0,00" style="width:95px;padding:7px;border:1.5px solid var(--cinza-300);border-radius:7px;font-size:13px;">
-    <label style="font-size:11.5px;color:var(--cinza-600);display:inline-flex;align-items:center;gap:3px;cursor:pointer;white-space:nowrap;" title="Se marcado, vai pra aba Reajustes. Desmarque para servi\u00e7os eventuais."><input type="checkbox" class="serv-ed-reaj" ${reajChk}> reajusta</label>
-    ${dataInput}
-    <button type="button" title="Remover" onclick="this.closest('.serv-ed-linha').remove();servEditorTotal('${containerId}')" style="border:none;background:none;color:var(--vermelho);cursor:pointer;font-size:18px;line-height:1;">&times;</button>
+  const g = v => String(v==null?'':v).replace(/"/g,'&quot;');
+  if (!rico) {
+    return `<div class="serv-ed-linha" style="display:flex;gap:6px;margin-bottom:6px;align-items:center;flex-wrap:wrap;">
+      <input type="text" class="serv-ed-nome" value="${g(s.servico||s.equipamento)}" placeholder="Servi\u00e7o (ex: Cont\u00eainer 1,1m\u00b3)" style="flex:1;min-width:150px;padding:7px;border:1.5px solid var(--cinza-300);border-radius:7px;font-size:13px;">
+      <span style="font-size:12px;color:var(--cinza-500);">R$</span>
+      <input type="number" step="0.01" class="serv-ed-valor" oninput="servEditorTotal('${containerId}')" value="${s.valor!=null?s.valor:''}" placeholder="0,00" style="width:95px;padding:7px;border:1.5px solid var(--cinza-300);border-radius:7px;font-size:13px;">
+      <label style="font-size:11.5px;color:var(--cinza-600);display:inline-flex;align-items:center;gap:3px;cursor:pointer;white-space:nowrap;" title="Se marcado, vai pra aba Reajustes. Desmarque para servi\u00e7os eventuais."><input type="checkbox" class="serv-ed-reaj" ${reajChk}> reajusta</label>
+      ${dataInput}
+      <button type="button" title="Remover" onclick="this.closest('.serv-ed-linha').remove();servEditorTotal('${containerId}')" style="border:none;background:none;color:var(--vermelho);cursor:pointer;font-size:18px;line-height:1;">&times;</button>
+    </div>`;
+  }
+  // MODO RICO: equipamento \u2194 res\u00edduo \u2194 frequ\u00eancia \u2194 pre\u00e7o (coleta + destina\u00e7\u00e3o) + m\u00ednima + reajuste
+  const inp='padding:7px;border:1.5px solid var(--cinza-300);border-radius:7px;font-size:12.5px;';
+  return `<div class="serv-ed-linha" style="border:1px solid var(--cinza-200);border-radius:9px;padding:10px;margin-bottom:8px;background:#fff;">
+    <div style="display:flex;gap:6px;align-items:center;">
+      <input type="text" class="serv-ed-nome" value="${g(s.servico||s.equipamento)}" placeholder="Equipamento (ex: Ca\u00e7amba 5m\u00b3 / Cont\u00eainer 1,1m\u00b3)" style="flex:1;${inp}">
+      <button type="button" title="Remover servi\u00e7o" onclick="this.closest('.serv-ed-linha').remove();servEditorTotal('${containerId}')" style="border:none;background:none;color:var(--vermelho);cursor:pointer;font-size:18px;line-height:1;">&times;</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;">
+      <input type="text" class="serv-ed-residuo" value="${g(s.residuo)}" placeholder="Res\u00edduo (ex: Classe I)" style="${inp}">
+      <input type="text" class="serv-ed-freq" value="${g(s.frequencia)}" placeholder="Frequ\u00eancia (ex: 2x/sem)" style="${inp}">
+    </div>
+    <div style="display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap;">
+      <span style="font-size:11.5px;color:var(--cinza-600);">Coleta/Transporte R$</span>
+      <input type="number" step="0.01" class="serv-ed-valor" oninput="servEditorTotal('${containerId}')" value="${s.valor!=null?s.valor:''}" placeholder="0,00" style="width:100px;${inp}">
+      <span style="font-size:11.5px;color:var(--cinza-600);">Destina\u00e7\u00e3o R$/t</span>
+      <input type="number" step="0.01" class="serv-ed-dest" value="${s.valorDestinacao!=null?s.valorDestinacao:(s.destinacao!=null?s.destinacao:'')}" placeholder="opcional" style="width:100px;${inp}">
+    </div>
+    <input type="text" class="serv-ed-min" value="${g(s.minima)}" placeholder="M\u00ednima (ex: 1 ton/coleta, 20 cont\u00eaineres/m\u00eas)" style="width:100%;margin-top:6px;${inp}">
+    <div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap;">
+      <label style="font-size:11.5px;color:var(--cinza-600);display:inline-flex;align-items:center;gap:3px;cursor:pointer;" title="Se marcado, vai pra aba Reajustes ao fechar. Desmarque para eventuais."><input type="checkbox" class="serv-ed-reaj" ${reajChk}> reajusta</label>
+      <input type="text" class="serv-ed-indice" value="${g(s.indice)}" placeholder="\u00cdndice (ex: IGP-M)" style="width:120px;${inp}">
+      ${dataInput}
+    </div>
   </div>`;
 }
 function servEditorRender(containerId, lista, opts){
@@ -2049,11 +2077,17 @@ function servEditorRender(containerId, lista, opts){
 }
 function servEditorAdd(containerId){ const rows=document.getElementById(containerId+'-rows'); if(!rows) return; const d=document.createElement('div'); d.innerHTML=servEditorLinha(containerId,{}); rows.appendChild(d.firstElementChild); }
 function servEditorRows(containerId){ const rows=document.getElementById(containerId+'-rows'); if(!rows) return [];
+  const gv=(l,cls)=>{ const el=l.querySelector(cls); return el?(el.value||'').trim():''; };
   return [...rows.querySelectorAll('.serv-ed-linha')].map(l=>({
     servico:(l.querySelector('.serv-ed-nome').value||'').trim(),
     valor:(l.querySelector('.serv-ed-valor').value||'').trim(),
     reajusta: !!(l.querySelector('.serv-ed-reaj') && l.querySelector('.serv-ed-reaj').checked),
-    data: (l.querySelector('.serv-ed-data') && l.querySelector('.serv-ed-data').value) || ''
+    data: (l.querySelector('.serv-ed-data') && l.querySelector('.serv-ed-data').value) || '',
+    residuo: gv(l,'.serv-ed-residuo'),
+    frequencia: gv(l,'.serv-ed-freq'),
+    valorDestinacao: gv(l,'.serv-ed-dest'),
+    minima: gv(l,'.serv-ed-min'),
+    indice: gv(l,'.serv-ed-indice')
   })).filter(s=>s.servico||s.valor);
 }
 function servEditorTotal(containerId){ const tot=servEditorRows(containerId).reduce((a,s)=>a+(parseFloat(String(s.valor).replace(',','.'))||0),0); const el=document.getElementById(containerId+'-total'); if(el) el.textContent=fmtMoeda(tot); return tot; }
@@ -2064,7 +2098,7 @@ async function servCriarLote(cnpj, cliente, servicos, dataBase, indice){
     if(!s.servico) continue;
     const vai = (s.reajusta!==false); // por serviço: eventuais podem ser desmarcados
     const dataServ = s.data || dataBase || ''; // data-base do reajuste do serviço
-    const campos={ cnpj:cnpjLimpo(cnpj), cliente, equipamento:s.servico, valor:s.valor||'', dataInicio:(vai?dataServ:''), indice:indice||'', vaiReajuste:vai };
+    const campos={ cnpj:cnpjLimpo(cnpj), cliente, equipamento:s.servico, residuo:s.residuo||'', frequencia:s.frequencia||'', valor:s.valor||'', valorDestinacao:s.valorDestinacao||'', minimaObs:s.minima||'', dataInicio:(vai?dataServ:''), indice:s.indice||indice||'', vaiReajuste:vai };
     try{ const resp=await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'novoServico',token:sessaoToken,dados:{campos}})}); const r=await resp.json(); if(r&&r.ok) n++; }catch(e){}
   }
   return n;
@@ -2626,7 +2660,14 @@ async function renderHistoricoCliente(corpo) {
   corpo.innerHTML = `<div style="text-align:center;color:var(--cinza-500);padding:20px;">Carregando histórico...</div>`;
   const r = await buscarDados('Atividades_Cliente');
   const cnpj = cnpjLimpo(fichaClienteAtual['CNPJ']);
-  const ativs = (r.ok?r.linhas:[]).filter(a=>cnpjLimpo(a['CNPJ'])===cnpj).sort((a,b)=>{ const da=parseDataReaj(a['DATA_REGISTRO'])||0, db=parseDataReaj(b['DATA_REGISTRO'])||0; return db-da; });
+  const nomeAlvo = String(fichaClienteAtual['CLIENTE']||'').trim().toUpperCase();
+  // casa por CNPJ; se o cliente não tem CNPJ, casa por NOME (senão atividades sem CNPJ somem do histórico)
+  const ativs = (r.ok?r.linhas:[]).filter(a=>{
+    if (String(a['TIPO']||'').toLowerCase().includes('impress')) return false; // impressão de ficha fica só no relatório, não no histórico
+    const ac = cnpjLimpo(a['CNPJ']);
+    if (cnpj && cnpj.length>=11) return ac===cnpj;
+    return String(a['CLIENTE']||'').trim().toUpperCase()===nomeAlvo;
+  }).sort((a,b)=>{ const da=parseDataReaj(a['DATA_REGISTRO'])||0, db=parseDataReaj(b['DATA_REGISTRO'])||0; return db-da; });
   const iconePorTipo = {'Visita técnica':'ti-map-pin','Ligação':'ti-phone','Tratativa':'ti-message','Ocorrência':'ti-alert-circle','E-mail':'ti-mail','Reunião':'ti-users','Proposta Revisada':'ti-file-pencil','Follow-up':'ti-calendar-clock'};
   let html = `<div style="margin-bottom:12px;"><button class="ficha-btn-primario" style="padding:8px 14px;border:none;border-radius:8px;cursor:pointer;font-size:13px;" onclick="abrirFormAtividade('${cnpj.replace(/'/g,'')}','${(fichaClienteAtual['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-plus"></i> Registrar atividade</button></div>`;
   if (!ativs.length) { corpo.innerHTML = html + `<div style="text-align:center;color:var(--cinza-500);padding:24px;font-size:13px;">Nenhuma atividade registrada ainda.</div>`; return; }
@@ -2646,6 +2687,16 @@ async function renderHistoricoCliente(corpo) {
   });
   html += `</div>`;
   corpo.innerHTML = html;
+}
+
+// registra uma atividade no histórico do cliente (aba Atividades_Cliente) — fire-and-forget
+function _logAtividadeCliente(cnpj, cliente, tipo, titulo, descricao){
+  try {
+    fetch(API_URL, { method:'POST', body: JSON.stringify({
+      acao:'registrarAtividade', token: sessaoToken,
+      dados:{ cnpj: String(cnpj||''), cliente: String(cliente||''), tipo: tipo||'Ocorrência', titulo: titulo||'', descricao: descricao||'', dataAgendada:'', registradoPor: (usuarioAtual&&usuarioAtual.nome)||'' }
+    })});
+  } catch(e){}
 }
 
 function abrirFormAtividade(cnpj, cliente) {
@@ -2986,7 +3037,7 @@ function aplicarKanban() {
         : st === 'pendente'
         ? '<span style="display:inline-block;background:#d99a00;color:#3a2a00;font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:5px;vertical-align:1px;">PENDENTE</span>'
         : '';
-      html += `<div class="kanban-card${ehNovo?' card-novo':''}" draggable="true" ondragstart="pegarCard(event,'${String(l['ID_LEAD']||'').replace(/'/g,'')}')" onclick="abrirLead('${String(l['ID_LEAD']||'').replace(/'/g,'')}')" style="border-left-color:${col.cor};${ehNovo?'background:#FFFBEA;box-shadow:0 0 0 1.5px #F0C808;':temFU?'background:#F3F0FA;box-shadow:0 0 0 1.5px #6B5B95;':''}">
+      html += `<div class="kanban-card${ehNovo?' card-novo':''}" draggable="true" ondragstart="pegarCard(event,'${String(l['ID_LEAD']||'').replace(/'/g,'')}')" onclick="abrirLead('${String(l['ID_LEAD']||'').replace(/'/g,'')}','${encodeURIComponent(l['CLIENTE']||'')}')" style="border-left-color:${col.cor};${ehNovo?'background:#FFFBEA;box-shadow:0 0 0 1.5px #F0C808;':temFU?'background:#F3F0FA;box-shadow:0 0 0 1.5px #6B5B95;':''}">
         <div class="cli">${ehNovo?'<span style="display:inline-block;background:#F0C808;color:#5a4a00;font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:5px;vertical-align:1px;">NOVO</span>':''}${tagSt}${temFU?'<span style="display:inline-block;background:#6B5B95;color:white;font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:5px;vertical-align:1px;">FOLLOW-UP</span>':''}${l['CLIENTE']||'—'}</div>
         <div class="meta">${l['CONSULTOR']||'—'}${l['FONTE']?' · '+l['FONTE']:''}</div>
         ${l['DATA_CONTATO']?`<div class="meta" style="margin-top:3px;"><i class="ti ti-calendar-plus" style="font-size:12px;vertical-align:-1px;"></i> Entrada: ${fmtDataBR(l['DATA_CONTATO'])}</div>`:''}
@@ -3393,27 +3444,45 @@ async function salvarClienteDeLead(cnpjLead, tipo, permitirDuplicado) {
   } catch(e) { document.getElementById('cl-msg').innerHTML='<div class="sem-acesso">Erro de conexão.</div>'; }
 }
 
-// modal que pede nº da proposta, data de envio e valor ao mover para "Proposta Enviada"
+// lê a lista de propostas de um lead (JSON em PROPOSTAS); se não houver, sintetiza a partir dos campos antigos
+function getPropostasLead(l){
+  if(!l) return [];
+  let arr=[]; try{ arr=JSON.parse(l['PROPOSTAS']||'[]'); }catch(e){ arr=[]; }
+  if(Array.isArray(arr) && arr.length) return arr;
+  // compatibilidade: lead antigo com uma única proposta nos campos legados
+  if(l['N_PROPOSTA']||l['VALOR_R$']||l['DATA_ENVIO_PROPOSTA']){
+    let servs=[]; try{ servs=JSON.parse(l['SERVICOS_PROPOSTA']||'[]'); }catch(e){}
+    return [{ tipo:'Serviço', numero:l['N_PROPOSTA']||'', data:l['DATA_ENVIO_PROPOSTA']||'', valor:l['VALOR_R$']||'', servicos:servs }];
+  }
+  return [];
+}
+
+// modal que pede nº da proposta, tipo, data de envio e valor (usado ao mover p/ "Proposta Enviada" E para adicionar outra proposta)
 function abrirModalProposta(idLead) {
   const lead = kanbanLeads.find(l => String(l['ID_LEAD'])===String(idLead));
   const nome = lead ? (lead['CLIENTE']||'') : '';
+  const qtd = getPropostasLead(lead).length;
   const hoje = new Date().toISOString().split('T')[0];
   const cont = document.getElementById('ficha-container');
   cont.insertAdjacentHTML('beforeend', `
     <div class="ficha-overlay" id="modal-prop-overlay" onclick="if(event.target===this)document.getElementById('modal-prop-overlay').remove()" style="z-index:700;">
-      <div class="ficha" style="width:440px;">
+      <div class="ficha" style="width:520px;">
         <div class="ficha-topo" style="background:linear-gradient(135deg,#BA7517,#925a10);">
           <button class="fechar" onclick="document.getElementById('modal-prop-overlay').remove()"><i class="ti ti-x"></i></button>
-          <div class="nome"><i class="ti ti-file-text"></i> Proposta enviada</div><div class="cnpj">${nome}</div></div>
+          <div class="nome"><i class="ti ti-file-text"></i> ${qtd?('Nova proposta (já há '+qtd+')'):'Proposta enviada'}</div><div class="cnpj">${nome}</div></div>
         <div class="ficha-corpo">
           <div style="font-size:13px;color:var(--cinza-600);margin-bottom:12px;">Registre os dados da proposta enviada:</div>
-          <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Nº da proposta *</label>
-            <input type="text" id="pp-numero" placeholder="ex: 6592/2026" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+            <div><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Tipo *</label>
+              <select id="pp-tipo" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"><option>Serviço</option><option>Assessoria</option></select></div>
+            <div><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Nº da proposta *</label>
+              <input type="text" id="pp-numero" placeholder="ex: 6592/2026" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+          </div>
           <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Data de envio *</label>
             <input type="date" id="pp-data" value="${hoje}" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
-          <div style="margin-bottom:10px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Serviços da proposta</label>
+          <div style="margin-bottom:10px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Serviços da proposta (equipamento · resíduo · frequência · preço · mínima · reajuste)</label>
             <div id="pp-serv-ed"></div>
-            <div style="font-size:11px;color:var(--cinza-500);margin-top:4px;">A soma dos serviços preenche o valor total abaixo.</div></div>
+            <div style="font-size:11px;color:var(--cinza-500);margin-top:4px;">A soma da coluna "Coleta/Transporte" preenche o valor total. Quando o lead fechar, esses serviços já entram no card do cliente.</div></div>
           <div style="margin-bottom:14px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Valor total da proposta (R$) *</label>
             <input type="number" id="pp-valor" step="0.01" placeholder="ex: 1500.00" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
           <div class="ficha-botoes">
@@ -3424,22 +3493,33 @@ function abrirModalProposta(idLead) {
         </div>
       </div>
     </div>`);
-  { let preServ=[]; try{ preServ=JSON.parse((lead&&lead['SERVICOS_PROPOSTA'])||'[]'); }catch(e){} servEditorRender('pp-serv-ed', preServ, {showData:false}); }
+  { let preServ=[]; try{ preServ=JSON.parse((lead&&lead['SERVICOS_PROPOSTA'])||'[]'); }catch(e){} servEditorRender('pp-serv-ed', preServ, {showData:false, rico:true}); }
 }
 async function confirmarProposta(idLead) {
   const numero = document.getElementById('pp-numero').value;
   const data = document.getElementById('pp-data').value;
+  const tipo = (document.getElementById('pp-tipo')||{}).value || 'Serviço';
   const servicos = servEditorRows('pp-serv-ed');
   const totalServ = servEditorTotal('pp-serv-ed');
   // se há serviços, a soma vira o valor total; senão usa o que foi digitado
   let valor = document.getElementById('pp-valor').value;
   if (servicos.length && totalServ>0) { valor = totalServ; document.getElementById('pp-valor').value = totalServ; }
-  if (!numero || !data || !valor) { document.getElementById('pp-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Preencha número, data e valor (ou os serviços).</div>'; return; }
-  // salva os serviços da proposta no lead (rascunho — vira oficial quando fechar o contrato)
-  try { await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'atualizarLeadCampos',token:sessaoToken,dados:{idLead:String(idLead),campos:{SERVICOS_PROPOSTA:JSON.stringify(servicos)}}})}); const it=(kanbanLeads||[]).find(x=>String(x['ID_LEAD'])===String(idLead)); if(it) it['SERVICOS_PROPOSTA']=JSON.stringify(servicos); } catch(e){}
+  if (!numero || !data || !valor) { document.getElementById('pp-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Preencha tipo, número, data e valor (ou os serviços).</div>'; return; }
+  const lead = (kanbanLeads||[]).find(x=>String(x['ID_LEAD'])===String(idLead));
+  // ADICIONA à lista de propostas (não sobrescreve as anteriores)
+  const props = getPropostasLead(lead);
+  props.push({ tipo, numero, data, valor:String(valor), servicos });
+  const campos = { PROPOSTAS: JSON.stringify(props), SERVICOS_PROPOSTA: JSON.stringify(servicos), N_PROPOSTA: numero, DATA_ENVIO_PROPOSTA: data, VALOR_R$: valor };
+  try { await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'atualizarLeadCampos',token:sessaoToken,dados:{idLead:String(idLead),campos}})}); } catch(e){}
+  if (lead) { lead['PROPOSTAS']=campos.PROPOSTAS; lead['SERVICOS_PROPOSTA']=campos.SERVICOS_PROPOSTA; lead['N_PROPOSTA']=numero; lead['DATA_ENVIO_PROPOSTA']=data; lead['VALOR_R$']=valor; }
   const overlay = document.getElementById('modal-prop-overlay');
   if (overlay) overlay.remove();
-  await mudarEtapaLead(idLead, 'Proposta Enviada', null, { numero, data, valor });
+  // se ainda não está em Proposta Enviada (nem Fechado), move a etapa; senão só atualiza a lista
+  if (lead && lead['ETAPA']!=='Proposta Enviada' && lead['ETAPA']!=='Fechado') {
+    await mudarEtapaLead(idLead, 'Proposta Enviada', null, { numero, data, valor });
+  } else {
+    if (typeof renderKanban==='function' && document.getElementById('area-conteudo')) { /* fica onde está */ }
+  }
   fecharFicha();
 }
 
@@ -5632,6 +5712,8 @@ async function salvarPropostaRegula(id) {
     const r = await resp.json();
     if (!r.ok) { msg.innerHTML = `<div class="sem-acesso" style="margin-top:10px;">${r.erro||'verifique se o Apps Script foi republicado.'}</div>`; return; }
     d['STATUS']='Proposta solicitada'; d['VALOR_PROPOSTA']=valor;
+    // registra no histórico do cliente
+    _logAtividadeCliente(d['CNPJ'], d['CLIENTE'], 'Proposta Revisada', 'Proposta SP Regula solicitada', `Proposta de assessoria SP Regula solicitada${valor?(' — valor: '+valor):''}.`);
     fecharFicha();
     renderRegula(document.getElementById('area-conteudo'), 'rgg');
     const av = document.createElement('div'); av.textContent = 'Proposta registrada!';
@@ -5710,6 +5792,8 @@ function dispararMailto(para, cc, assunto, btn) {
   const hojeBR = new Date().toLocaleDateString('pt-BR');
   if (d) d['ALERTA_ENVIADO_EM'] = hojeBR;
   try { fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'marcarAlertaRegula',token:sessaoToken,dados:{tipo,id:String(id),data:hojeBR}})}); } catch(e){}
+  // registra no histórico do cliente
+  if (d) _logAtividadeCliente(d['CNPJ'], d['CLIENTE'], 'E-mail', `Alerta ${tipo==='sigor'?'SIGOR/MTR':'SP Regula'} enviado`, `Alerta de regularização enviado em ${hojeBR}.`);
   setTimeout(fecharFicha, 500);
 }
 
@@ -7094,38 +7178,78 @@ async function salvarCompromisso() {
 // ============================================================
 // CRM — PROPOSTAS
 // ============================================================
+function _propValorNum(v){ if(v==null||v==='')return 0; if(typeof v==='number')return v; let s=String(v).replace(/[^\d,.-]/g,''); if(s.includes(',')&&s.lastIndexOf(',')>s.lastIndexOf('.'))s=s.replace(/\./g,'').replace(',','.'); const n=parseFloat(s); return isNaN(n)?0:n; }
 async function renderPropostas(area) {
   area.innerHTML = `<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando propostas...</h2></div>`;
   await carregarLeads();
-  // propostas = leads com proposta enviada ou nº/valor de proposta
-  const props = kanbanLeads.filter(l => l['ETAPA']==='Proposta Enviada' || l['N_PROPOSTA'] || l['VALOR_R$']);
-  function valorNum(v){ if(v==null||v==='')return 0; if(typeof v==='number')return v; let s=String(v).replace(/[^\d,.-]/g,''); if(s.includes(',')&&s.lastIndexOf(',')>s.lastIndexOf('.'))s=s.replace(/\./g,'').replace(',','.'); const n=parseFloat(s); return isNaN(n)?0:n; }
-  const totalPropostas = props.reduce((s,l)=>s+valorNum(l['VALOR_R$']),0);
-  const fechadas = kanbanLeads.filter(l=>l['ETAPA']==='Fechado');
-
-  let html = `
-    <div class="kpi-funil" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));">
-      <div class="kpi-card" style="border-top:3px solid #BA7517;"><div class="kpi-num" style="color:#BA7517;">${props.length}</div><div class="kpi-lbl">Propostas enviadas</div></div>
-      <div class="kpi-card" style="border-top:3px solid var(--verde-escuro);"><div class="kpi-num" style="font-size:20px;color:var(--verde-escuro);">${fmtMoeda(totalPropostas)}</div><div class="kpi-lbl">Valor em propostas</div></div>
-      <div class="kpi-card" style="border-top:3px solid var(--verde-ok);"><div class="kpi-num" style="color:var(--verde-ok);">${fechadas.length}</div><div class="kpi-lbl">Fechadas</div></div>
+  // ACHATA todas as propostas de todos os leads (uma linha por proposta). Cobertura fica de fora dos números.
+  const flat = [];
+  (kanbanLeads||[]).forEach(l=>{
+    if (String(l['ETAPA'])==='Cobertura') return;
+    getPropostasLead(l).forEach(p=>{
+      flat.push({ cliente:l['CLIENTE']||'', consultor:l['CONSULTOR']||'', etapa:l['ETAPA']||'',
+        tipo: p.tipo||'Serviço', numero:p.numero||'', data:p.data||'', valor:_propValorNum(p.valor), entry:l['DATA_CONTATO']||'' });
+    });
+  });
+  window._propostasFlat = flat;
+  const inp='padding:6px 8px;border:1.5px solid var(--cinza-300);border-radius:7px;font-size:12px;';
+  area.innerHTML = `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;font-size:12px;color:var(--cinza-600);">
+      <i class="ti ti-calendar-event"></i> Enviadas entre:
+      <input type="date" id="prop-de" onchange="filtraPropostas()" style="${inp}"> <span>e</span>
+      <input type="date" id="prop-ate" onchange="filtraPropostas()" style="${inp}">
+      <button class="filtro-chip" onclick="document.getElementById('prop-de').value='';document.getElementById('prop-ate').value='';filtraPropostas()">Limpar</button>
     </div>
-    <div class="barra-busca" style="margin-top:16px;"><i class="ti ti-search"></i><input type="text" id="prop-busca" placeholder="Buscar por cliente ou nº da proposta..." oninput="filtraPropostas()"><span class="contagem">${props.length} propostas</span></div>
+    <div id="prop-kpis"></div>
+    <div class="barra-busca" style="margin-top:12px;"><i class="ti ti-search"></i><input type="text" id="prop-busca" placeholder="Buscar por cliente ou nº da proposta..." oninput="filtraPropostas()"><span class="contagem" id="prop-cont"></span></div>
     <div id="prop-res"></div>`;
-  area.innerHTML = html;
-  window._propostas = props;
   filtraPropostas();
 }
 function filtraPropostas() {
+  const flat = window._propostasFlat||[];
   const termo = ((document.getElementById('prop-busca')||{}).value||'').toLowerCase();
-  let lista = (window._propostas||[]).filter(l=>!termo || String(l['CLIENTE']||'').toLowerCase().includes(termo) || String(l['N_PROPOSTA']||'').toLowerCase().includes(termo));
+  const deV = (document.getElementById('prop-de')||{}).value||'';
+  const ateV = (document.getElementById('prop-ate')||{}).value||'';
+  const de = deV ? new Date(deV+'T00:00:00') : null;
+  const ate = ateV ? new Date(ateV+'T23:59:59') : null;
+  const toYM = v => { const d=parseDataReaj(v); return d? (d.getFullYear()*12+d.getMonth()) : null; };
+  let lista = flat.filter(p=>{
+    if (de || ate) { const d=parseDataReaj(p.data); if(!d) return false; if(de&&d<de) return false; if(ate&&d>ate) return false; }
+    if (termo && !(String(p.cliente).toLowerCase().includes(termo) || String(p.numero).toLowerCase().includes(termo))) return false;
+    return true;
+  });
+  const soma = a => a.reduce((s,p)=>s+p.valor,0);
+  const eServ = p => String(p.tipo).toLowerCase().indexOf('assess')<0; // tudo que não é assessoria = serviço
+  const serv = lista.filter(eServ), asse = lista.filter(p=>!eServ(p));
+  // SAFRA: proposta de lead "novo" (entrou no mesmo mês do envio) vs "antigo" (entrou em mês anterior)
+  const novos=[], antigos=[];
+  lista.forEach(p=>{ const e=toYM(p.entry), s=toYM(p.data); if(e!=null&&s!=null&&e<s) antigos.push(p); else novos.push(p); });
+  const kpi=(cor,num,lbl,val)=>`<div class="kpi-card" style="border-top:3px solid ${cor};"><div class="kpi-num" style="color:${cor};font-size:20px;">${num}</div><div class="kpi-lbl">${lbl}${val!=null?('<br><b>'+fmtMoeda(val)+'</b>'):''}</div></div>`;
+  const kpis = document.getElementById('prop-kpis');
+  if (kpis) kpis.innerHTML = `<div class="kpi-funil" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));">
+    ${kpi('#BA7517', lista.length, 'Propostas enviadas', soma(lista))}
+    ${kpi('#2d5a3d', serv.length, 'Serviço', soma(serv))}
+    ${kpi('#6B5B95', asse.length, 'Assessoria', soma(asse))}
+    ${kpi('#3B6D11', novos.length, 'Leads do mês (referência)', soma(novos))}
+    ${kpi('#8a5a00', antigos.length, 'Leads de meses anteriores', soma(antigos))}
+  </div>`;
+  const cont=document.getElementById('prop-cont'); if(cont) cont.textContent = lista.length+' propostas';
   const res = document.getElementById('prop-res');
-  if (!lista.length) { res.innerHTML='<div class="sem-acesso">Nenhuma proposta encontrada.</div>'; return; }
+  if (!lista.length) { res.innerHTML='<div class="sem-acesso">Nenhuma proposta no período.</div>'; return; }
+  // ordena por data de envio (mais recente primeiro)
+  lista = lista.slice().sort((a,b)=>{ const da=parseDataReaj(a.data)||0, db=parseDataReaj(b.data)||0; return db-da; });
   let html = '<div class="grid-cards">';
-  lista.slice(0,150).forEach(l => {
-    html += `<div class="reaj-card r60" style="cursor:default;border-left-color:#BA7517;">
-      <div class="reaj-topo"><div style="min-width:0;"><div class="reaj-nome">${l['CLIENTE']||'—'}</div><div class="reaj-cnpj">${l['CONSULTOR']||''}${l['N_PROPOSTA']?' · proposta '+l['N_PROPOSTA']:''}</div></div>
-      ${l['VALOR_R$']?`<span class="reaj-pill" style="background:#FAEEDA;color:#BA7517;">${fmtMoeda(l['VALOR_R$'])}</span>`:''}</div>
-      <div class="reaj-linhas"><div><span>Etapa</span><b style="font-size:12px;">${l['ETAPA']||'—'}</b></div>${l['DATA_ENVIO_PROPOSTA']?`<div><span>Enviada</span><b style="font-size:12px;">${fmtDataBR(l['DATA_ENVIO_PROPOSTA'])}</b></div>`:''}</div>
+  lista.slice(0,300).forEach(p => {
+    const e=toYM(p.entry), s=toYM(p.data); const antigo = (e!=null&&s!=null&&e<s);
+    const corTipo = eServ(p)?'#2d5a3d':'#6B5B95';
+    html += `<div class="reaj-card r60" style="cursor:default;border-left-color:${corTipo};">
+      <div class="reaj-topo"><div style="min-width:0;"><div class="reaj-nome">${p.cliente||'—'}</div><div class="reaj-cnpj">${p.consultor||''}${p.numero?' · nº '+p.numero:''}</div></div>
+      ${p.valor?`<span class="reaj-pill" style="background:#FAEEDA;color:#BA7517;">${fmtMoeda(p.valor)}</span>`:''}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
+        <span class="reaj-pill" style="background:${eServ(p)?'#e8f0e4':'#ede9f3'};color:${corTipo};">${p.tipo||'Serviço'}</span>
+        <span class="reaj-pill" style="background:${antigo?'#fff3e0':'#eafbea'};color:${antigo?'#8a5a00':'#3B6D11'};">${antigo?'Lead de mês anterior':'Lead do mês'}</span>
+      </div>
+      <div class="reaj-linhas" style="margin-top:6px;"><div><span>Enviada</span><b style="font-size:12px;">${p.data?fmtDataBR(p.data):'—'}</b></div><div><span>Entrada do lead</span><b style="font-size:12px;">${p.entry?fmtDataBR(p.entry):'—'}</b></div></div>
     </div>`;
   });
   res.innerHTML = html + '</div>';
@@ -7944,17 +8068,23 @@ async function removerPropostaCobertura(idLead){
   }catch(e){ alert('Erro de conexão.'); }
 }
 
-async function abrirLead(id) {
-  let l = (kanbanLeads||[]).find(x => String(x['ID_LEAD'])===String(id));
+async function abrirLead(id, nomeEnc) {
+  // nome de reserva (vem do card do kanban), usado quando o lead não tem ID_LEAD na planilha
+  let nomeFallback = '';
+  try { nomeFallback = nomeEnc ? decodeURIComponent(nomeEnc) : ''; } catch(e){ nomeFallback = nomeEnc || ''; }
+  const temId = String(id||'').trim() !== '';
+  // só casa por ID quando o ID não é vazio (senão abriria um lead qualquer de ID em branco)
+  let l = temId ? (kanbanLeads||[]).find(x => String(x['ID_LEAD'])===String(id)) : null;
   // não achou no cache (lead recém-criado, cache antigo etc.) -> recarrega do servidor e tenta de novo
-  if (!l && id && String(id).trim()) {
+  if (!l && (temId || nomeFallback)) {
     try { await carregarLeads(true); } catch(e){}
-    l = (kanbanLeads||[]).find(x => String(x['ID_LEAD'])===String(id));
+    if (temId) l = (kanbanLeads||[]).find(x => String(x['ID_LEAD'])===String(id));
   }
   if (!l) {
-    // último recurso: casa pelo nome (leads sem ID_LEAD gravado na planilha)
-    if (id && String(id).trim()) { const alvo=String(id).trim().toUpperCase(); l = (kanbanLeads||[]).find(x => String(x['CLIENTE']||'').trim().toUpperCase()===alvo); }
-    if (!l) { alert('Não consegui abrir este lead. Ele pode ter sido criado sem ID. Atualize a página (Ctrl+Shift+R) e, se persistir, me avise.'); return; }
+    // último recurso: casa pelo NOME (leads sem ID_LEAD gravado na planilha)
+    const alvo = (nomeFallback || (temId?'':String(id||''))).trim().toUpperCase();
+    if (alvo) l = (kanbanLeads||[]).find(x => String(x['CLIENTE']||'').trim().toUpperCase()===alvo);
+    if (!l) { alert('Não consegui abrir este lead. Atualize a página (Ctrl+Shift+R) e, se persistir, me avise.'); return; }
   }
   const cont = document.getElementById('ficha-container');
   const linha = (rotulo, valor) => valor ? `<tr><td style="padding:7px 0;color:var(--cinza-600);white-space:nowrap;padding-right:14px;">${rotulo}</td><td style="padding:7px 0;color:var(--cinza-900);">${valor}</td></tr>` : '';
@@ -8003,6 +8133,12 @@ async function abrirLead(id) {
               <button onclick="mudarEtapaPeloSeletor('${idLead}')" style="padding:9px 14px;border:none;background:var(--verde-medio);color:white;border-radius:8px;cursor:pointer;font-size:13px;white-space:nowrap;"><i class="ti ti-check"></i> Aplicar</button>
             </div>
             <div style="font-size:11px;color:var(--cinza-500);margin-top:6px;">Ao escolher "Proposta Solicitada", abre a precificação automaticamente.</div>
+          </div>
+          <div style="background:#FAEEDA;border:1px solid #f0d9b0;border-radius:10px;padding:12px;margin-bottom:14px;">
+            <label style="font-size:12px;color:#8a5a00;display:block;margin-bottom:6px;font-weight:600;"><i class="ti ti-file-dollar"></i> Propostas enviadas${(function(){const ps=getPropostasLead(l);return ps.length?(' ('+ps.length+')'):'';})()}</label>
+            ${(function(){ const ps=getPropostasLead(l); if(!ps.length) return '<div style="font-size:11px;color:var(--cinza-500);margin-bottom:8px;">Nenhuma proposta registrada ainda.</div>';
+              return ps.map(p=>`<div style="display:flex;justify-content:space-between;gap:8px;font-size:12.5px;color:var(--cinza-800);padding:5px 0;border-bottom:1px dashed #f0d9b0;"><span><b>${p.tipo||'Serviço'}</b>${p.numero?' · nº '+p.numero:''}${p.data?' · '+fmtDataBR(p.data):''}</span><b>${p.valor?fmtMoeda(p.valor):'—'}</b></div>`).join(''); })()}
+            <button onclick="abrirModalProposta('${idLead}')" style="margin-top:8px;padding:7px 12px;border:none;background:#BA7517;color:white;border-radius:7px;cursor:pointer;font-size:12px;"><i class="ti ti-plus"></i> Registrar outra proposta</button>
           </div>
           <div style="background:var(--cinza-100);border-radius:10px;padding:12px;margin-bottom:14px;">
             <label style="font-size:12px;color:var(--cinza-600);display:block;margin-bottom:6px;font-weight:600;"><i class="ti ti-package"></i> Serviços da proposta (rascunho)</label>
