@@ -560,6 +560,19 @@ const IDS_VE_TUDO = ['mafe', 'andrea', 'roberto'];
 const IDS_VE_TABELA_CONSULTA = ['rogerio', 'danielly'];
 
 // Listas padronizadas (da planilha de Propostas e Chamados)
+// normaliza nome de transportadora pra comparar (ignora caixa/acentos/espaços)
+function _transpNorm(s){ return String(s||'').trim().toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' '); }
+// lista combinada: fixas (LISTA_EMPRESAS) + as já usadas nos leads, sem duplicar (prefere a grafia da lista fixa)
+function _transpList(){
+  const set=new Map();
+  (typeof LISTA_EMPRESAS!=='undefined'?LISTA_EMPRESAS:[]).forEach(e=>{ const k=_transpNorm(e); if(k && !set.has(k)) set.set(k,e); });
+  const usados=(typeof kanbanLeads!=='undefined'&&kanbanLeads)?kanbanLeads.map(l=>String(l['EMPRESA_COLETA_ATUAL']||'').trim()).filter(Boolean):[];
+  usados.forEach(e=>{ const k=_transpNorm(e); if(k && !set.has(k)) set.set(k,e); });
+  return [...set.values()].filter(e=>e && e.toLowerCase()!=='outra').sort((a,b)=>a.localeCompare(b,'pt'));
+}
+// devolve a grafia canônica se já existe (evita duplicado); senão mantém o que foi digitado (transportadora nova)
+function _transpCanonico(v){ const alvo=_transpNorm(v); if(!alvo) return ''; const m=_transpList().find(e=>_transpNorm(e)===alvo); return m || String(v).trim(); }
+
 const LISTA_EMPRESAS = ["2A","4R","Alternativa","Alvorada","Ambilixo","Ambipar","Ambitrans","Brados","CKR Ambiental","CR Emoções","Colepav","Corpus Saneamento","Dipbel","Ecourbis","Ecovallore","Estrela Ambiental","Formiga","Futura","Global Ambiental","Hynove","Lixotal","Lopes Lix","Luvitec Soluções Ambientais","Mafra","Mega Ambiental","Miglix","Miguelão","Montanha","Muda","Multilixo","Musa","Nova Ambiental","Nova Osasco","Nova São José","Novo Horizonte","Polilix","Prefeitura","Proactiva","RA Gestão Ambiental","RG Ambiental","RR Ambiental","Renova Suzano","Retec","SIM / Druck Chemie","Seven","Seven Resíduos","Simões Ambiental","Supply","Supply Service","TWM Ambiental","TransOlivía","Translix","Vanlix","Vicente Entulho","You Green","Stericycle","Outra"];
 const LISTA_FONTES = ["Cliente","Google","Indicação","Licitação","Prospecção","Sp Regula"];
 const LISTA_MOTIVOS_PERDA = ["Baixo Volume","CADRI Coletivo","Concorrência/Bid/Licitação","Demanda Encerrada","Escopo Inviável","Falta de Informação","Horário Incompatível","Menor Preço","Preço","Rota Inviável","Sem Retorno do Cliente","Terceirização Serviço","Outros"];
@@ -3009,7 +3022,7 @@ async function renderKanban(area) {
     </div>
     <div class="barra-busca" style="margin-top:4px;">
       <i class="ti ti-search"></i>
-      <input type="text" id="k-busca" placeholder="Buscar chamado por cliente..." oninput="aplicarKanban()">
+      <input type="text" id="k-busca" placeholder="Buscar por cliente, CNPJ ou nº da proposta..." oninput="aplicarKanban()">
     </div>
     <div class="filtros">
       <select class="filtro-sel" id="k-consultor" onchange="aplicarKanban()"><option value="">Todos consultores</option>${consultores.map(c=>`<option>${c}</option>`).join('')}</select>
@@ -3080,7 +3093,22 @@ function aplicarKanban() {
   if (etapa) leads = leads.filter(l => etapaDe(l)===etapa);
   const statusF = (document.getElementById('k-status')||{}).value||'';
   if (statusF) leads = leads.filter(l => etapaDe(l)==='Prospecção' && statusEntrada(l)===statusF);
-  if (busca) leads = leads.filter(l => String(l['CLIENTE']||'').toLowerCase().includes(busca));
+  if (busca) {
+    const buscaDig = busca.replace(/\D/g,'');
+    leads = leads.filter(l => {
+      const nome = String(l['CLIENTE']||'').toLowerCase();
+      if (nome.includes(busca)) return true;
+      const cnpj = String(l['CNPJ']||'').toLowerCase();
+      if (cnpj.includes(busca)) return true;
+      if (buscaDig && cnpj.replace(/\D/g,'').includes(buscaDig)) return true;   // CNPJ com/sem pontuação
+      const nprop = String(l['N_PROPOSTA']||'').toLowerCase();
+      if (nprop.includes(busca)) return true;
+      // nº de qualquer proposta registrada no lead (múltiplas propostas)
+      let propsNums=''; try { propsNums=(JSON.parse(l['PROPOSTAS']||'[]')||[]).map(p=>String(p.numero||'')).join(' ').toLowerCase(); } catch(e){}
+      if (propsNums && propsNums.includes(busca)) return true;
+      return false;
+    });
+  }
   if (dIni || dFim) {
     const ini = dIni ? new Date(dIni+'T00:00:00') : null;
     const fim = dFim ? new Date(dFim+'T23:59:59') : null;
@@ -6846,7 +6874,9 @@ function abrirFormLead() {
             <div style="grid-column:1/3;"><label style="font-size:13px;color:var(--cinza-700);">E-mail</label>
               <input type="text" id="nl-email" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
             <div><label style="font-size:13px;color:var(--cinza-700);">Transportadora atual</label>
-              <select id="nl-transp" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"><option value="">— selecione —</option>${LISTA_EMPRESAS.map(e=>`<option>${e}</option>`).join('')}</select></div>
+              <input type="text" id="nl-transp" list="nl-transp-list" autocomplete="off" placeholder="escolha uma ou digite uma nova" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;">
+              <datalist id="nl-transp-list">${_transpList().map(e=>`<option value="${String(e).replace(/"/g,'&quot;')}">`).join('')}</datalist>
+              <div style="font-size:11px;color:var(--cinza-500);margin-top:3px;">Se já existe, escolha da lista. Se for nova, digite — o sistema evita duplicar nomes iguais.</div></div>
             <div><label style="font-size:13px;color:var(--cinza-700);">É cobertura?</label>
               <select id="nl-cobertura" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"><option value="nao">Não</option><option value="sim">Sim (não conta indicadores)</option></select></div>
             <div><label style="font-size:13px;color:var(--cinza-700);">Frequência</label>
@@ -6880,13 +6910,9 @@ async function onMudarFonteLead() {
   const wrap = document.getElementById('nl-buscacli-wrap');
   if (wrap) wrap.style.display = ehCliente ? 'block' : 'none';
   if (ehCliente) {
-    // pré-seleciona Ecotrans na transportadora
+    // pré-seleciona Ecotrans na transportadora (campo agora é texto com autocomplete)
     const tr = document.getElementById('nl-transp');
-    if (tr) {
-      let achou = false;
-      Array.from(tr.options).forEach(o=>{ if(o.value.toLowerCase().includes('ecotrans')){ tr.value=o.value; achou=true; } });
-      if (!achou) { const op=document.createElement('option'); op.text='Ecotrans'; op.value='Ecotrans'; tr.add(op); tr.value='Ecotrans'; }
-    }
+    if (tr) tr.value = 'Ecotrans';
     await carregarClientes();
   }
 }
@@ -6958,7 +6984,7 @@ async function salvarLead() {
     'CONTA_INDICADORES': ehCobertura ? 'Não' : 'Sim', 'DATA_CONTATO': (document.getElementById('nl-data') && document.getElementById('nl-data').value) ? fmtDataBR(document.getElementById('nl-data').value) : fmtDataBR(new Date().toISOString()),
     'RESPONSAVEL': document.getElementById('nl-resp').value, 'EMAIL': document.getElementById('nl-email').value,
     'TELEFONE': document.getElementById('nl-tel').value,
-    'EMPRESA_COLETA_ATUAL': document.getElementById('nl-transp').value,
+    'EMPRESA_COLETA_ATUAL': _transpCanonico(document.getElementById('nl-transp').value),
     'ENDERECO': (document.getElementById('nl-endereco')||{}).value || '',
     'CEP': (document.getElementById('nl-cep')||{}).value || '',
     'FREQUENCIA': (document.getElementById('nl-freq')||{}).value || '',
