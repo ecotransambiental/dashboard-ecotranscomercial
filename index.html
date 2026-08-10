@@ -7517,6 +7517,7 @@ async function renderRelatoriosCRM(area) {
 
   const consultoresUnq = [...new Set(kanbanLeads.map(l=>l['CONSULTOR']).filter(Boolean))].sort();
   const hojeISO = new Date().toISOString().slice(0,10);
+  const primeiroDiaMes = (function(){ const d=new Date(); return new Date(d.getFullYear(),d.getMonth(),1).toISOString().slice(0,10); })();
 
   let html = `
     <div style="background:white;border:1px solid var(--cinza-200);border-radius:12px;padding:18px;margin-bottom:18px;">
@@ -7563,8 +7564,29 @@ async function renderRelatoriosCRM(area) {
         <thead><tr style="color:var(--cinza-600);text-align:left;"><th style="padding:6px 0;">Consultor</th><th style="text-align:center;">Leads</th><th style="text-align:center;">Fechados</th><th style="text-align:center;">Conversão</th></tr></thead>
         <tbody>${Object.entries(porCons).sort((a,b)=>b[1].fechados-a[1].fechados).map(([c,d])=>`<tr style="border-top:1px solid var(--cinza-100);"><td style="padding:8px 0;font-weight:600;">${c}</td><td style="text-align:center;">${d.total}</td><td style="text-align:center;color:var(--verde-ok);font-weight:600;">${d.fechados}</td><td style="text-align:center;">${d.total?(d.fechados/d.total*100).toFixed(0):0}%</td></tr>`).join('')}</tbody>
       </table>
-    </div>`;
+    </div>
+
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;background:white;border:1px solid var(--cinza-200);border-radius:12px;padding:14px;margin-top:16px;">
+      <div style="font-size:14px;font-weight:600;color:var(--cinza-800);align-self:center;font-family:var(--fonte-display);">Desempenho por consultor (leads recebidos) — período:</div>
+      <div><label style="font-size:12px;color:var(--cinza-600);display:block;margin-bottom:3px;">De</label><input type="date" id="rel2-ini" value="${primeiroDiaMes}" class="filtro-sel"></div>
+      <div><label style="font-size:12px;color:var(--cinza-600);display:block;margin-bottom:3px;">Até</label><input type="date" id="rel2-fim" value="${hojeISO}" class="filtro-sel"></div>
+      <button class="btn-importar" onclick="renderDesempRelatorio()"><i class="ti ti-filter"></i> Aplicar período</button>
+    </div>
+    <div id="rel-desemp"></div>`;
   area.innerHTML = html;
+  renderDesempRelatorio();
+}
+// renderiza a tabela "Desempenho por consultor (leads recebidos)" na aba Relatórios, pelo período escolhido
+function renderDesempRelatorio(){
+  const iniV=(document.getElementById('rel2-ini')||{}).value||'';
+  const fimV=(document.getElementById('rel2-fim')||{}).value||'';
+  const ini=iniV?new Date(iniV+'T00:00:00'):null;
+  const fim=fimV?new Date(fimV+'T23:59:59'):null;
+  const leadsPeriodo=(kanbanLeads||[]).filter(l=>{ const d=parseDataReaj(l['DATA_CONTATO']); if(!d) return false; if(ini&&d<ini) return false; if(fim&&d>fim) return false; return true; });
+  const cont=document.getElementById('rel-desemp'); if(!cont) return;
+  cont.innerHTML = (typeof blocoPorConsultor==='function')
+    ? (blocoPorConsultor(leadsPeriodo, ini, fim) || '<div style="color:var(--cinza-500);font-size:13px;padding:14px;">Nenhum lead recebido no período.</div>')
+    : '';
 }
 
 // ============================================================
