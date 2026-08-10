@@ -2163,8 +2163,12 @@ async function renderAbaServicos(corpo){
     window._servLoadColetas=true;
     finCarregarDoSheets(['coletas']).then(()=>{ window._servLoadColetas=false; const c=document.getElementById('ficha-corpo'); if(c && document.getElementById('serv-tabela')) renderAbaServicos(c); }).catch(()=>{ window._servLoadColetas=false; });
   }
-  const jaSalvo=new Set(salvos.map(s=>servNormKey(s['EQUIPAMENTO'])));
-  const derivados=servDerivar(cliente,reaj,coletasCli).filter(d=>!jaSalvo.has(servNormKey(d.equipamento)));
+  const jaSalvoKeys=salvos.map(s=>servNormKey(s['EQUIPAMENTO'])).filter(Boolean);
+  // esconde a sugestão se já existe um serviço salvo igual OU que contenha a sugestão (ex: "Roll ON" some quando há "Caçamba Roll ON")
+  const derivados=servDerivar(cliente,reaj,coletasCli).filter(d=>{
+    const k=servNormKey(d.equipamento); if(!k) return true;
+    return !jaSalvoKeys.some(sk=> sk===k || (k.length>=4 && (sk.includes(k)||k.includes(sk))) );
+  });
   const cliJs=(cliente||'').replace(/'/g,"\\'");
   let html=`<button class="ficha-btn-primario" style="margin-bottom:14px;" onclick="abrirFormServico('${alvo}','${cliJs}')"><i class="ti ti-plus"></i> Adicionar serviço</button>`;
   if(!salvos.length && !derivados.length){ corpo.innerHTML=html+`<div style="text-align:center;color:var(--cinza-500);padding:24px;font-size:13px;">Nenhum serviço cadastrado ainda para este cliente.</div>`; return; }
@@ -2181,7 +2185,8 @@ async function renderAbaServicos(corpo){
     const extra=det?`<div style="font-size:10.5px;color:var(--cinza-500);">${det}</div>`:'';
     const preEdit={ id:s['ID'], equipamento:s['EQUIPAMENTO'], residuo:s['RESIDUO'], frequencia:s['FREQUENCIA'], valor:s['VALOR'], valorDestinacao:s['VALOR_DESTINACAO'], destinacao:s['VALOR_DESTINACAO'], modeloPreco:s['MODELO_PRECO'], qtdFechado:s['QTD_FECHADO'], minimaQtd:s['MINIMA_QTD'], minimaUnidade:s['MINIMA_UNIDADE'], minimaPeriodo:s['MINIMA_PERIODO'], minimaObs:s['MINIMA_OBS'], dataInicio:s['DATA_INICIO'], indice:s['INDICE'], numProposta:s['NUM_PROPOSTA'], tempoLocacao:s['TEMPO_LOCACAO'], vaiReajuste:rj };
     const preJsonE=JSON.stringify(preEdit).replace(/'/g,"&#39;").replace(/"/g,'&quot;');
-    html+=`<tr><td><b>${s['EQUIPAMENTO']||'—'}</b>${extra}</td><td>${s['RESIDUO']||'—'}</td><td>${s['FREQUENCIA']||'—'}</td><td>${vfmt(s['VALOR'])}</td><td>${vfmt(s['VALOR_DESTINACAO'])}</td><td>${s['DATA_INICIO']?fmtDataBR(s['DATA_INICIO']):'—'}</td><td>${badge}</td><td><button class="ficha-btn-secundario" style="padding:4px 9px;font-size:11px;" onclick='abrirFormServico("${alvo}","${(cliente||'').replace(/"/g,'&quot;')}", JSON.parse(this.getAttribute("data-pre")))' data-pre="${preJsonE}"><i class="ti ti-edit"></i> editar</button></td></tr>`;
+    const btnExcluir = s['ID'] ? `<button class="ficha-btn-secundario" title="Excluir serviço" style="padding:4px 8px;font-size:11px;border-color:var(--vermelho);color:var(--vermelho);margin-left:4px;" onclick="excluirServicoFront('${String(s['ID']).replace(/'/g,'')}')"><i class="ti ti-trash"></i></button>` : '';
+    html+=`<tr><td><b>${s['EQUIPAMENTO']||'—'}</b>${extra}</td><td>${s['RESIDUO']||'—'}</td><td>${s['FREQUENCIA']||'—'}</td><td>${vfmt(s['VALOR'])}</td><td>${vfmt(s['VALOR_DESTINACAO'])}</td><td>${s['DATA_INICIO']?fmtDataBR(s['DATA_INICIO']):'—'}</td><td>${badge}</td><td style="white-space:nowrap;"><button class="ficha-btn-secundario" style="padding:4px 9px;font-size:11px;" onclick='abrirFormServico("${alvo}","${(cliente||'').replace(/"/g,'&quot;')}", JSON.parse(this.getAttribute("data-pre")))' data-pre="${preJsonE}"><i class="ti ti-edit"></i> editar</button>${btnExcluir}</td></tr>`;
   });
   derivados.forEach(d=>{
     const preJson=JSON.stringify(d).replace(/'/g,"&#39;").replace(/"/g,'&quot;');
@@ -2297,6 +2302,18 @@ async function salvarServico(cnpj, cliente){
     cacheReajustes=null;
     renderAbaServicos(document.getElementById('ficha-corpo'));
   }catch(e){ msg.innerHTML='<div class="sem-acesso" style="margin-top:10px;">Erro de conexão.</div>'; }
+}
+
+// exclui um serviço salvo (aba Servicos_Cliente) pela coluna ID
+async function excluirServicoFront(id){
+  if(!id){ alert('Este serviço não tem ID — recarregue a página e tente de novo.'); return; }
+  if(!confirm('Remover este serviço do cliente? (não apaga o reajuste, só o serviço)')) return;
+  try{
+    const resp=await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'excluirLinha',token:sessaoToken,dados:{aba:'Servicos_Cliente', id:String(id)}})});
+    const r=await resp.json();
+    if(!r.ok){ alert('Erro: '+(r.erro||'republique o Apps Script.')); return; }
+    const corpo=document.getElementById('ficha-corpo'); if(corpo) renderAbaServicos(corpo);
+  }catch(e){ alert('Erro de conexão.'); }
 }
 
 async function renderAbaContratos(corpo) {
@@ -6727,12 +6744,80 @@ function gerarRelatorioFunil(paraPdf) {
   }
 }
 
+// imprime o "Questionário - Proposta de Serviço" (modelo F-1.00 COMERCIAL) preenchido com os dados do lead
+function imprimirQuestionarioLead(idLead){
+  const l=(kanbanLeads||[]).find(x=>String(x['ID_LEAD'])===String(idLead));
+  if(!l){ alert('Lead não encontrado. Recarregue e tente de novo.'); return; }
+  const win = (function(){ try{ return window.open('','_blank'); }catch(e){ return null; } })();
+  if(win){ try{ win.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Gerando…</title></head><body style="font-family:Arial;padding:40px;color:#2d5a3d;">Gerando o questionário…</body></html>'); }catch(e){} }
+  const g=v=>String(v==null?'':v).replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const chk=c=>c?'(X)':'(   )';
+  const fonte=String(l['FONTE']||''); const f=fonte.toLowerCase();
+  const ehRegula=f.includes('regula'), ehGoogle=(f==='google'), ehSite=f.includes('site');
+  const ehOutro=!!fonte && !ehRegula && !ehGoogle && !ehSite;
+  const como=`${chk(ehRegula)} SP Regula &nbsp; ${chk(ehGoogle)} Google &nbsp; ${chk(ehSite)} Site &nbsp; ${chk(ehOutro)} Outro: ${ehOutro?g(fonte):''}`;
+  const visita=`Realizou visita ( ) SIM ( ) NÃO &nbsp;&nbsp;/&nbsp;&nbsp; PROSPECÇÃO ${chk(f.includes('prospec'))} &nbsp; INDICAÇÃO ${chk(f.includes('indica'))}`;
+  const dataQ = (fmtDataBR(l['DATA_CONTATO'])||'') || new Date().toLocaleDateString('pt-BR');
+  const resQtd = [g(l['RESIDUO']), l['QUANTIDADE']?('— '+g(l['QUANTIDADE'])):''].filter(Boolean).join(' ');
+  const obs = [g(l['OBSERVACOES']), g(l['INFO_ADICIONAL'])].filter(Boolean).join(' — ');
+  const linha=(rot,val)=>`<tr><td class="rot">${rot}</td><td class="val">${val||'&nbsp;'}</td></tr>`;
+  const htmlDoc=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Questionário — ${g(l['CLIENTE'])}</title>
+    <style>
+      body{font-family:Arial,sans-serif;color:#222;padding:26px;font-size:13px;}
+      .cab{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #8bc34a;padding-bottom:10px;margin-bottom:6px;}
+      .cab h1{color:#2d5a3d;font-size:18px;margin:0;} .cab .sub{color:#666;font-size:12px;}
+      .cab .cod{text-align:right;font-size:11px;color:#666;}
+      table{width:100%;border-collapse:collapse;margin-top:10px;}
+      td{border:1px solid #bbb;padding:7px 9px;vertical-align:top;}
+      td.rot{background:#f0f7ec;color:#2d5a3d;font-weight:600;width:38%;}
+      td.val{min-height:20px;}
+      .secao{background:#2d5a3d;color:#fff;font-weight:600;text-align:center;}
+      @media print{ button{display:none;} }
+    </style></head><body>
+    <div class="cab">
+      <div><h1>Ecotrans Ambiental</h1><div class="sub">Questionário — Proposta de Serviço</div></div>
+      <div class="cod">F-1.00 &nbsp; COMERCIAL<br>Data: ${dataQ}</div>
+    </div>
+    <table>
+      <tr><td class="rot">Data</td><td class="val">${dataQ}</td></tr>
+      <tr><td class="rot">Consultor Responsável</td><td class="val">${g(l['CONSULTOR'])}</td></tr>
+      ${linha('CLIENTE / CNPJ', g(l['CLIENTE'])+(l['CNPJ']?('<br>'+g(l['CNPJ'])):''))}
+      ${linha('Endereço da coleta', g(l['ENDERECO']))}
+      ${linha('Bairro / Cidade', g(l['CEP'])?('CEP '+g(l['CEP'])):'')}
+      ${linha('Nome do contato', g(l['RESPONSAVEL']))}
+      ${linha('E-Mail', g(l['EMAIL']))}
+      ${linha('Telefones', g(l['TELEFONE']))}
+      ${linha('Já possui essa coleta? Qual transportador atual?', g(l['EMPRESA_COLETA_ATUAL']))}
+      ${linha('Tipo de resíduo e quantidade gerada (por dia / por coleta)', resQtd)}
+      ${linha('Acondicionamento dos resíduos', g(l['CATEGORIA_RESIDUO']))}
+      ${linha('Frequência da coleta', g(l['FREQUENCIA']))}
+      ${linha('Período para a realização da coleta', '( ) Manhã &nbsp; ( ) Tarde &nbsp; ( ) Noite')}
+      ${linha('Como conheceu nossa empresa?', como)}
+      <tr><td class="secao" colspan="2">PARA USO INTERNO</td></tr>
+      ${linha('OBS', obs)}
+      ${linha('Situação', visita)}
+    </table>
+    <p style="font-size:11px;color:#888;margin-top:14px;">Gerado pelo sistema Ecotrans em ${new Date().toLocaleString('pt-BR')}. Campos com ( ) devem ser marcados manualmente conforme o atendimento.</p>
+    </body></html>`;
+  if (win && !win.closed) {
+    try { win.document.open(); win.document.write(htmlDoc); win.document.close(); setTimeout(function(){ try{ win.focus(); win.print(); }catch(e){} }, 400); }
+    catch(e){ if(typeof imprimirViaIframe==='function') imprimirViaIframe(htmlDoc); }
+  } else if (typeof imprimirViaIframe==='function') { imprimirViaIframe(htmlDoc); }
+}
+
+// fecha o form de novo lead, mas avisa se já digitou algo (evita perder tudo por clique fora sem querer)
+function fecharFormLead(){
+  const ids=['nl-cliente','nl-cnpj','nl-resp','nl-email','nl-tel','nl-endereco','nl-cep','nl-obs','nl-residuo','nl-infoadd','nl-freq','nl-acond'];
+  const temAlgo = ids.some(id=>{ const el=document.getElementById(id); return el && String(el.value||'').trim(); });
+  if (temAlgo && !confirm('Deseja mesmo sair e perder tudo que você preencheu neste lead?')) return;
+  fecharFicha();
+}
 function abrirFormLead() {
   const cont = document.getElementById('ficha-container');
   cont.innerHTML = `
-    <div class="ficha-overlay" onclick="if(event.target===this)fecharFicha()">
+    <div class="ficha-overlay" onclick="if(event.target===this)fecharFormLead()">
       <div class="ficha" style="width:520px;">
-        <div class="ficha-topo"><button class="fechar" onclick="fecharFicha()"><i class="ti ti-x"></i></button>
+        <div class="ficha-topo"><button class="fechar" onclick="fecharFormLead()"><i class="ti ti-x"></i></button>
           <div class="nome"><i class="ti ti-user-plus"></i> Novo lead</div><div class="cnpj">Adicionar ao funil</div></div>
         <div class="ficha-corpo">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
@@ -8218,6 +8303,9 @@ async function abrirLead(id, nomeEnc) {
           </div>
         </div>
         <div class="ficha-corpo">
+          <div style="margin-bottom:12px;">
+            <button onclick="imprimirQuestionarioLead('${idLead}')" style="width:100%;padding:10px;border:1.5px solid var(--verde-medio);background:var(--verde-claro-bg);color:var(--verde-escuro);border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;"><i class="ti ti-printer"></i> Imprimir questionário (proposta de serviço)</button>
+          </div>
           <div style="background:var(--cinza-100);border-radius:10px;padding:12px;margin-bottom:14px;">
             <label style="font-size:12px;color:var(--cinza-600);display:block;margin-bottom:6px;font-weight:600;">Nome do lead</label>
             <div style="display:flex;gap:8px;align-items:center;">
