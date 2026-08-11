@@ -5366,6 +5366,11 @@ async function processarVariacao() {
     const r = await resp.json();
     if (!r.ok) { msg.innerHTML=`<div class="sem-acesso">${r.erro||'verifique se o Apps Script foi republicado.'}</div>`; return; }
     cacheFat = null;
+    // IMPORTANTE: invalida o cache de leitura do financeiro e recarrega o faturamento do zero.
+    // Sem isso, a tela continuava mostrando os meses antigos (o cache dura 90s) e parecia que o upload não tinha feito nada.
+    if (typeof finInvalidarCache==='function') finInvalidarCache();
+    window._fatMesSel = null; window._fatMesComp = null; // volta pro mês mais recente do relatório novo
+    if (typeof finCarregarDoSheets==='function') { try { await finCarregarDoSheets(['faturamento'], true); } catch(e){} }
     let aviso = '';
     if (r.naoCasados && r.naoCasados.length) {
       aviso = `<div style="background:var(--amarelo-bg);border-radius:8px;padding:10px;margin-top:10px;font-size:12.5px;color:#8a6d00;"><b>${r.naoCasados.length} clientes não casaram por nome</b> (ficaram salvos sem CNPJ). Me mande os CNPJs deles que eu ensino o sistema:<br>${r.naoCasados.map(n=>'• '+n).join('<br>')}</div>`;
@@ -7701,10 +7706,13 @@ function solicStatusInfo(s){
 // quem gerencia (avança status): diretoria, admin (Mafe/Andrea/Guilherme/Leonardo) e Dany
 function podeGerirSolic(){ if(!usuarioAtual) return false; return ['admin','diretor'].includes(usuarioAtual.perfil) || String(usuarioAtual.id||'').toLowerCase()==='danielly'; }
 function _cnpjDoClienteNome(nome){ const alvo=String(nome||'').trim().toUpperCase(); const c=(cacheClientes||[]).find(x=>String(x['CLIENTE']||'').trim().toUpperCase()===alvo); return c?(c['CNPJ']||''):''; }
+// consultor responsável pelo cliente (a solicitação fica sempre no nome dele, pra ele acompanhar o status)
+function _consultorDoClienteNome(nome){ const alvo=String(nome||'').trim().toUpperCase(); const c=(cacheClientes||[]).find(x=>String(x['CLIENTE']||'').trim().toUpperCase()===alvo); return c?(String(c['CONSULTOR']||'').trim()):''; }
 
 async function renderSolicitacoes(area){
   area.innerHTML = `<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando solicitações...</h2></div>`;
-  await carregarClientes();
+  // clientes carregam em 2º plano (só são necessários nos formulários) — deixa a página abrir rápido
+  if (!cacheClientes) { carregarClientes().catch(()=>{}); }
   const r = await buscarDados('Solicitacoes');
   let lista = r.ok ? r.linhas.slice() : [];
   const gere = podeGerirSolic();
@@ -7759,14 +7767,29 @@ function filtraSolic(){
     const cnpjJs=String(l['CNPJ']||'').replace(/'/g,'');
     let hist=[]; try{ hist=JSON.parse(l['HISTORICO']||'[]'); }catch(e){}
     const histHtml=hist.slice().reverse().map(h=>`<div style="font-size:11px;color:var(--cinza-600);padding:3px 0;border-bottom:1px dashed var(--cinza-200);"><b>${h.status}</b> · ${h.data}${h.por?(' · '+h.por):''}${h.obs?(' · '+h.obs):''}</div>`).join('');
-    const det=[l['VIGENCIA']?('Vigência: '+l['VIGENCIA']):'', l['MULTA']?('Multa: '+l['MULTA']):'', String(l['ALTERA_VALOR']||'').toLowerCase()==='sim'?'Altera valores':'', l['VALOR_ESTIMADO']?('Estimado: '+fmtMoeda(l['VALOR_ESTIMADO'])):''].filter(Boolean).join(' · ');
+    // serviços/valores que o consultor preencheu
+    let servs=[]; try{ servs=JSON.parse(l['SERVICOS']||'[]'); }catch(e){}
+    const servHtml = servs.length ? `<div style="margin-top:8px;background:var(--verde-claro-bg);border-radius:8px;padding:8px 10px;">
+        <div style="font-size:11px;font-weight:600;color:var(--verde-escuro);margin-bottom:4px;"><i class="ti ti-package"></i> Serviços / novos valores (${servs.length})</div>
+        ${servs.map(s=>`<div style="font-size:12px;color:var(--cinza-800);padding:2px 0;"><b>${s.equipamento||'—'}</b>${s.residuo?(' · '+s.residuo):''} — ${(s.valorAntigo!=null&&s.valorAntigo!=='')?(`<span style="color:var(--cinza-500);">${fmtMoeda(s.valorAntigo)} →</span> `):''}<b style="color:var(--verde-escuro);">${s.valorNovo?fmtMoeda(s.valorNovo):'—'}</b></div>`).join('')}
+      </div>` : '';
+    const linhaInfo=(rot,val)=>val?`<div style="display:flex;gap:6px;font-size:12px;padding:2px 0;"><span style="color:var(--cinza-500);min-width:96px;">${rot}</span><b style="color:var(--cinza-800);">${val}</b></div>`:'';
     html+=`<div class="reaj-card" style="cursor:default;border-left-color:${ad?'#6B5B95':'#185FA5'};">
       <div class="reaj-topo"><div style="min-width:0;">
         <div class="reaj-nome"><span onclick="abrirFicha('${cnpjJs}','${String(l['CLIENTE']||'').replace(/'/g,"\\'")}')" style="cursor:pointer;" title="Abrir ficha">${l['CLIENTE']||'—'}</span></div>
-        <div class="reaj-cnpj"><span style="color:${ad?'#6B5B95':'#185FA5'};font-weight:600;">${ad?'Aditivo':'Contrato'}</span> · por ${l['CONSULTOR']||'—'} · ${fmtDataBR(l['DATA'])}</div>
+        <div class="reaj-cnpj"><span style="color:${ad?'#6B5B95':'#185FA5'};font-weight:600;">${ad?'Aditivo':'Contrato'}</span> · consultor: ${l['CONSULTOR']||'—'} · ${fmtDataBR(l['DATA'])}</div>
       </div><span class="reaj-pill" style="background:${st.bg};color:${st.cor};">${st.nome}</span></div>
-      ${det?`<div style="font-size:12px;color:var(--cinza-600);margin-top:8px;">${det}</div>`:''}
-      ${l['OBS']?`<div style="font-size:12px;color:var(--cinza-600);margin-top:4px;font-style:italic;">"${l['OBS']}"</div>`:''}
+      <div style="margin-top:8px;border-top:1px solid var(--cinza-100);padding-top:8px;">
+        ${linhaInfo('Vigência', l['VIGENCIA'])}
+        ${linhaInfo('Multa', l['MULTA'])}
+        ${linhaInfo('Altera valores', l['ALTERA_VALOR'])}
+        ${linhaInfo('Valor estimado', l['VALOR_ESTIMADO']?fmtMoeda(l['VALOR_ESTIMADO']):'')}
+        ${linhaInfo('Mínima', [l['MINIMA_QTD'],l['MINIMA_TIPO']].filter(Boolean).join(' '))}
+        ${linhaInfo('CNPJ', l['CNPJ'])}
+        ${(l['SOLICITADO_POR'] && String(l['SOLICITADO_POR'])!==String(l['CONSULTOR']))?linhaInfo('Pedido por', l['SOLICITADO_POR']):''}
+      </div>
+      ${servHtml}
+      ${l['OBS']?`<div style="font-size:12px;color:var(--cinza-700);margin-top:8px;background:var(--cinza-100);border-radius:8px;padding:8px 10px;"><b style="font-size:11px;color:var(--cinza-500);">Observação do consultor:</b><br>${l['OBS']}</div>`:''}
       ${(String(l['STATUS'])==='Aguardando dados do cliente' && l['OBS_STATUS'])?`<div style="font-size:12px;color:#8a6d00;margin-top:6px;"><i class="ti ti-alert-triangle"></i> Falta: ${l['OBS_STATUS']}</div>`:''}
       <details style="margin-top:8px;"><summary style="font-size:11.5px;color:var(--cinza-500);cursor:pointer;">Histórico do status (${hist.length})</summary><div style="margin-top:6px;">${histHtml||'<div style="font-size:11px;color:var(--cinza-400);">—</div>'}</div></details>
       ${gere?`<div style="margin-top:10px;border-top:1px solid var(--cinza-100);padding-top:10px;">
@@ -7821,7 +7844,7 @@ async function salvarSolicContrato(){
   const gv=id=>((document.getElementById(id)||{}).value||'').trim();
   const cliente=gv('soc-cliente'); if(!cliente){ document.getElementById('soc-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Informe o cliente.</div>'; return; }
   const vig=gv('soc-vigencia'); if(!vig){ document.getElementById('soc-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Informe a vigência.</div>'; return; }
-  const dados={ tipo:'Contrato', cliente, cnpj:_cnpjDoClienteNome(cliente), consultor:usuarioAtual.nome, vigencia:vig, valorEstimado:gv('soc-valor'), minimaTipo:gv('soc-mintipo'), minimaQtd:gv('soc-minqtd'), obs:gv('soc-obs'), origem:'avulso' };
+  const dados={ tipo:'Contrato', cliente, cnpj:_cnpjDoClienteNome(cliente), consultor:(_consultorDoClienteNome(cliente)||usuarioAtual.nome), vigencia:vig, valorEstimado:gv('soc-valor'), minimaTipo:gv('soc-mintipo'), minimaQtd:gv('soc-minqtd'), obs:gv('soc-obs'), origem:'avulso' };
   document.getElementById('soc-msg').innerHTML='<div style="text-align:center;padding:10px;color:var(--cinza-500);">Enviando...</div>';
   try{ const resp=await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'criarSolicitacao',token:sessaoToken,dados})}); const r=await resp.json();
     if(!r.ok){ document.getElementById('soc-msg').innerHTML=`<div class="sem-acesso">${r.erro||'Erro. Republique o Apps Script.'}</div>`; return; }
@@ -7914,7 +7937,7 @@ async function salvarSolicAditivo(){
       servicos.push({ equipamento:eq, residuo:(resEl?resEl.value.trim():''), valorNovo:(novoEl?novoEl.value:''), valorAntigo:(novoEl?novoEl.getAttribute('data-antigo'):'') });
     });
   }
-  const dados={ tipo:'Aditivo', cliente, cnpj, consultor:usuarioAtual.nome, vigencia:vig, multa:gv('soa-multa'), alteraValor:gv('soa-altera'), servicos:JSON.stringify(servicos), obs:gv('soa-obs'), origem:'avulso' };
+  const dados={ tipo:'Aditivo', cliente, cnpj, consultor:(_consultorDoClienteNome(cliente)||usuarioAtual.nome), vigencia:vig, multa:gv('soa-multa'), alteraValor:gv('soa-altera'), servicos:JSON.stringify(servicos), obs:gv('soa-obs'), origem:'avulso' };
   document.getElementById('soa-msg').innerHTML='<div style="text-align:center;padding:10px;color:var(--cinza-500);">Enviando...</div>';
   try{ const resp=await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'criarSolicitacao',token:sessaoToken,dados})}); const r=await resp.json();
     if(!r.ok){ document.getElementById('soa-msg').innerHTML=`<div class="sem-acesso">${r.erro||'Erro. Republique o Apps Script.'}</div>`; return; }
@@ -7927,7 +7950,10 @@ async function salvarSolicAditivo(){
 // ============================================================
 async function renderPendencias(area){
   area.innerHTML = `<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando suas pendências...</h2></div>`;
-  try{ await carregarLeads(); }catch(e){}
+  // carrega leads + atividades + solicitações EM PARALELO (era sequencial, ficava lento)
+  const _pLeads = (typeof carregarLeads==='function') ? carregarLeads().catch(()=>{}) : Promise.resolve();
+  const _pAtiv = buscarDados('Atividades_Cliente');
+  const _pSolic = buscarDados('Solicitacoes');
   const gere = (typeof podeGerirSolic==='function') && podeGerirSolic(); // diretoria/admin/Dany veem tudo
   const veTudo = gere || (usuarioAtual && ['admin','diretor'].includes(usuarioAtual.perfil));
   const meuNome = String((usuarioAtual&&usuarioAtual.nome)||'').trim().toUpperCase();
@@ -7936,7 +7962,7 @@ async function renderPendencias(area){
   const soMeuCons = v => ehMeuRegistro(v) || String(v||'').trim().toUpperCase()===meuNome;
   // solicitações: diretoria/Mafe/Dany veem todas; consultor só as suas
   const meuCons = v => veTudo || ehMeuRegistro(v) || String(v||'').trim().toUpperCase()===meuNome;
-  const [ra, rs] = await Promise.all([buscarDados('Atividades_Cliente'), buscarDados('Solicitacoes')]);
+  const [ra, rs] = await Promise.all([_pAtiv, _pSolic, _pLeads]);
   const ativs = ra.ok ? ra.linhas : [];
   let solic = rs.ok ? rs.linhas : [];
   const hojeD = new Date(); hojeD.setHours(0,0,0,0);
@@ -10082,16 +10108,24 @@ function FIN_renderReceber(){
   const listaEmit = mesSel==='todos' ? baseEmit : baseEmit.filter(x=>mesEmiss(x)===mesSel);
   const emitido = listaEmit.reduce((s,x)=>s+x.valor,0);
   const aberto = listaEmit.reduce((s,x)=>s+x.saldo,0);
+  // SANEAMENTO: imposto maior que o próprio valor do título é impossível (dado corrompido de upload antigo).
+  // Nesses casos o imposto é ignorado (0), pra não inflar o total (era o que causava ISS de milhões / 1000%).
+  const imp = (x, campo) => { const v=x[campo]||0; const b=x.valor||0; return (b>0 && v>b) ? 0 : v; };
+  const impostosDoTitulo = x => imp(x,'iss')+imp(x,'inss')+imp(x,'pis')+imp(x,'cofins')+imp(x,'csll')+imp(x,'ir');
   // impostos e líquido (dos emitidos do período)
-  const tISS = listaEmit.reduce((s,x)=>s+(x.iss||0),0);
-  const tINSS = listaEmit.reduce((s,x)=>s+(x.inss||0),0);
-  const tPIS = listaEmit.reduce((s,x)=>s+(x.pis||0),0);
-  const tCOFINS = listaEmit.reduce((s,x)=>s+(x.cofins||0),0);
-  const tCSLL = listaEmit.reduce((s,x)=>s+(x.csll||0),0);
-  const tIR = listaEmit.reduce((s,x)=>s+(x.ir||0),0);
+  const tISS = listaEmit.reduce((s,x)=>s+imp(x,'iss'),0);
+  const tINSS = listaEmit.reduce((s,x)=>s+imp(x,'inss'),0);
+  const tPIS = listaEmit.reduce((s,x)=>s+imp(x,'pis'),0);
+  const tCOFINS = listaEmit.reduce((s,x)=>s+imp(x,'cofins'),0);
+  const tCSLL = listaEmit.reduce((s,x)=>s+imp(x,'csll'),0);
+  const tIR = listaEmit.reduce((s,x)=>s+imp(x,'ir'),0);
   const totalImpostos = tISS+tINSS+tPIS+tCOFINS+tCSLL+tIR;
-  // líquido: usa a coluna "Vlr. Líquido" da planilha. Se algum título vier sem, cai pro bruto-impostos daquele título.
-  const liquido = listaEmit.reduce((s,x)=>s + (x.liquido || (x.valor - (x.iss||0)-(x.inss||0)-(x.pis||0)-(x.cofins||0)-(x.csll||0)-(x.ir||0)-(x.desconto||0))), 0);
+  // líquido: usa a coluna "Vlr. Líquido" da planilha (se for coerente, <= bruto); senão bruto - impostos saneados.
+  const liquido = listaEmit.reduce((s,x)=>{
+    const b=x.valor||0, l=x.liquido||0;
+    const ok = l>0 && (b<=0 || l<=b*1.0001);
+    return s + (ok ? l : (b - impostosDoTitulo(x) - (x.desconto||0)));
+  },0);
   // recebido: filtra também pelo mês selecionado (por emissão do recebido)
   const listaReceb = mesSel==='todos' ? baseReceb : baseReceb.filter(x=>mesEmiss(x)===mesSel);
   const recebidoTotal = listaReceb.reduce((s,x)=>s+(x.recebido||x.valor),0);
@@ -10126,9 +10160,9 @@ function FIN_renderReceber(){
         Bruto <b>${finFmtM(emitido)}</b> − impostos <b>${finFmtM(totalImpostos)}</b> = Líquido <b style="color:var(--verde-escuro);">${finFmtM(liquido)}</b>
       </div>
     </div>
-    ${window._finImpostoDiag ? `<div class="aviso" style="background:var(--vermelho-bg);color:var(--vermelho);"><i class="ti ti-alert-triangle"></i>
-      <b>Atenção:</b> ${window._finImpostoDiag.total} título(s) estão com imposto maior que o próprio valor — sinal de que os dados no sistema vieram corrompidos de um upload antigo (ex.: "${window._finImpostoDiag.exemplo.cliente||'—'}" tem ISS de ${finFmtM(window._finImpostoDiag.exemplo.iss||0)} num título de ${finFmtM(window._finImpostoDiag.exemplo.valor||0)}).
-      <br><b>Solução:</b> clique em "Limpar só este" na caixa de <b>Contas a Receber Emitidos</b> (em Relatórios) e <b>resuba o arquivo</b>. Isso regrava os valores certos.
+    ${window._finImpostoDiag ? `<div class="aviso" style="background:var(--amarelo-bg);color:#8a6d00;"><i class="ti ti-alert-triangle"></i>
+      <b>${window._finImpostoDiag.total} título(s) com imposto corrompido</b> (imposto maior que o próprio valor do título) — vieram assim de um upload antigo. Ex.: "${window._finImpostoDiag.exemplo.cliente||'—'}" com ISS de ${finFmtM(window._finImpostoDiag.exemplo.iss||0)} num título de ${finFmtM(window._finImpostoDiag.exemplo.valor||0)}.
+      <br>Esses impostos estão sendo <b>ignorados no cálculo</b> (por isso os totais acima já saem corretos), mas o ideal é limpar: em <b>Financeiro › Relatórios</b>, use "Limpar só este" na caixa de <b>Contas a Receber Emitidos</b> e <b>resuba o arquivo</b>.
     </div>` : ''}
     <div class="aviso" style="background:var(--verde-claro-bg);color:var(--verde-escuro);"><i class="ti ti-info-circle"></i>
       O <b>Líquido</b> vem da coluna "Vlr. Líquido" do relatório (o que de fato entra depois dos impostos).
