@@ -7844,7 +7844,11 @@ function abrirSolicitarAditivoNovo(clientePre){
               <label style="font-size:13px;color:var(--verde-escuro);font-weight:600;"><i class="ti ti-package"></i> Serviços a alterar</label>
               <button type="button" class="ficha-btn-secundario" style="padding:5px 10px;font-size:12px;" onclick="carregarServicosAditivo()"><i class="ti ti-download"></i> Carregar serviços do cliente</button>
             </div>
-            <div id="soa-serv"><div style="font-size:12px;color:var(--cinza-500);">Selecione o cliente e clique em "Carregar serviços". Já vem com o valor reajustado de 2026 pra você confirmar ou ajustar.</div></div>
+            <div id="soa-serv">
+              <div id="soa-serv-rows"></div>
+              <button type="button" class="ficha-btn-secundario" style="margin-top:8px;padding:5px 10px;font-size:12px;" onclick="adicionarServicoAditivo()"><i class="ti ti-plus"></i> Adicionar serviço</button>
+              <div style="font-size:11px;color:var(--cinza-500);margin-top:6px;">Clique em <b>"Carregar serviços do cliente"</b> pra puxar os já cadastrados (com o valor 2026), ou <b>adicione manualmente</b> se não houver. Ao finalizar o aditivo, os serviços atualizam ou entram no card e no reajuste.</div>
+            </div>
           </div>
           <div style="margin-top:12px;"><label style="font-size:13px;color:var(--cinza-700);">Observação</label><textarea id="soa-obs" rows="2" style="${inp}font-family:var(--fonte-corpo);"></textarea></div>
           <div class="ficha-botoes" style="margin-top:14px;"><button class="ficha-btn-primario" onclick="salvarSolicAditivo()"><i class="ti ti-send"></i> Enviar solicitação</button><button class="ficha-btn-secundario" onclick="fecharFicha()">Cancelar</button></div>
@@ -7853,12 +7857,26 @@ function abrirSolicitarAditivoNovo(clientePre){
       </div>
     </div>`;
 }
-// carrega os serviços salvos do cliente com o valor reajustado 2026 pré-preenchido
+// uma linha editável de serviço do aditivo (serve pra serviço puxado OU manual)
+function _aditServRow(pre){
+  pre=pre||{};
+  const g=v=>String(v==null?'':v).replace(/"/g,'&quot;');
+  const inp='padding:5px;border:1.5px solid var(--cinza-300);border-radius:6px;font-size:12px;';
+  return `<div class="adit-serv" style="display:grid;grid-template-columns:1.3fr 1fr auto auto;gap:6px;align-items:center;padding:6px 0;border-bottom:1px dashed var(--cinza-200);">
+    <input type="text" class="adit-eq" value="${g(pre.equipamento)}" placeholder="Equipamento" style="${inp}">
+    <input type="text" class="adit-res" value="${g(pre.residuo)}" placeholder="Resíduo" style="${inp}">
+    <span style="font-size:11px;color:var(--cinza-600);white-space:nowrap;">${(pre.valorAntigo!=null&&pre.valorAntigo!=='')?('atual '+fmtMoeda(pre.valorAntigo)+' → '):''}R$ <input type="number" step="0.01" class="adit-novo" value="${pre.valorNovo!=null?pre.valorNovo:''}" data-antigo="${pre.valorAntigo!=null?pre.valorAntigo:''}" placeholder="novo" style="width:90px;${inp}"></span>
+    <button type="button" title="Remover" onclick="this.closest('.adit-serv').remove()" style="border:none;background:none;color:var(--vermelho);cursor:pointer;font-size:16px;line-height:1;">&times;</button>
+  </div>`;
+}
+function adicionarServicoAditivo(){ const box=document.getElementById('soa-serv-rows'); if(box) box.insertAdjacentHTML('beforeend', _aditServRow({})); }
+
+// carrega os serviços salvos do cliente com o valor reajustado 2026 pré-preenchido (nas linhas editáveis)
 async function carregarServicosAditivo(){
   const nome=(document.getElementById('soa-cliente')||{}).value||'';
   const cnpj=_cnpjDoClienteNome(nome);
-  const box=document.getElementById('soa-serv'); if(!box) return;
-  if(!cnpj){ box.innerHTML='<div class="sem-acesso">Selecione um cliente existente primeiro.</div>'; return; }
+  const box=document.getElementById('soa-serv-rows'); if(!box) return;
+  if(!cnpj){ alert('Selecione um cliente existente primeiro.'); return; }
   box.innerHTML='<div style="color:var(--cinza-500);font-size:12px;padding:6px;">Carregando serviços...</div>';
   const alvo=cnpjLimpo(cnpj);
   const norm=s=>String(s||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Z0-9]/g,'');
@@ -7866,19 +7884,15 @@ async function carregarServicosAditivo(){
     const [rs,rr]=await Promise.all([buscarDados('Servicos_Cliente'), buscarDados('Reajustes')]);
     const servs=(rs.ok?rs.linhas:[]).filter(s=>cnpjLimpo(s['CNPJ'])===alvo);
     const reaj=(rr.ok?rr.linhas:[]).filter(x=>cnpjLimpo(x['CNPJ'])===alvo);
-    if(!servs.length){ box.innerHTML='<div style="font-size:12px;color:var(--cinza-500);padding:6px;">Nenhum serviço salvo pra este cliente. Detalhe na observação.</div>'; return; }
+    if(!servs.length){ box.innerHTML=_aditServRow({}); alert('Este cliente não tem serviços salvos. Adicione o serviço manualmente (deixei uma linha em branco).'); return; }
     let html='';
     servs.forEach(s=>{
       const eq=s['EQUIPAMENTO']||''; const atual=parseMoedaReaj(s['VALOR']);
       const rj=reaj.find(x=>norm(x['TP DE SERVIÇO'])===norm(eq));
       const reajustado=rj?(parseMoedaReaj(rj['VALOR REAJUSTADO'])||atual):atual;
-      html+=`<div class="adit-serv" data-eq="${String(eq).replace(/"/g,'&quot;')}" style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px dashed var(--cinza-200);font-size:12.5px;flex-wrap:wrap;">
-        <label style="display:flex;align-items:center;gap:5px;flex:1;min-width:0;cursor:pointer;"><input type="checkbox" class="adit-usar" checked><b>${eq||'—'}</b>${s['RESIDUO']?(' · '+s['RESIDUO']):''}</label>
-        <span style="color:var(--cinza-500);">atual ${atual!=null?fmtMoeda(atual):'—'}</span>
-        <span style="color:var(--cinza-600);white-space:nowrap;">novo R$ <input type="number" step="0.01" class="adit-novo" value="${reajustado!=null?reajustado:''}" data-antigo="${atual!=null?atual:''}" style="width:100px;padding:5px;border:1.5px solid var(--cinza-300);border-radius:6px;"></span>
-      </div>`;
+      html+=_aditServRow({ equipamento:eq, residuo:s['RESIDUO']||'', valorNovo:(reajustado!=null?reajustado:''), valorAntigo:(atual!=null?atual:'') });
     });
-    box.innerHTML=html+'<div style="font-size:11px;color:var(--cinza-500);margin-top:6px;">Valores já vêm com o reajuste de 2026. Ao <b>finalizar</b> o aditivo, os que você deixar marcados atualizam o card e o reajuste do cliente.</div>';
+    box.innerHTML=html;
   }catch(e){ box.innerHTML='<div class="sem-acesso">Erro ao carregar serviços.</div>'; }
 }
 async function salvarSolicAditivo(){
@@ -7888,10 +7902,10 @@ async function salvarSolicAditivo(){
   const vig=gv('soa-vigencia'); if(!vig){ document.getElementById('soa-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Informe a vigência.</div>'; return; }
   let servicos=[];
   if(gv('soa-altera')==='Sim'){
-    document.querySelectorAll('#soa-serv .adit-serv').forEach(row=>{
-      const usar=row.querySelector('.adit-usar'); if(usar && !usar.checked) return;
-      const novoEl=row.querySelector('.adit-novo');
-      servicos.push({ equipamento:row.getAttribute('data-eq')||'', valorNovo:(novoEl?novoEl.value:''), valorAntigo:(novoEl?novoEl.getAttribute('data-antigo'):'') });
+    document.querySelectorAll('#soa-serv-rows .adit-serv').forEach(row=>{
+      const eqEl=row.querySelector('.adit-eq'), resEl=row.querySelector('.adit-res'), novoEl=row.querySelector('.adit-novo');
+      const eq=eqEl?eqEl.value.trim():''; if(!eq) return; // linha vazia, ignora
+      servicos.push({ equipamento:eq, residuo:(resEl?resEl.value.trim():''), valorNovo:(novoEl?novoEl.value:''), valorAntigo:(novoEl?novoEl.getAttribute('data-antigo'):'') });
     });
   }
   const dados={ tipo:'Aditivo', cliente, cnpj, consultor:usuarioAtual.nome, vigencia:vig, multa:gv('soa-multa'), alteraValor:gv('soa-altera'), servicos:JSON.stringify(servicos), obs:gv('soa-obs'), origem:'avulso' };
@@ -7911,7 +7925,10 @@ async function renderPendencias(area){
   const gere = (typeof podeGerirSolic==='function') && podeGerirSolic(); // diretoria/admin/Dany veem tudo
   const veTudo = gere || (usuarioAtual && ['admin','diretor'].includes(usuarioAtual.perfil));
   const meuNome = String((usuarioAtual&&usuarioAtual.nome)||'').trim().toUpperCase();
-  const meuAtiv = a => veTudo || ehMeuRegistro(a['REGISTRADO_POR']) || String(a['REGISTRADO_POR']||'').trim().toUpperCase()===meuNome;
+  // follow-ups e agendados são SEMPRE só os próprios (mesmo pra diretoria/Mafe) — cada um vê os seus
+  const soMeuAtiv = a => ehMeuRegistro(a['REGISTRADO_POR']) || String(a['REGISTRADO_POR']||'').trim().toUpperCase()===meuNome;
+  const soMeuCons = v => ehMeuRegistro(v) || String(v||'').trim().toUpperCase()===meuNome;
+  // solicitações: diretoria/Mafe/Dany veem todas; consultor só as suas
   const meuCons = v => veTudo || ehMeuRegistro(v) || String(v||'').trim().toUpperCase()===meuNome;
   const [ra, rs] = await Promise.all([buscarDados('Atividades_Cliente'), buscarDados('Solicitacoes')]);
   const ativs = ra.ok ? ra.linhas : [];
@@ -7920,11 +7937,11 @@ async function renderPendencias(area){
   const diasDe = d => { const x=parseDataReaj(d); if(!x) return null; const xx=new Date(x); xx.setHours(0,0,0,0); return Math.round((xx-hojeD)/864e5); };
   // FOLLOW-UPS (leads com FOLLOWUP + atividades tipo Follow-up não concluídas)
   const fus = [];
-  (kanbanLeads||[]).forEach(l=>{ if(l['FOLLOWUP'] && meuCons(l['CONSULTOR'])) fus.push({cliente:l['CLIENTE'], data:l['FOLLOWUP'], quem:l['CONSULTOR'], idLead:l['ID_LEAD'], cnpj:l['CNPJ']}); });
-  ativs.forEach(a=>{ if(String(a['TIPO'])==='Follow-up' && a['DATA_AGENDADA'] && String(a['STATUS'])!=='Concluída' && meuAtiv(a)) fus.push({cliente:a['CLIENTE'], data:a['DATA_AGENDADA'], quem:a['REGISTRADO_POR'], cnpj:a['CNPJ']}); });
+  (kanbanLeads||[]).forEach(l=>{ if(l['FOLLOWUP'] && soMeuCons(l['CONSULTOR'])) fus.push({cliente:l['CLIENTE'], data:l['FOLLOWUP'], quem:l['CONSULTOR'], idLead:l['ID_LEAD'], cnpj:l['CNPJ']}); });
+  ativs.forEach(a=>{ if(String(a['TIPO'])==='Follow-up' && a['DATA_AGENDADA'] && String(a['STATUS'])!=='Concluída' && soMeuAtiv(a)) fus.push({cliente:a['CLIENTE'], data:a['DATA_AGENDADA'], quem:a['REGISTRADO_POR'], cnpj:a['CNPJ']}); });
   fus.sort((a,b)=>(parseDataReaj(a.data)||0)-(parseDataReaj(b.data)||0));
-  // AGENDADOS (visitas/reuniões pendentes)
-  const agend = ativs.filter(a=>['Visita técnica','Reunião'].includes(String(a['TIPO'])) && a['DATA_AGENDADA'] && String(a['STATUS'])==='Pendente' && meuAtiv(a))
+  // AGENDADOS (visitas/reuniões pendentes) — sempre só os próprios
+  const agend = ativs.filter(a=>['Visita técnica','Reunião'].includes(String(a['TIPO'])) && a['DATA_AGENDADA'] && String(a['STATUS'])==='Pendente' && soMeuAtiv(a))
     .map(a=>({cliente:a['CLIENTE'], data:a['DATA_AGENDADA'], tipo:a['TIPO'], quem:a['REGISTRADO_POR'], cnpj:a['CNPJ'], titulo:a['TITULO']}))
     .sort((a,b)=>(parseDataReaj(a.data)||0)-(parseDataReaj(b.data)||0));
   // SOLICITAÇÕES pendentes (não finalizadas)
@@ -7949,15 +7966,15 @@ async function renderPendencias(area){
       <div style="min-width:0;"><b>${l['CLIENTE']||'—'}</b> <span style="color:${ad?'#6B5B95':'#185FA5'};font-size:11px;">${ad?'Aditivo':'Contrato'}</span>${veTudo&&l['CONSULTOR']?`<span style="color:var(--cinza-500);font-size:11px;"> · ${l['CONSULTOR']}</span>`:''}</div>
       <span class="reaj-pill" style="background:${st.bg};color:${st.cor};white-space:nowrap;">${st.nome}</span></div>`; };
   const fuLinha = f => `<div onclick="${f.idLead?`abrirLead('${String(f.idLead).replace(/'/g,'')}','${encodeURIComponent(f.cliente||'')}')`:`abrirFicha('${String(f.cnpj||'').replace(/'/g,'')}','${String(f.cliente||'').replace(/'/g,"\\'")}')`}" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px dashed var(--cinza-200);font-size:13px;cursor:pointer;">
-      <div style="min-width:0;"><b>${f.cliente||'—'}</b>${veTudo&&f.quem?`<span style="color:var(--cinza-500);font-size:11px;"> · ${f.quem}</span>`:''}</div>${dataBadge(f.data)}</div>`;
+      <div style="min-width:0;"><b>${f.cliente||'—'}</b></div>${dataBadge(f.data)}</div>`;
   const agLinha = a => `<div onclick="abrirFicha('${String(a.cnpj||'').replace(/'/g,'')}','${String(a.cliente||'').replace(/'/g,"\\'")}')" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px dashed var(--cinza-200);font-size:13px;cursor:pointer;">
-      <div style="min-width:0;"><span style="background:var(--verde-claro-bg);color:var(--verde-escuro);border-radius:4px;padding:1px 6px;font-size:10px;margin-right:6px;">${a.tipo}</span><b>${a.cliente||'—'}</b>${a.titulo?`<span style="color:var(--cinza-500);"> — ${a.titulo}</span>`:''}${veTudo&&a.quem?`<span style="color:var(--cinza-500);font-size:11px;"> · ${a.quem}</span>`:''}</div>${dataBadge(a.data)}</div>`;
+      <div style="min-width:0;"><span style="background:var(--verde-claro-bg);color:var(--verde-escuro);border-radius:4px;padding:1px 6px;font-size:10px;margin-right:6px;">${a.tipo}</span><b>${a.cliente||'—'}</b>${a.titulo?`<span style="color:var(--cinza-500);"> — ${a.titulo}</span>`:''}</div>${dataBadge(a.data)}</div>`;
 
   const totalPend = fus.length + agend.length + solicPend.length;
   let html = `
     <div style="margin-bottom:16px;">
       <div style="font-size:20px;font-family:var(--fonte-display);font-weight:600;color:var(--cinza-900);">Olá, ${(usuarioAtual.nome||'').split(' ')[0]}! 👋</div>
-      <div style="font-size:13px;color:var(--cinza-500);">${veTudo?'Você vê as pendências de toda a equipe.':'Estas são as suas pendências.'} ${totalPend?('Você tem <b>'+totalPend+'</b> item(ns) pendente(s).'):'Tudo em dia por aqui!'}</div>
+      <div style="font-size:13px;color:var(--cinza-500);">Follow-ups e visitas são sempre seus.${veTudo?' Contratos e aditivos você vê de toda a equipe.':''} ${totalPend?('Você tem <b>'+totalPend+'</b> item(ns) pendente(s).'):'Tudo em dia por aqui!'}</div>
     </div>
     <div class="kpi-funil" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:16px;">
       <div class="kpi-card" style="border-top:3px solid #6B5B95;"><div class="kpi-num" style="color:#6B5B95;">${fus.length}</div><div class="kpi-lbl">Follow-ups</div></div>
