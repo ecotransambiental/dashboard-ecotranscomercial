@@ -4948,10 +4948,16 @@ let cacheFat = null, cacheFatCols = null;
 async function renderFaturamento(area) {
   area.innerHTML = `<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando faturamento...</h2></div>`;
   await carregarClientes(); // pra saber tipo (Contrato/Eventual)
-  // carrega o faturamento do módulo Financeiro (upload único, aba Fin_Faturamento)
-  if (typeof FIN_garantirSheetJS==='function') { await new Promise(r=>FIN_garantirSheetJS(r)); }
-  if (typeof finCarregarDoSheets==='function') { try { await finCarregarDoSheets(['faturamento','coletas']); } catch(e){} }
-  if (typeof FIN_carregarAuxMotivo==='function') { try { await FIN_carregarAuxMotivo(); } catch(e){} } // reajustes/assessoria/motivos p/ a coluna Motivo
+  // carrega SÓ o faturamento (Fin_Faturamento, compacto) — abre rápido.
+  if (typeof finCarregarDoSheets==='function') { try { await finCarregarDoSheets(['faturamento']); } catch(e){} }
+  if (typeof FIN_carregarAuxMotivo==='function') { try { await FIN_carregarAuxMotivo(); } catch(e){} } // reajustes/assessoria/motivos p/ a coluna Motivo (cacheado)
+  // COLETAS em 2º plano: o relatório de coletas é grande, então não trava a abertura.
+  // Quando chega, re-renderiza a tabela pra o Motivo considerar a variação de equipamentos coletados (motivo principal).
+  const _temColetas = (typeof FINdados!=='undefined' && FINdados.coletas && FINdados.coletas.length);
+  if (!_temColetas && typeof finCarregarDoSheets==='function' && !window._fatLoadColetas) {
+    window._fatLoadColetas = true;
+    finCarregarDoSheets(['coletas']).then(()=>{ window._fatLoadColetas=false; if(document.getElementById('fat-mes')) filtraTabelaFat(); }).catch(()=>{ window._fatLoadColetas=false; });
+  }
   const fatNovo = (typeof FINdados!=='undefined' && FINdados.faturamento) ? FINdados.faturamento : [];
   // converte {cliente, valores:{mes:v}} para o formato de linha que a tela usa (CLIENTE + colunas de mês)
   cacheFat = fatNovo.map(x => ({ CLIENTE: x.cliente, ...x.valores }));
@@ -10524,23 +10530,23 @@ function FIN_ymDeNomeMes(nome, ano){ const idx=FIN_MES_IDX[String(nome||'').trim
 
 // NÚCLEO do estudo de motivo: recebe o mês do SERVIÇO já em ym (yyyy-mm) e o anterior.
 // REGRA: só estuda motivo pra quem CAIU mais de 5% no faturamento. Quem não caiu fica sem motivo automático.
-// Ordem das justificativas: 1) variação de equipamentos  2) SP Regula/MTR  3) reajuste  4) feriado (por último).
+// Ordem (prioridade) das justificativas: 1) variação de equipamentos coletados  2) reajuste  3) assessoria SP Regula  4) feriado (por último).
 function FIN_motivoDeServico(cliente, ymServ, ymServAnt, varPct){
   if(varPct==null || varPct >= -5) return ''; // sem queda relevante (> -5%) => sem motivo automático
   const nomeN=FIN_normNomeMot(cliente);
   const rot = ymServ ? finRotMes(ymServ) : '';
   const motivos=[];
-  // 1) variação (queda) de equipamentos coletados — quando a quantidade caiu de forma coerente
+  // 1) MOTIVO PRINCIPAL: variação (queda) na quantidade de equipamentos coletados
   if(ymServ && ymServAnt){
     const qA=FIN_qtdeColetasClienteYM(cliente, ymServ), qP=FIN_qtdeColetasClienteYM(cliente, ymServAnt);
     if(qP>0 && qA<qP){ const q=((qA-qP)/qP*100); motivos.push('Menos equipamentos coletados em '+rot+' ('+q.toFixed(0)+'%: '+qP+'→'+qA+')'); }
   }
-  // 2) assessoria SP Regula/MTR no mês do serviço
-  const ass=(_assessFat||[]).find(a=>{ if(FIN_normNomeMot(a['CLIENTE'])!==nomeN) return false; if(String(a['ASSESSORIA']||'').trim().toLowerCase()!=='sim') return false; const d=parseDataReaj(a['DATA_RENOVACAO']); return d && (d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'))===ymServ; });
-  if(ass) motivos.push('Assessoria SP Regula/MTR em '+rot+(ass['VALOR']?(' (R$ '+ass['VALOR']+')'):''));
-  // 3) reajuste no mês do serviço
+  // 2) reajuste no mês do serviço
   const teveReaj=(_reajFat||[]).some(r=>{ if(FIN_normNomeMot(r['CLIENTE'])!==nomeN) return false; const d=parseDataReaj(r['DATA ÚLTIMO REAJUSTE ']||r['DATA ÚLTIMO REAJUSTE']); return d && (d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'))===ymServ; });
   if(teveReaj) motivos.push('Reajuste aplicado em '+rot);
+  // 3) assessoria SP Regula/MTR no mês do serviço
+  const ass=(_assessFat||[]).find(a=>{ if(FIN_normNomeMot(a['CLIENTE'])!==nomeN) return false; if(String(a['ASSESSORIA']||'').trim().toLowerCase()!=='sim') return false; const d=parseDataReaj(a['DATA_RENOVACAO']); return d && (d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'))===ymServ; });
+  if(ass) motivos.push('Assessoria SP Regula/MTR em '+rot+(ass['VALOR']?(' (R$ '+ass['VALOR']+')'):''));
   // 4) feriado no mês do serviço (menos dias de coleta) — POR ÚLTIMO
   const fer=FIN_feriadosDoMes(ymServ);
   if(fer.length) motivos.push('Feriado em '+rot+' — menos dias de coleta ('+fer.join(', ')+')');
