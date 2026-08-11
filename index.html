@@ -3761,6 +3761,10 @@ async function renderReajustes(area) {
     const r = await buscarDados('Reajustes');
     cacheReajustes = dedupReajustes(r.ok ? r.linhas : []);
   }
+  // clientes cancelados saem dos reajustes (por CNPJ e por nome)
+  if (!cacheCanc) { const rc = await buscarDados('Cancelados'); cacheCanc = rc.ok ? rc.linhas : []; }
+  window._reajCancelCnpj = new Set((cacheCanc||[]).map(c=>cnpjLimpo(c['CNPJ'])).filter(x=>x&&x.length>=11));
+  window._reajCancelNome = new Set((cacheCanc||[]).map(c=>_transpNorm(c['CLIENTE'])).filter(Boolean));
   area.innerHTML = `
     <div class="barra-busca">
       <i class="ti ti-search"></i>
@@ -3815,9 +3819,19 @@ function aplicarReaj() {
   const dIni = (document.getElementById('reaj-ini')||{}).value||'';
   const dFim = (document.getElementById('reaj-fim')||{}).value||'';
 
+  const cCnpj = window._reajCancelCnpj || new Set();
+  const cNome = window._reajCancelNome || new Set();
   let lista = cacheReajustes.map((r, idx) => {
     const prox = proximoReajuste(r['DATA ÚLTIMO REAJUSTE '] || r['DATA ÚLTIMO REAJUSTE']);
     return { ...r, _idx: idx, _prox: prox, _cls: classifReaj(prox) };
+  });
+
+  // remove reajustes de clientes cancelados (por CNPJ ou por nome)
+  lista = lista.filter(r => {
+    const cj = cnpjLimpo(r['CNPJ']);
+    if (cj && cj.length>=11 && cCnpj.has(cj)) return false;
+    if (cNome.has(_transpNorm(r['CLIENTE']))) return false;
+    return true;
   });
 
   if (busca) lista = lista.filter(r => String(r['CLIENTE']||'').toLowerCase().includes(busca));
