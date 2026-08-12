@@ -393,10 +393,10 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.06.23</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.12</div>
       </div>
     </aside>
-    <!-- VERSÃO DO DASHBOARD: v2026.06.23 — separação CRM/Carteira (Danielly vê CRM inteiro) + cobertura na busca -->
+    <!-- VERSÃO DO DASHBOARD: v2026.08.12 — conexão (leitura 25s x2 / escrita 90s x3), Pendências à prova de falha, clientes garantidos nos formulários de Solicitação -->
 
     <!-- Coluna nível 2: submódulos -->
     <div class="subcoluna" id="subcoluna">
@@ -439,12 +439,17 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbw-nMudRjf8DkkzdJi9mLFx
 // ============================================================
 (function(){
   const _fetchOriginal = window.fetch.bind(window);
-  const TENTATIVAS = 3;
-  const TIMEOUT_MS = 90000; // 90s por tentativa (planilhas grandes demoram)
   const espera = ms => new Promise(r=>setTimeout(r, ms));
   window.fetch = async function(url, opts){
     const ehAPI = (typeof url === 'string') && url.indexOf('script.google.com') >= 0;
     if (!ehAPI) return _fetchOriginal(url, opts);
+    // LEITURA x ESCRITA: ler dados costuma ser rapido — se demorar demais, e melhor desistir
+    // logo e avisar (senao a tela fica "carregando" por minutos). Ja salvar pode demorar mesmo,
+    // entao damos mais tempo e mais tentativas: perder um salvamento e pior que esperar.
+    let ehLeitura = false;
+    try { ehLeitura = !!(opts && opts.body && String(opts.body).indexOf('"acao":"dados"') >= 0); } catch(e){}
+    const TENTATIVAS = ehLeitura ? 2 : 3;
+    const TIMEOUT_MS = ehLeitura ? 25000 : 90000;   // leitura: 25s x2 | escrita: 90s x3
     let ultimoErro;
     for (let i = 0; i < TENTATIVAS; i++) {
       const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
@@ -7789,8 +7794,10 @@ async function trocarConsultorSolic(id){
 
 async function renderSolicitacoes(area){
   area.innerHTML = `<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando solicitações...</h2></div>`;
-  // clientes carregam em 2º plano (só são necessários nos formulários) — deixa a página abrir rápido
-  if (!cacheClientes) { carregarClientes().catch(()=>{}); }
+  // clientes carregam em 2º plano (só são necessários nos formulários) — deixa a página abrir rápido.
+  // Guardamos a PROMESSA: quando alguém abre um formulário, ele espera esta mesma carga terminar
+  // (antes o form abria com a lista vazia se a pessoa fosse rápida — foi o que aconteceu com a Danielly).
+  if (!cacheClientes && !window._solicPromClientes) { window._solicPromClientes = carregarClientes().catch(()=>{}); }
   const r = await buscarDados('Solicitacoes');
   let lista = r.ok ? r.linhas.slice() : [];
   const gere = podeGerirSolic();
@@ -7896,9 +7903,45 @@ async function avancarStatusSolic(id){
 }
 // ---- forms de solicitação ----
 function _solicClientDatalistOptions(){ return (cacheClientes||[]).slice(0,2000).map(c=>`<option value="${String(c['CLIENTE']||'').replace(/"/g,'&quot;')}">`).join(''); }
-function abrirSolicitarContratoNovo(clientePre){
+// garante que a lista de clientes está carregada ANTES de montar o formulário.
+// Sem isso, quem abria o form rápido demais via a lista vazia (bug relatado no login da Danielly).
+async function _solicGarantirClientes(){
+  if (cacheClientes && cacheClientes.length) return true;
+  try {
+    if (window._solicPromClientes) await window._solicPromClientes;   // aproveita a carga que já começou
+    if (!cacheClientes || !cacheClientes.length) await carregarClientes();
+  } catch(e){}
+  return !!(cacheClientes && cacheClientes.length);
+}
+// botão "recarregar clientes" dentro do formulário: força a busca e repopula o datalist na hora
+async function _solicRecarregarClientes(idDatalist, idAviso){
+  const av = document.getElementById(idAviso);
+  if (av) av.innerHTML = '<span style="color:var(--cinza-500);"><i class="ti ti-loader"></i> Buscando clientes...</span>';
+  cacheClientes = null; window._solicPromClientes = null;
+  if (typeof limparCacheBusca==='function') limparCacheBusca();
+  try { await carregarClientes(); } catch(e){}
+  const dl = document.getElementById(idDatalist);
+  if (dl) dl.innerHTML = _solicClientDatalistOptions();
+  const n = (cacheClientes||[]).length;
+  if (av) av.innerHTML = n
+    ? `<span style="color:var(--verde-medio);"><i class="ti ti-circle-check"></i> ${n} clientes carregados.</span>`
+    : `<span style="color:var(--vermelho);"><i class="ti ti-alert-triangle"></i> Não consegui carregar os clientes. Tente de novo em alguns segundos.</span>`;
+}
+// linha de aviso/recarga que aparece embaixo do campo Cliente nos formulários
+function _solicLinhaClientes(idDatalist, idAviso){
+  const n = (cacheClientes||[]).length;
+  const txt = n ? `${n} clientes na lista` : 'Nenhum cliente na lista';
+  const cor = n ? 'var(--cinza-500)' : 'var(--vermelho)';
+  return `<div style="font-size:11px;margin-top:4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+    <span id="${idAviso}" style="color:${cor};">${txt}</span>
+    <span onclick="_solicRecarregarClientes('${idDatalist}','${idAviso}')" style="color:var(--verde-medio);cursor:pointer;text-decoration:underline;"><i class="ti ti-refresh"></i> recarregar clientes</span>
+  </div>`;
+}
+async function abrirSolicitarContratoNovo(clientePre){
   const inp='width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;';
   const cont=document.getElementById('ficha-container');
+  cont.innerHTML=`<div class="ficha-overlay"><div class="ficha" style="width:500px;"><div class="ficha-corpo"><div style="text-align:center;padding:34px;color:var(--cinza-500);"><i class="ti ti-loader"></i> Carregando a lista de clientes...</div></div></div></div>`;
+  await _solicGarantirClientes();
   cont.innerHTML=`
     <div class="ficha-overlay" onclick="if(event.target===this)fecharFicha()">
       <div class="ficha" style="width:500px;">
@@ -7907,7 +7950,8 @@ function abrirSolicitarContratoNovo(clientePre){
         <div class="ficha-corpo">
           <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);">Cliente *</label>
             <input type="text" id="soc-cliente" list="soc-cli-list" onchange="_solicAutoConsultor('soc-cliente','soc-consultor')" oninput="_solicAutoConsultor('soc-cliente','soc-consultor')" value="${(clientePre||'').replace(/"/g,'&quot;')}" placeholder="cliente existente ou novo" style="${inp}">
-            <datalist id="soc-cli-list">${_solicClientDatalistOptions()}</datalist></div>
+            <datalist id="soc-cli-list">${_solicClientDatalistOptions()}</datalist>
+            ${_solicLinhaClientes('soc-cli-list','soc-cli-aviso')}</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
             <div><label style="font-size:13px;color:var(--cinza-700);">Vigência *</label><input type="text" id="soc-vigencia" placeholder="ex: 12 meses" style="${inp}"></div>
             <div><label style="font-size:13px;color:var(--cinza-700);">Valor mensal estimado (R$)</label><input type="number" id="soc-valor" step="0.01" style="${inp}"></div>
@@ -7934,9 +7978,11 @@ async function salvarSolicContrato(){
     fecharFicha(); renderSolicitacoes(document.getElementById('area-conteudo')); if(typeof atualizarSino==='function') atualizarSino();
   }
 }
-function abrirSolicitarAditivoNovo(clientePre){
+async function abrirSolicitarAditivoNovo(clientePre){
   const inp='width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;';
   const cont=document.getElementById('ficha-container');
+  cont.innerHTML=`<div class="ficha-overlay"><div class="ficha" style="width:500px;"><div class="ficha-corpo"><div style="text-align:center;padding:34px;color:var(--cinza-500);"><i class="ti ti-loader"></i> Carregando a lista de clientes...</div></div></div></div>`;
+  await _solicGarantirClientes();
   cont.innerHTML=`
     <div class="ficha-overlay" onclick="if(event.target===this)fecharFicha()">
       <div class="ficha" style="width:500px;">
@@ -7945,7 +7991,8 @@ function abrirSolicitarAditivoNovo(clientePre){
         <div class="ficha-corpo">
           <div style="margin-bottom:12px;"><label style="font-size:13px;color:var(--cinza-700);">Cliente * (obrigatório)</label>
             <input type="text" id="soa-cliente" list="soa-cli-list" onchange="_solicAutoConsultor('soa-cliente','soa-consultor')" oninput="_solicAutoConsultor('soa-cliente','soa-consultor')" value="${(clientePre||'').replace(/"/g,'&quot;')}" placeholder="selecione o cliente" style="${inp}">
-            <datalist id="soa-cli-list">${_solicClientDatalistOptions()}</datalist></div>
+            <datalist id="soa-cli-list">${_solicClientDatalistOptions()}</datalist>
+            ${_solicLinhaClientes('soa-cli-list','soa-cli-aviso')}</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
             <div style="grid-column:1/3;"><label style="font-size:13px;color:var(--cinza-700);">Vigência *</label><input type="text" id="soa-vigencia" placeholder="ex: 12 meses a partir de 01/08/2026" style="${inp}"></div>
             <div><label style="font-size:13px;color:var(--cinza-700);">Tem multa?</label><select id="soa-multa" style="${inp}"><option>Não</option><option>Sim</option></select></div>
@@ -8035,10 +8082,13 @@ async function salvarSolicAditivo(){
 // ============================================================
 async function renderPendencias(area){
   area.innerHTML = `<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando suas pendências...</h2></div>`;
-  // carrega leads + atividades + solicitações EM PARALELO (era sequencial, ficava lento)
-  const _pLeads = (typeof carregarLeads==='function') ? carregarLeads().catch(()=>{}) : Promise.resolve();
-  const _pAtiv = buscarDados('Atividades_Cliente');
-  const _pSolic = buscarDados('Solicitacoes');
+  // carrega leads + atividades + solicitações EM PARALELO (era sequencial, ficava lento).
+  // Cada promessa tem o SEU PRÓPRIO catch: se uma falhar, as outras continuam e a tela abre
+  // do mesmo jeito (antes, uma falha sozinha travava tudo em "Carregando..." pra sempre).
+  const _pegar = (p) => p.then(r=>r).catch(e=>({ok:false, _falhou:true, _erro:String((e&&e.message)||e)}));
+  const _pLeads = _pegar((typeof carregarLeads==='function') ? carregarLeads() : Promise.resolve());
+  const _pAtiv = _pegar(buscarDados('Atividades_Cliente'));
+  const _pSolic = _pegar(buscarDados('Solicitacoes'));
   const gere = (typeof podeGerirSolic==='function') && podeGerirSolic(); // diretoria/admin/Dany veem tudo
   const veTudo = gere || (usuarioAtual && ['admin','diretor'].includes(usuarioAtual.perfil));
   const meuNome = String((usuarioAtual&&usuarioAtual.nome)||'').trim().toUpperCase();
@@ -8048,8 +8098,23 @@ async function renderPendencias(area){
   // solicitações: diretoria/Mafe/Dany veem todas; consultor só as suas
   const meuCons = v => veTudo || ehMeuRegistro(v) || String(v||'').trim().toUpperCase()===meuNome;
   const [ra, rs] = await Promise.all([_pAtiv, _pSolic, _pLeads]);
-  const ativs = ra.ok ? ra.linhas : [];
-  let solic = rs.ok ? rs.linhas : [];
+  // Se as DUAS leituras falharam, não há o que mostrar: avisa e oferece tentar de novo,
+  // em vez de deixar a pessoa olhando "Carregando..." sem fim.
+  if ((ra && ra._falhou) && (rs && rs._falhou)) {
+    area.innerHTML = `<div class="placeholder" style="border-color:var(--vermelho-borda);">
+      <i class="ti ti-plug-connected-x" style="color:var(--vermelho);"></i>
+      <h2>Não consegui carregar suas pendências</h2>
+      <p>O servidor não respondeu a tempo. Isso costuma ser passageiro — normalmente funciona na segunda tentativa.</p>
+      <p style="font-size:11px;color:var(--cinza-400);margin-top:6px;">Detalhe técnico: ${(ra&&ra._erro)||''}</p>
+      <button class="ficha-btn-primario" style="margin-top:14px;padding:10px 18px;border:none;border-radius:8px;cursor:pointer;font-size:13px;" onclick="renderPendencias(document.getElementById('area-conteudo'))"><i class="ti ti-refresh"></i> Tentar de novo</button>
+    </div>`;
+    return;
+  }
+  const ativs = (ra && ra.ok) ? ra.linhas : [];
+  let solic = (rs && rs.ok) ? rs.linhas : [];
+  // uma falhou só: mostra o que deu certo e avisa o que ficou faltando
+  const _avisoParcial = (ra && ra._falhou) ? 'follow-ups e visitas'
+                      : (rs && rs._falhou) ? 'contratos e aditivos' : '';
   const hojeD = new Date(); hojeD.setHours(0,0,0,0);
   const diasDe = d => { const x=parseDataReaj(d); if(!x) return null; const xx=new Date(x); xx.setHours(0,0,0,0); return Math.round((xx-hojeD)/864e5); };
   // FOLLOW-UPS (leads com FOLLOWUP + atividades tipo Follow-up não concluídas)
@@ -8093,6 +8158,10 @@ async function renderPendencias(area){
       <div style="font-size:20px;font-family:var(--fonte-display);font-weight:600;color:var(--cinza-900);">Olá, ${(usuarioAtual.nome||'').split(' ')[0]}! 👋</div>
       <div style="font-size:13px;color:var(--cinza-500);">Follow-ups e visitas são sempre seus.${veTudo?' Contratos e aditivos você vê de toda a equipe.':''} ${totalPend?('Você tem <b>'+totalPend+'</b> item(ns) pendente(s).'):'Tudo em dia por aqui!'}</div>
     </div>
+    ${_avisoParcial?`<div style="background:var(--amarelo-bg);border:1px solid var(--amarelo-borda);border-radius:10px;padding:11px 13px;margin-bottom:14px;font-size:13px;color:#8a6d00;">
+      <i class="ti ti-alert-triangle"></i> Parte dos dados não carregou (<b>${_avisoParcial}</b>). O resto está aí embaixo.
+      <button onclick="renderPendencias(document.getElementById('area-conteudo'))" style="margin-left:8px;padding:4px 10px;border:none;background:#8a6d00;color:white;border-radius:6px;cursor:pointer;font-size:12px;">Tentar de novo</button>
+    </div>`:''}
     <div class="kpi-funil" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:16px;">
       <div class="kpi-card" style="border-top:3px solid #6B5B95;"><div class="kpi-num" style="color:#6B5B95;">${fus.length}</div><div class="kpi-lbl">Follow-ups</div></div>
       <div class="kpi-card" style="border-top:3px solid var(--verde-medio);"><div class="kpi-num" style="color:var(--verde-medio);">${agend.length}</div><div class="kpi-lbl">Visitas/reuniões</div></div>
