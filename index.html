@@ -432,6 +432,40 @@
 const API_URL = 'https://script.google.com/macros/s/AKfycbw-nMudRjf8DkkzdJi9mLFxbV6ydkMtDJFITzKJZIG81xBdkKrnkLHlrlnsatZmMNSi/exec';
 
 // ============================================================
+// RESILIÊNCIA DE CONEXÃO (evita o "Erro de conexão")
+// O Apps Script às vezes demora ou devolve erro momentâneo quando a planilha está grande.
+// Aqui embrulhamos o fetch: toda chamada à API ganha TIMEOUT maior e até 3 TENTATIVAS
+// automáticas (com espera crescente). Assim uma falha passageira não vira erro na tela.
+// ============================================================
+(function(){
+  const _fetchOriginal = window.fetch.bind(window);
+  const TENTATIVAS = 3;
+  const TIMEOUT_MS = 90000; // 90s por tentativa (planilhas grandes demoram)
+  const espera = ms => new Promise(r=>setTimeout(r, ms));
+  window.fetch = async function(url, opts){
+    const ehAPI = (typeof url === 'string') && url.indexOf('script.google.com') >= 0;
+    if (!ehAPI) return _fetchOriginal(url, opts);
+    let ultimoErro;
+    for (let i = 0; i < TENTATIVAS; i++) {
+      const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      const t = ctrl ? setTimeout(()=>ctrl.abort(), TIMEOUT_MS) : null;
+      try {
+        const resp = await _fetchOriginal(url, ctrl ? {...(opts||{}), signal: ctrl.signal} : opts);
+        if (t) clearTimeout(t);
+        // 5xx = erro temporário do servidor: vale tentar de novo
+        if (resp.status >= 500 && i < TENTATIVAS-1) { await espera(1200*(i+1)); continue; }
+        return resp;
+      } catch(e) {
+        if (t) clearTimeout(t);
+        ultimoErro = e;
+        if (i < TENTATIVAS-1) { await espera(1200*(i+1)); continue; } // espera 1.2s, depois 2.4s
+      }
+    }
+    throw ultimoErro || new Error('Falha de conexão com o servidor.');
+  };
+})();
+
+// ============================================================
 // CHAVE DO GOOGLE MAPS (Geocoding + Routes API)
 // >>> COLE SUA CHAVE ENTRE AS ASPAS ABAIXO, antes de subir pro GitHub <<<
 // A chave deve estar RESTRITA ao domínio ecotransambiental.github.io
@@ -7718,18 +7752,39 @@ function _solicAutoConsultor(idCliente, idSelect){
   const opt = SOLIC_CONSULTORES.find(n=>n===alvo) || SOLIC_CONSULTORES.find(n=>alvo && (alvo.includes(n.split(' ')[0])||n.includes(String(alvo).split(' ')[0])));
   if(opt) sel.value=opt;
 }
+// chamada à API com erro DETALHADO (em vez do genérico "Erro de conexão").
+// Devolve {ok:true, dados} ou {ok:false, erro:'mensagem clara do que aconteceu'}.
+async function apiPost(payload){
+  let resp;
+  try { resp = await fetch(API_URL, { method:'POST', body: JSON.stringify(payload) }); }
+  catch(e){
+    const m = String((e&&e.message)||e);
+    if (m.toLowerCase().includes('abort')) return { ok:false, erro:'O servidor demorou demais para responder (a planilha pode estar pesada). Tente de novo em alguns segundos.' };
+    return { ok:false, erro:'Não consegui falar com o servidor. Verifique a internet e se o Apps Script está publicado. Detalhe: '+m };
+  }
+  let txt='';
+  try { txt = await resp.text(); } catch(e){ return { ok:false, erro:'Resposta vazia do servidor (HTTP '+resp.status+').' }; }
+  try { const j = JSON.parse(txt); return j && j.ok ? { ok:true, dados:j } : { ok:false, erro:(j&&j.erro)||('O servidor recusou a operação (HTTP '+resp.status+').') }; }
+  catch(e){
+    // veio HTML (página de erro do Google) em vez de JSON
+    if (txt.indexOf('<') === 0 || /<!DOCTYPE|<html/i.test(txt)) {
+      return { ok:false, erro:'O Apps Script respondeu uma página de erro (HTTP '+resp.status+'). Provável causa: a implantação está desatualizada ou sem permissão. Republique em "Gerenciar implantações → Nova versão".' };
+    }
+    return { ok:false, erro:'Resposta inesperada do servidor (HTTP '+resp.status+'): '+txt.slice(0,120) };
+  }
+}
+
 // troca o consultor responsável de uma solicitação já criada (corrige as antigas)
 async function trocarConsultorSolic(id){
   const sel=document.getElementById('solcons-'+id); if(!sel) return;
-  try{
-    const resp=await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'salvar',aba:'Solicitacoes',token:sessaoToken,dados:{ID:id, CONSULTOR:sel.value}})});
-    const r=await resp.json();
-    if(!r.ok){ alert('Erro: '+(r.erro||'republique o Apps Script.')); return; }
+  {
+    const r = await apiPost({acao:'salvar',aba:'Solicitacoes',token:sessaoToken,dados:{ID:id, CONSULTOR:sel.value}});
+    if(!r.ok){ alert('Não consegui trocar o consultor.\n\n'+r.erro); return; }
     const av=document.createElement('div'); av.textContent='Consultor atualizado!';
     av.style.cssText='position:fixed;bottom:20px;right:20px;background:var(--verde-escuro);color:white;padding:10px 18px;border-radius:8px;font-size:13px;z-index:9999;';
     document.body.appendChild(av); setTimeout(()=>av.remove(),1800);
     renderSolicitacoes(document.getElementById('area-conteudo'));
-  }catch(e){ alert('Erro de conexão.'); }
+  }
 }
 
 async function renderSolicitacoes(area){
@@ -7834,13 +7889,10 @@ function filtraSolic(){
 async function avancarStatusSolic(id){
   const status=(document.getElementById('solst-'+id)||{}).value||'';
   const obs=(document.getElementById('solobs-'+id)||{}).value||'';
-  try{
-    const resp=await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'atualizarStatusSolicitacao',token:sessaoToken,dados:{id,status,obs}})});
-    const r=await resp.json();
-    if(!r.ok){ alert('Erro: '+(r.erro||'republique o Apps Script.')); return; }
-    renderSolicitacoes(document.getElementById('area-conteudo'));
-    if(typeof atualizarSino==='function') atualizarSino();
-  }catch(e){ alert('Erro de conexão.'); }
+  const r = await apiPost({acao:'atualizarStatusSolicitacao',token:sessaoToken,dados:{id,status,obs}});
+  if(!r.ok){ alert('Não consegui atualizar o status.\n\n'+r.erro); return; }
+  renderSolicitacoes(document.getElementById('area-conteudo'));
+  if(typeof atualizarSino==='function') atualizarSino();
 }
 // ---- forms de solicitação ----
 function _solicClientDatalistOptions(){ return (cacheClientes||[]).slice(0,2000).map(c=>`<option value="${String(c['CLIENTE']||'').replace(/"/g,'&quot;')}">`).join(''); }
@@ -7877,10 +7929,10 @@ async function salvarSolicContrato(){
   const vig=gv('soc-vigencia'); if(!vig){ document.getElementById('soc-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Informe a vigência.</div>'; return; }
   const dados={ tipo:'Contrato', cliente, cnpj:_cnpjDoClienteNome(cliente), consultor:(gv('soc-consultor')||_consultorDoClienteNome(cliente)||usuarioAtual.nome), vigencia:vig, valorEstimado:gv('soc-valor'), minimaTipo:gv('soc-mintipo'), minimaQtd:gv('soc-minqtd'), obs:gv('soc-obs'), origem:'avulso' };
   document.getElementById('soc-msg').innerHTML='<div style="text-align:center;padding:10px;color:var(--cinza-500);">Enviando...</div>';
-  try{ const resp=await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'criarSolicitacao',token:sessaoToken,dados})}); const r=await resp.json();
-    if(!r.ok){ document.getElementById('soc-msg').innerHTML=`<div class="sem-acesso">${r.erro||'Erro. Republique o Apps Script.'}</div>`; return; }
+  { const r = await apiPost({acao:'criarSolicitacao',token:sessaoToken,dados});
+    if(!r.ok){ document.getElementById('soc-msg').innerHTML=`<div class="sem-acesso" style="margin-top:10px;">${r.erro}</div>`; return; }
     fecharFicha(); renderSolicitacoes(document.getElementById('area-conteudo')); if(typeof atualizarSino==='function') atualizarSino();
-  }catch(e){ document.getElementById('soc-msg').innerHTML='<div class="sem-acesso">Erro de conexão.</div>'; }
+  }
 }
 function abrirSolicitarAditivoNovo(clientePre){
   const inp='width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;';
@@ -7972,10 +8024,10 @@ async function salvarSolicAditivo(){
   }
   const dados={ tipo:'Aditivo', cliente, cnpj, consultor:(gv('soa-consultor')||_consultorDoClienteNome(cliente)||usuarioAtual.nome), vigencia:vig, multa:gv('soa-multa'), alteraValor:gv('soa-altera'), servicos:JSON.stringify(servicos), obs:gv('soa-obs'), origem:'avulso' };
   document.getElementById('soa-msg').innerHTML='<div style="text-align:center;padding:10px;color:var(--cinza-500);">Enviando...</div>';
-  try{ const resp=await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'criarSolicitacao',token:sessaoToken,dados})}); const r=await resp.json();
-    if(!r.ok){ document.getElementById('soa-msg').innerHTML=`<div class="sem-acesso">${r.erro||'Erro. Republique o Apps Script.'}</div>`; return; }
+  { const r = await apiPost({acao:'criarSolicitacao',token:sessaoToken,dados});
+    if(!r.ok){ document.getElementById('soa-msg').innerHTML=`<div class="sem-acesso" style="margin-top:10px;">${r.erro}</div>`; return; }
     fecharFicha(); renderSolicitacoes(document.getElementById('area-conteudo')); if(typeof atualizarSino==='function') atualizarSino();
-  }catch(e){ document.getElementById('soa-msg').innerHTML='<div class="sem-acesso">Erro de conexão.</div>'; }
+  }
 }
 
 // ============================================================
@@ -9319,7 +9371,7 @@ async function finEnviarSheetsCompleto(tipo, statusEl){
   const setCols = new Set();
   linhas.forEach(l=>Object.keys(l).forEach(k=>setCols.add(k)));
   const colunas = setCols.size ? [...setCols] : ['vazio'];
-  const LOTE = 300;
+  const LOTE = 150; // lotes menores = menos timeout no Apps Script
   // se não há nada, manda um lote vazio em modo 'tudo' pra limpar a aba
   if (!linhas.length){
     await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'salvarFinanceiro',token:sessaoToken,
@@ -9395,7 +9447,7 @@ async function finEnviarSheets(tipo, valorPeriodo, statusEl){
   let aEnviar = linhas;
   if (cfg.campoPeriodo && valorPeriodo!=null) aEnviar = linhas.filter(l=>String(l[cfg.campoPeriodo])===String(valorPeriodo));
   const colunas = aEnviar.length ? Object.keys(aEnviar[0]) : (linhas.length?Object.keys(linhas[0]):['vazio']);
-  const LOTE = 300;
+  const LOTE = 150; // lotes menores = menos timeout no Apps Script
   const modo = cfg.campoPeriodo ? 'periodo' : 'tudo';
   let primeiro = true;
   if (!aEnviar.length) {
