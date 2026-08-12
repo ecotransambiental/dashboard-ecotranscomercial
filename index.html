@@ -3713,23 +3713,38 @@ async function salvarClienteDeLead(cnpjLead, tipo, permitirDuplicado) {
   };
   if (!campos['CLIENTE']) { document.getElementById('cl-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Informe o nome do cliente.</div>'; return; }
   document.getElementById('cl-msg').innerHTML = '<div style="text-align:center;padding:10px;color:var(--cinza-500);">Criando...</div>';
+  // guarda os dados da solicitação num lugar seguro: se o cliente for criado mas a solicitação
+  // falhar, dá pra reenviar SÓ a solicitação, sem duplicar cliente e sem preencher tudo de novo.
+  {
+    const ld0=(kanbanLeads||[]).find(x=>cnpjLimpo(x['CNPJ'])===cnpjLimpo(cnpjLead)||String(x['CLIENTE']||'')===campos['CLIENTE']) || {};
+    let vlr0=''; try{ const ps=getPropostasLead(ld0); if(ps.length) vlr0=ps[ps.length-1].valor; }catch(e){}
+    window._solicPendenteLead = {
+      tipo:'Contrato', cliente:campos['CLIENTE'], cnpj:campos['CNPJ'],
+      consultor:(campos['CONSULTOR']||ld0['CONSULTOR']||usuarioAtual.nome), valorEstimado:vlr0,
+      obs:'Solicitação criada ao fechar o lead.', origem:'lead', idLead:String(ld0['ID_LEAD']||'')
+    };
+  }
   try {
-    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({ acao:'novoRegistro', token: sessaoToken, dados:{ aba:'Clientes', campos, permitirDuplicado: !!permitirDuplicado } })});
-    const r = await resp.json();
+    const rc = await apiPost({ acao:'novoRegistro', token: sessaoToken, dados:{ aba:'Clientes', campos, permitirDuplicado: !!permitirDuplicado } });
+    const r = rc.ok ? rc.dados : { ok:false, erro:rc.erro };
     if (!r.ok) {
-      if (r.duplicado) {
-        // oferece a opção de criar mesmo assim (unidade nova)
+      const ehDup = r.duplicado || /j[\u00e1a] existe|duplicad/i.test(String(r.erro||''));
+      if (ehDup) {
+        // oferece criar mesmo assim (unidade nova) — e, no fluxo "solicitar", aproveitar o
+        // cliente que já existe e mandar só a solicitação.
         document.getElementById('cl-msg').innerHTML = `
           <div style="background:var(--amarelo-bg);border-radius:8px;padding:12px;margin-top:10px;color:#8a6d00;font-size:12.5px;">
             <i class="ti ti-alert-triangle"></i> ${r.erro}
             <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+              ${tipo==='solicitar'?`<button onclick="reenviarSolicDeLead()" style="padding:7px 12px;border:none;background:#185FA5;color:white;border-radius:7px;cursor:pointer;font-size:12px;">O cliente já existe — enviar só a solicitação</button>`:''}
               <button onclick="salvarClienteDeLead('${cnpjLead}','${tipo}',true)" style="padding:7px 12px;border:none;background:#8a6d00;color:white;border-radius:7px;cursor:pointer;font-size:12px;">É uma unidade nova, criar mesmo assim</button>
               <button onclick="fecharFicha()" style="padding:7px 12px;border:1px solid var(--cinza-300);background:white;border-radius:7px;cursor:pointer;font-size:12px;">Cancelar (é duplicado)</button>
             </div>
           </div>`;
         return;
       }
-      document.getElementById('cl-msg').innerHTML=`<div class="sem-acesso">${r.erro||'verifique se o Apps Script foi republicado.'}</div>`; return;
+      document.getElementById('cl-msg').innerHTML=`<div class="sem-acesso" style="margin-top:10px;">Não consegui criar o cliente.<br><span style="font-size:11.5px;">${r.erro||'verifique se o Apps Script foi republicado.'}</span><div style="margin-top:8px;"><button onclick="salvarClienteDeLead('${cnpjLead}','${tipo}',${!!permitirDuplicado})" style="padding:7px 12px;border:none;background:var(--verde-medio);color:white;border-radius:7px;cursor:pointer;font-size:12px;"><i class="ti ti-refresh"></i> Tentar de novo</button></div></div>`;
+      return;
     }
     cacheClientes = null;
     if (typeof limparCacheBusca==='function') limparCacheBusca();
@@ -3739,18 +3754,10 @@ async function salvarClienteDeLead(cnpjLead, tipo, permitirDuplicado) {
       let preServ=[]; try{ const ld=(kanbanLeads||[]).find(x=>cnpjLimpo(x['CNPJ'])===cnpjLimpo(cnpjLead)||String(x['CLIENTE']||'')===campos['CLIENTE']); if(ld) preServ=JSON.parse(ld['SERVICOS_PROPOSTA']||'[]'); }catch(e){}
       abrirFormContrato(campos['CLIENTE'], campos['CNPJ'], preServ);
     } else if (tipo === 'solicitar') {
-      // cria a SOLICITAÇÃO de contrato linkada ao lead (vai pra aba Solicitações, responsável Mafe)
-      const ld=(kanbanLeads||[]).find(x=>cnpjLimpo(x['CNPJ'])===cnpjLimpo(cnpjLead)||String(x['CLIENTE']||'')===campos['CLIENTE']) || {};
-      let vlr=''; try{ const ps=getPropostasLead(ld); if(ps.length) vlr=ps[ps.length-1].valor; }catch(e){}
-      try{
-        await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'criarSolicitacao',token:sessaoToken,dados:{
-          tipo:'Contrato', cliente:campos['CLIENTE'], cnpj:campos['CNPJ'],
-          consultor:(campos['CONSULTOR']||ld['CONSULTOR']||usuarioAtual.nome), valorEstimado:vlr,
-          obs:'Solicitação criada ao fechar o lead.', origem:'lead', idLead:String(ld['ID_LEAD']||'')
-        }})});
-      }catch(e){}
-      document.getElementById('cl-msg').innerHTML = '<div style="background:var(--verde-ok-bg);border-radius:8px;padding:10px;margin-top:10px;color:var(--verde-ok);font-size:13px;"><i class="ti ti-circle-check"></i> Cliente criado e <b>solicitação de contrato enviada pra Mafe</b> (aba Solicitações).</div>';
-      setTimeout(fecharFicha, 2200);
+      // cria a SOLICITAÇÃO de contrato linkada ao lead (vai pra aba Solicitações, responsável Mafe).
+      // O resultado agora é CONFERIDO: antes o erro era engolido e a tela dizia "enviada"
+      // mesmo quando a solicitação não tinha ido — foi o que aconteceu com a consultora.
+      await reenviarSolicDeLead();
     } else if (tipo === 'eventual') {
       document.getElementById('cl-msg').innerHTML = '<div style="background:var(--verde-ok-bg);border-radius:8px;padding:10px;margin-top:10px;color:var(--verde-ok);font-size:13px;"><i class="ti ti-circle-check"></i> Cliente criado como Eventual!</div>';
       setTimeout(fecharFicha, 1800);
@@ -3758,7 +3765,35 @@ async function salvarClienteDeLead(cnpjLead, tipo, permitirDuplicado) {
       document.getElementById('cl-msg').innerHTML = '<div style="background:var(--amarelo-bg);border-radius:8px;padding:10px;margin-top:10px;color:#8a6d00;font-size:13px;"><i class="ti ti-alert-triangle"></i> Cliente criado como "Contratual - pendente". Lembre de preencher o contrato depois.</div>';
       setTimeout(fecharFicha, 2200);
     }
-  } catch(e) { document.getElementById('cl-msg').innerHTML='<div class="sem-acesso">Erro de conexão.</div>'; }
+  } catch(e) {
+    document.getElementById('cl-msg').innerHTML=`<div class="sem-acesso" style="margin-top:10px;">Erro de conexão com o servidor.<br><span style="font-size:11.5px;">${String((e&&e.message)||e)}</span><div style="margin-top:8px;"><button onclick="salvarClienteDeLead('${cnpjLead}','${tipo}',${!!permitirDuplicado})" style="padding:7px 12px;border:none;background:var(--verde-medio);color:white;border-radius:7px;cursor:pointer;font-size:12px;"><i class="ti ti-refresh"></i> Tentar de novo</button></div></div>`;
+  }
+}
+// Envia (ou reenvia) a solicitação de contrato do lead recém-fechado.
+// Fica separado de propósito: se o cliente já foi criado e só a solicitação falhou,
+// dá pra mandar só ela de novo — sem duplicar cliente e sem redigitar nada.
+async function reenviarSolicDeLead(){
+  const d = window._solicPendenteLead;
+  const msg = document.getElementById('cl-msg');
+  if (!d) { if(msg) msg.innerHTML='<div class="sem-acesso" style="margin-top:10px;">Não achei os dados da solicitação. Faça pela aba <b>CRM → Solicitações → Solicitar contrato</b>.</div>'; return; }
+  if (msg) msg.innerHTML = '<div style="text-align:center;padding:10px;color:var(--cinza-500);">Enviando a solicitação de contrato...</div>';
+  const r = await apiPost({ acao:'criarSolicitacao', token: sessaoToken, dados: d });
+  if (r.ok) {
+    window._solicPendenteLead = null;
+    if (typeof limparCacheBusca==='function') limparCacheBusca();
+    if (msg) msg.innerHTML = '<div style="background:var(--verde-ok-bg);border-radius:8px;padding:10px;margin-top:10px;color:var(--verde-ok);font-size:13px;"><i class="ti ti-circle-check"></i> Cliente criado e <b>solicitação de contrato enviada pra Mafe</b> (aba Solicitações).</div>';
+    if (typeof atualizarSino==='function') atualizarSino();
+    setTimeout(fecharFicha, 2200);
+  } else {
+    if (msg) msg.innerHTML = `<div style="background:var(--amarelo-bg);border:1px solid var(--amarelo-borda);border-radius:8px;padding:12px;margin-top:10px;color:#8a6d00;font-size:12.5px;">
+      <b><i class="ti ti-alert-triangle"></i> O cliente foi criado, mas a solicitação de contrato NÃO foi enviada.</b>
+      <div style="margin-top:4px;font-size:11.5px;">${r.erro||''}</div>
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+        <button onclick="reenviarSolicDeLead()" style="padding:7px 12px;border:none;background:#8a6d00;color:white;border-radius:7px;cursor:pointer;font-size:12px;"><i class="ti ti-refresh"></i> Tentar enviar de novo</button>
+        <button onclick="fecharFicha();selecionarModulo('crm');setTimeout(function(){selecionarSub('crm-solicitacoes','Solicitações');},80);" style="padding:7px 12px;border:1px solid var(--cinza-300);background:white;border-radius:7px;cursor:pointer;font-size:12px;">Abrir Solicitações e fazer manualmente</button>
+      </div>
+    </div>`;
+  }
 }
 
 // lê a lista de propostas de um lead (JSON em PROPOSTAS); se não houver, sintetiza a partir dos campos antigos
