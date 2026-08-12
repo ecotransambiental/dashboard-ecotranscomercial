@@ -393,10 +393,10 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.12c</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.12e</div>
       </div>
     </aside>
-    <!-- VERSÃO DO DASHBOARD: v2026.08.12c — conexão (leitura 25s x2 / escrita 90s x3), Pendências à prova de falha, clientes garantidos nos formulários de Solicitação -->
+    <!-- VERSÃO DO DASHBOARD: v2026.08.12e — conexão (leitura 25s x2 / escrita 90s x3), Pendências à prova de falha, clientes garantidos nos formulários de Solicitação -->
 
     <!-- Coluna nível 2: submódulos -->
     <div class="subcoluna" id="subcoluna">
@@ -9508,8 +9508,15 @@ async function finSincronizarAposUpload(tipoDados, st){
   if (!cfg) return;
   try {
     if (st) { st.textContent = 'Salvando no sistema (compartilhado)...'; st.style.color='var(--cinza-500)'; }
-    // sempre modo 'tudo': reescreve a aba inteira do tipo com o que está na memória (fonte da verdade)
-    await finEnviarSheetsCompleto(tipoDados, st);
+    // COLETAS: manda só os meses que vieram no arquivo, em vez de reescrever a aba inteira.
+    // Com dois meses carregados eram ~80 idas ao servidor a cada upload; agora são poucas,
+    // porque os meses antigos ficam onde estão.
+    if (tipoDados==='coletas' && Array.isArray(st && st._mesesEnviar) && st._mesesEnviar.length) {
+      for (const ym of st._mesesEnviar) await finEnviarSheets('coletas', ym, st);
+    } else {
+      // demais relatórios: reescreve a aba inteira do tipo (a memória é a fonte da verdade)
+      await finEnviarSheetsCompleto(tipoDados, st);
+    }
     if (st) { st.textContent = 'Salvo! Todos da equipe já veem estes dados.'; st.style.color='var(--verde-medio)'; }
     if (typeof finInvalidarCache==='function') finInvalidarCache();
   } catch(e){
@@ -9528,7 +9535,7 @@ async function finEnviarSheetsCompleto(tipo, statusEl){
   const setCols = new Set();
   linhas.forEach(l=>Object.keys(l).forEach(k=>setCols.add(k)));
   const colunas = setCols.size ? [...setCols] : ['vazio'];
-  const LOTE = 150; // lotes menores = menos timeout no Apps Script
+  const LOTE = 500; // cada ida ao servidor custa ~1-3s; lotes maiores = muito menos espera
   // se não há nada, manda um lote vazio em modo 'tudo' pra limpar a aba
   if (!linhas.length){
     await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'salvarFinanceiro',token:sessaoToken,
@@ -9538,7 +9545,7 @@ async function finEnviarSheetsCompleto(tipo, statusEl){
   let primeiro = true;
   for (let i=0;i<linhas.length;i+=LOTE){
     const lote = linhas.slice(i,i+LOTE);
-    if (statusEl) statusEl.textContent = `Enviando ${Math.min(i+LOTE,linhas.length)} de ${linhas.length}...`;
+    if (statusEl) { const feito=Math.min(i+LOTE,linhas.length); statusEl.innerHTML = `Salvando no sistema: <b>${feito.toLocaleString('pt-BR')} de ${linhas.length.toLocaleString('pt-BR')}</b> (${Math.round(feito/linhas.length*100)}%)<div style="font-size:11px;color:var(--cinza-500);">Pode deixar a aba aberta — é normal demorar quando o mês é grande.</div>`; }
     await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'salvarFinanceiro',token:sessaoToken,
       dados:{ aba:cfg.aba, colunas, linhas:lote, modo:'tudo', primeiroLote:primeiro }})});
     primeiro = false;
@@ -9604,7 +9611,7 @@ async function finEnviarSheets(tipo, valorPeriodo, statusEl){
   let aEnviar = linhas;
   if (cfg.campoPeriodo && valorPeriodo!=null) aEnviar = linhas.filter(l=>String(l[cfg.campoPeriodo])===String(valorPeriodo));
   const colunas = aEnviar.length ? Object.keys(aEnviar[0]) : (linhas.length?Object.keys(linhas[0]):['vazio']);
-  const LOTE = 150; // lotes menores = menos timeout no Apps Script
+  const LOTE = 500; // cada ida ao servidor custa ~1-3s; lotes maiores = muito menos espera
   const modo = cfg.campoPeriodo ? 'periodo' : 'tudo';
   let primeiro = true;
   if (!aEnviar.length) {
@@ -9645,7 +9652,7 @@ async function finCarregarDoSheets(tipos, forcar){
         } else {
           FINdados[tipo] = r.linhas.map(l=>{
             const o = {...l};
-            ['valor','pago','saldo','recebido','qtdeServ','pesoTon','iss','inss','pis','cofins','csll','ir','desconto','liquido'].forEach(k=>{ if(o[k]!==undefined&&o[k]!=='') o[k]=finN(o[k]); });
+            ['valor','pago','saldo','recebido','qtdeServ','pesoTon','minimaServ','minimaTaxa','semana','iss','inss','pis','cofins','csll','ir','desconto','liquido'].forEach(k=>{ if(o[k]!==undefined&&o[k]!=='') o[k]=finN(o[k]); });
             if(o.foraDoTotal!==undefined) o.foraDoTotal = (o.foraDoTotal===true||o.foraDoTotal==='true'||o.foraDoTotal==='Sim');
             return o;
           });
@@ -10103,8 +10110,12 @@ function FIN_processarServicos(texto, st){
   const antes = FINdados.coletas.length;
   FINdados.coletas = FINdados.coletas.filter(c=>!mesesNoArquivo.has(c.ym));
   const removidas = antes - FINdados.coletas.length;
-  novas.forEach(c=>FINdados.coletas.push(c));
+  // as linhas de complemento de mínima NÃO são guardadas: elas são acerto de cobrança,
+  // não coleta. O faturado continua certo porque guardamos a mínima em cada linha
+  // (faturado = maior entre o coletado e a mínima). Guardar menos linha = envio mais rápido.
+  novas.filter(c=>!c.ehCompl).forEach(c=>{ delete c.ehCompl; delete c.ordem; FINdados.coletas.push(c); });
 
+  st._mesesEnviar = [...mesesNoArquivo].sort();   // só estes meses vão pro servidor
   const meses = [...mesesNoArquivo].sort().map(m=>finRotMes(m)).join(', ');
   const dias = [...new Set(novas.map(c=>c.data))].sort();
   const nClientes = new Set(novas.map(c=>c.cnpj)).size;
@@ -10636,7 +10647,7 @@ function FIN_renderColetas(){
   const agrup = window._coletaAgrup || 'unidade';
   const rotYM = ym=>{ const [a,m]=ym.split('-'); return (FIN_MESNOME[m]||m)+'/'+a.slice(2); };
   // pra agrupar por GRUPO é preciso ter a aba Clientes carregada (é de lá que vem o campo Grupo)
-  if (agrup==='grupo' && !cacheClientes && typeof carregarClientes==='function') {
+  if ((agrup==='grupo' || String(window._coletaGrupoEmp||'').indexOf('CLI::')===0) && !cacheClientes && typeof carregarClientes==='function') {
     carregarClientes().then(()=>FIN_renderColetas()).catch(()=>{});
   }
   p.innerHTML=`
@@ -10646,6 +10657,8 @@ function FIN_renderColetas(){
         <option value="semana" ${modo==='semana'?'selected':''}>Comparar por semana (entre 2 meses)</option>
         <option value="mes" ${modo==='mes'?'selected':''}>Visão mensal por cliente</option>
       </select>
+      <span style="font-size:13px;color:var(--cinza-600);">Grupo:</span>
+      <select onchange="window._coletaGrupoEmp=this.value;FIN_renderColetas()" title="Filtra a análise para uma rede inteira (ex: DASA), somando todas as unidades.">${FIN_opcoesGrupo()}</select>
       <span style="font-size:13px;color:var(--cinza-600);">Ver:</span>
       <select onchange="window._coletaAgrup=this.value;FIN_renderColetas()" title="Unidade = cada loja separada (La Braciera). Grupo = junta os CNPJs pelo campo Grupo da aba Clientes (Gara School, PUC).">
         <option value="unidade" ${agrup==='unidade'?'selected':''}>Por unidade (cada CNPJ)</option>
@@ -10659,6 +10672,130 @@ function FIN_renderColetas(){
   else FIN_renderColetaMes(meses, rotYM);
 }
 
+// ============================================================
+// GRUPOS EMPRESARIAIS (para filtrar a aba Coletas)
+// Um grupo é definido pela RAIZ do CNPJ (os 8 primeiros dígitos). Assim,
+// qualquer unidade nova da rede entra sozinha no filtro, sem precisar cadastrar
+// uma a uma — e sem depender de como o nome veio escrito no relatório.
+// Para incluir outra rede, é só acrescentar aqui a raiz do CNPJ dela.
+// ============================================================
+const GRUPOS_EMPRESA = {
+  'DASA': {
+    raizes: ['61486650',   // Delboni Auriemo / Lavoisier / Alta Excelência (DA-, LV-, AE-)
+             '04539279',   // Cientifica Lâmina (ADM-CL, ARMAZEM-CL)
+             '45796554'],  // Salomão Zoppi (SZ-)
+    obs: 'Delboni, Lavoisier, Alta Excelência, Cientifica Lâmina e Salomão Zoppi'
+  }
+};
+function _raizCnpj(cnpj){ return String(cnpj||'').replace(/\D/g,'').slice(0,8); }
+// nome do grupo empresarial de uma coleta ('' se não pertence a nenhum)
+function FIN_grupoEmpresaDe(c){
+  const raiz=_raizCnpj(c && c.cnpj);
+  if(!raiz) return '';
+  for(const nome in GRUPOS_EMPRESA){
+    if(GRUPOS_EMPRESA[nome].raizes.indexOf(raiz)>=0) return nome;
+  }
+  return '';
+}
+// predicado do filtro escolhido na tela (grupo empresarial ou grupo da aba Clientes)
+function FIN_filtroGrupo(){
+  const sel = window._coletaGrupoEmp || '';
+  if(!sel) return ()=>true;
+  if(sel.indexOf('EMP::')===0){ const nome=sel.slice(5); return c=>FIN_grupoEmpresaDe(c)===nome; }
+  if(sel.indexOf('CLI::')===0){ const g=sel.slice(5).toUpperCase(); return c=>String(FIN_grupoDoCliente(c.cnpj,c.cliente)||'').toUpperCase()===g; }
+  return ()=>true;
+}
+function FIN_grupoSelecionadoNome(){
+  const sel = window._coletaGrupoEmp || '';
+  if(sel.indexOf('EMP::')===0) return sel.slice(5);
+  if(sel.indexOf('CLI::')===0) return sel.slice(5);
+  return '';
+}
+// opções do seletor: grupos empresariais (por CNPJ) + grupos cadastrados na aba Clientes
+function FIN_opcoesGrupo(){
+  const sel = window._coletaGrupoEmp || '';
+  let h = `<option value="" ${sel===''?'selected':''}>Todos os clientes</option>`;
+  Object.keys(GRUPOS_EMPRESA).forEach(nome=>{
+    const n=new Set((FINdados.coletas||[]).filter(c=>FIN_grupoEmpresaDe(c)===nome).map(c=>c.cnpj)).size;
+    if(n) h += `<option value="EMP::${nome}" ${sel==='EMP::'+nome?'selected':''}>${nome} (${n} unidades)</option>`;
+  });
+  const gs=[...new Set((cacheClientes||[]).map(c=>String(c['GRUPO']||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt'));
+  gs.forEach(g=>{ h += `<option value="CLI::${String(g).replace(/"/g,'')}" ${sel==='CLI::'+g?'selected':''}>${g} (grupo cadastrado)</option>`; });
+  return h;
+}
+// ============================================================
+// Painel do grupo: quebra por RESÍDUO e por UNIDADE.
+// Por resíduo mostramos só o COLETADO — de propósito. A mínima do contrato é
+// negociada por equipamento/unidade, não por tipo de resíduo, então ratear
+// faturamento por resíduo seria inventar número.
+// ============================================================
+function FIN_painelGrupo(mesA, mesB, rotYM){
+  const nome=FIN_grupoSelecionadoNome();
+  if(!nome) return '';
+  const filtro=FIN_filtroGrupo();
+  const doMes=(m)=> (FINdados.coletas||[]).filter(c=>c.ym===m && filtro(c));
+  const lA=doMes(mesA), lB=doMes(mesB);
+  if(!lA.length && !lB.length) return `<div class="card"><div class="vazio">Nenhuma coleta de ${nome} nos meses escolhidos.</div></div>`;
+  // --- por resíduo ---
+  const res={};
+  const somaRes=(lista,campo)=>lista.forEach(c=>{
+    const k=(c.classe||'—')+' · '+(c.residuo||'—');
+    (res[k]=res[k]||{a:0,b:0,linA:0,linB:0})[campo]+= (c.ehCompl?0:(c.qtdeServ||0));
+    res[k][campo==='a'?'linA':'linB']++;
+  });
+  somaRes(lA,'a'); somaRes(lB,'b');
+  const linhasRes=Object.entries(res).sort((x,y)=>y[1].b-x[1].b).map(([k,v])=>{
+    const varP = v.a>0 ? ((v.b-v.a)/v.a*100) : null;
+    const cor = varP===null?'':(varP>0.5?'pos':varP<-0.5?'neg':'');
+    const vt = varP===null?'—':(varP>0?'+':'')+varP.toFixed(0)+'%';
+    return `<tr><td><b>${k}</b></td><td>${Math.round(v.a)}</td><td>${Math.round(v.b)}</td><td class="${cor}">${vt}</td></tr>`;
+  }).join('');
+  // --- por unidade ---
+  const gA=FIN_agrupaColetas(c=>c.ym===mesA && filtro(c));
+  const gB=FIN_agrupaColetas(c=>c.ym===mesB && filtro(c));
+  const porUni={};
+  const junta=(g,campo)=>Object.values(g).forEach(o=>{
+    const u=porUni[o.cliente]||(porUni[o.cliente]={cliente:o.cliente,colA:0,colB:0,fatA:0,fatB:0});
+    u['col'+campo]+=o.coletado; u['fat'+campo]+=o.faturado;
+  });
+  junta(gA,'A'); junta(gB,'B');
+  const unis=Object.values(porUni).sort((x,y)=>y.colB-x.colB);
+  const linhasUni=unis.map(u=>{
+    const varP = u.colA>0 ? ((u.colB-u.colA)/u.colA*100) : null;
+    const cor = varP===null?'':(varP>0.5?'pos':varP<-0.5?'neg':'');
+    const vt = varP===null?(u.colB>0?'<span class="badge" style="background:var(--verde-claro-bg);color:var(--verde-escuro);">novo</span>':'—'):(u.colB===0?'<span class="neg">parou</span>':(varP>0?'+':'')+varP.toFixed(0)+'%');
+    const min = u.fatB>u.colB+0.001;
+    return `<tr><td><b>${u.cliente}</b></td><td>${Math.round(u.colA)}</td><td>${Math.round(u.colB)}</td>
+      <td>${min?`<b style="color:var(--roxo);" title="A mínima do contrato entrou na conta">${Math.round(u.fatB)}</b> <span style="font-size:10px;color:var(--roxo);">mín.</span>`:`<span style="color:var(--cinza-500);">${Math.round(u.fatB)}</span>`}</td>
+      <td class="${cor}">${vt}</td></tr>`;
+  }).join('');
+  const totColA=unis.reduce((s,u)=>s+u.colA,0), totColB=unis.reduce((s,u)=>s+u.colB,0);
+  const totFatB=unis.reduce((s,u)=>s+u.fatB,0);
+  const comMin=unis.filter(u=>u.fatB>u.colB+0.001).length;
+  const varTot = totColA>0 ? ((totColB-totColA)/totColA*100) : null;
+  return `
+    <div class="card" style="border-left:3px solid var(--verde-escuro);">
+      <h2><i class="ti ti-building-community"></i> ${nome} — visão do grupo</h2>
+      ${GRUPOS_EMPRESA[nome]?`<div style="font-size:11.5px;color:var(--cinza-500);margin:-8px 0 12px;">${GRUPOS_EMPRESA[nome].obs} · agrupado pela raiz do CNPJ, então unidade nova entra sozinha.</div>`:''}
+      <div class="kpis">
+        <div class="kpi"><div class="num">${unis.length}</div><div class="lbl">unidades com coleta</div></div>
+        <div class="kpi"><div class="num">${Math.round(totColB).toLocaleString('pt-BR')}</div><div class="lbl">coletado em ${rotYM(mesB)}</div></div>
+        <div class="kpi ${varTot!=null&&varTot<0?'verm':''}"><div class="num">${varTot==null?'—':(varTot>0?'+':'')+varTot.toFixed(1)+'%'}</div><div class="lbl">vs ${rotYM(mesA)} (${Math.round(totColA).toLocaleString('pt-BR')})</div></div>
+        <div class="kpi roxo"><div class="num">${Math.round(totFatB).toLocaleString('pt-BR')}</div><div class="lbl">faturado em ${rotYM(mesB)}${comMin?` · ${comMin} na mínima`:''}</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Por resíduo</h2>
+      <p style="font-size:12px;color:var(--cinza-500);margin-bottom:8px;">Quantidade <b>coletada</b> por classe e tipo de resíduo. Não rateio faturamento aqui: a mínima é por contrato/equipamento, não por resíduo.</p>
+      <table><thead><tr><th>Classe · Resíduo</th><th>${rotYM(mesA)}</th><th>${rotYM(mesB)}</th><th>Variação</th></tr></thead>
+      <tbody>${linhasRes||'<tr><td colspan="4" class="vazio">Sem dados.</td></tr>'}</tbody></table>
+    </div>
+    <div class="card">
+      <h2>Por unidade (${unis.length})</h2>
+      <table><thead><tr><th>Unidade</th><th>Coletado ${rotYM(mesA)}</th><th>Coletado ${rotYM(mesB)}</th><th>Faturado ${rotYM(mesB)}</th><th>Variação</th></tr></thead>
+      <tbody>${linhasUni||'<tr><td colspan="5" class="vazio">Sem dados.</td></tr>'}</tbody></table>
+    </div>`;
+}
 // ============================================================
 // Agrupamento das coletas.
 // A pessoa escolhe na tela como quer ver:
@@ -10742,8 +10879,9 @@ function FIN_renderColetaComp(meses, rotYM, porSemana){
     sem = Number(window._coletaSem || semanas[0]);
   }
   // agrupa por cliente+equip+classe (mês inteiro, ou só a semana escolhida)
-  const filtA = porSemana ? (c=>c.ym===mesA && Number(c.semana)===sem) : (c=>c.ym===mesA);
-  const filtB = porSemana ? (c=>c.ym===mesB && Number(c.semana)===sem) : (c=>c.ym===mesB);
+  const fg = FIN_filtroGrupo();   // filtro de grupo empresarial (ex: só DASA)
+  const filtA = porSemana ? (c=>c.ym===mesA && Number(c.semana)===sem && fg(c)) : (c=>c.ym===mesA && fg(c));
+  const filtB = porSemana ? (c=>c.ym===mesB && Number(c.semana)===sem && fg(c)) : (c=>c.ym===mesB && fg(c));
   const gA=FIN_agrupaColetas(filtA), gB=FIN_agrupaColetas(filtB);
   const chaves=[...new Set([...Object.keys(gA),...Object.keys(gB)])];
   let linhas=chaves.map(k=>{
@@ -10773,6 +10911,7 @@ function FIN_renderColetaComp(meses, rotYM, porSemana){
   else if(ordem==='nome') linhasEx.sort((x,y)=>String(x.cliente).localeCompare(String(y.cliente)));
   else if(ordem==='volume') linhasEx.sort((x,y)=>y.qb-x.qb);       // maior volume no mês B
   const titulo = porSemana ? `${FIN_rotSemana(sem)}: ${rotYM(mesA)} vs ${rotYM(mesB)}` : `Mês inteiro: ${rotYM(mesA)} vs ${rotYM(mesB)}`;
+  const painel = (!porSemana) ? FIN_painelGrupo(mesA, mesB, rotYM) : '';   // resumo da rede, quando há grupo escolhido
   area.innerHTML=`
     <div class="filtros" style="margin-bottom:10px;">
       <span style="font-size:13px;color:var(--cinza-600);">Comparar</span>
@@ -10801,8 +10940,9 @@ function FIN_renderColetaComp(meses, rotYM, porSemana){
       </select>
       <button class="btn sec" onclick="window.print()" style="margin-left:auto;"><i class="ti ti-printer"></i> Exportar</button>
     </div>
+    ${painel}
     <div class="card">
-      <h2>${titulo}</h2>
+      <h2>${titulo}${FIN_grupoSelecionadoNome()?` <span style="font-size:12px;font-weight:400;color:var(--cinza-500);">— detalhe por unidade e equipamento</span>`:''}</h2>
       <p style="font-size:12px;color:var(--cinza-500);margin-bottom:8px;">Verde = subiu, vermelho = caiu. Mostrando ${linhasEx.length} de ${linhas.length}.</p>
       <table><thead><tr>
         <th rowspan="2" style="vertical-align:bottom;">Cliente</th><th rowspan="2" style="vertical-align:bottom;">Equipamento / Resíduo</th>
@@ -10831,8 +10971,9 @@ function FIN_renderColetaMes(meses, rotYM){
   const area=document.getElementById('coleta-area');
   const mes = window._coletaMesUnico || meses[meses.length-1];
   const mesAnt = meses[meses.indexOf(mes)-1];
-  const g=FIN_agrupaColetas(c=>c.ym===mes);
-  const gAnt = mesAnt ? FIN_agrupaColetas(c=>c.ym===mesAnt) : {};
+  const fgM = FIN_filtroGrupo();
+  const g=FIN_agrupaColetas(c=>c.ym===mes && fgM(c));
+  const gAnt = mesAnt ? FIN_agrupaColetas(c=>c.ym===mesAnt && fgM(c)) : {};
   // agrupa por cliente/grupo (junta os equipamentos/resíduos dentro).
   // A chave é o RÓTULO já resolvido — assim funciona tanto por unidade quanto por grupo.
   const porCliente={};
