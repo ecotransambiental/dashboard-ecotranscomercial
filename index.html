@@ -393,10 +393,10 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.12</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.12c</div>
       </div>
     </aside>
-    <!-- VERSÃO DO DASHBOARD: v2026.08.12 — conexão (leitura 25s x2 / escrita 90s x3), Pendências à prova de falha, clientes garantidos nos formulários de Solicitação -->
+    <!-- VERSÃO DO DASHBOARD: v2026.08.12c — conexão (leitura 25s x2 / escrita 90s x3), Pendências à prova de falha, clientes garantidos nos formulários de Solicitação -->
 
     <!-- Coluna nível 2: submódulos -->
     <div class="subcoluna" id="subcoluna">
@@ -1061,8 +1061,27 @@ function coletasDoCliente(cnpj){
   const lista = (typeof FINdados!=='undefined' && FINdados.coletas) ? FINdados.coletas : [];
   if(!lista.length || !cnpj) return null;
   const alvo = String(cnpj).replace(/\D/g,'');
+  // COLETADO: exclui a linha de complemento de mínima (ela é acerto de cobrança, não coleta)
   const porMes = {};
-  lista.forEach(x=>{ if(String(x.cnpj||'').replace(/\D/g,'')===alvo){ porMes[x.ym]=(porMes[x.ym]||0)+(x.qtdeServ||0); } });
+  lista.forEach(x=>{ if(String(x.cnpj||'').replace(/\D/g,'')===alvo && !x.ehCompl){ porMes[x.ym]=(porMes[x.ym]||0)+(x.qtdeServ||0); } });
+  return Object.keys(porMes).length ? porMes : null;
+}
+// FATURADO por mês: soma as linhas e respeita a mínima de cada tipo de serviço.
+// É o número que casa com a nota — pode ser maior que o coletado quando a mínima entra.
+function coletasFatDoCliente(cnpj){
+  const lista = (typeof FINdados!=='undefined' && FINdados.coletas) ? FINdados.coletas : [];
+  if(!lista.length || !cnpj) return null;
+  const alvo = String(cnpj).replace(/\D/g,'');
+  const porMesServ = {};
+  lista.forEach(x=>{
+    if(String(x.cnpj||'').replace(/\D/g,'')!==alvo) return;
+    const k=x.ym+'||'+(x.tipoServ||x.equip||'');
+    const p=porMesServ[k]||(porMesServ[k]={ym:x.ym,soma:0,minima:0});
+    p.soma+=(x.qtdeServ||0);
+    if((x.minimaServ||0)>p.minima) p.minima=(x.minimaServ||0);
+  });
+  const porMes={};
+  Object.values(porMesServ).forEach(p=>{ porMes[p.ym]=(porMes[p.ym]||0)+Math.max(p.soma,p.minima); });
   return Object.keys(porMes).length ? porMes : null;
 }
 
@@ -1852,7 +1871,8 @@ async function imprimirFichaCliente(cnpj) {
   // Coletas por mês (Fin_Coletas, por CNPJ) — mesma fonte do card
   let coletasHtml;
   if (coletasMes && Object.keys(coletasMes).length) {
-    coletasHtml = `<table class="t"><tr style="background:#f0f7ec;"><th>Mês</th><th>Equipamentos coletados</th></tr>${Object.keys(coletasMes).sort().map(m=>`<tr><td>${rotColetaPrint(m)}</td><td>${coletasMes[m]}</td></tr>`).join('')}</table>`;
+    const coletasFatP = (typeof coletasFatDoCliente==='function') ? (coletasFatDoCliente(c['CNPJ'])||{}) : {};
+    coletasHtml = `<table class="t"><tr style="background:#f0f7ec;"><th>Mês</th><th>Coletado</th><th>Faturado (com mínima)</th></tr>${Object.keys(coletasMes).sort().map(m=>{const col=coletasMes[m]||0, fat=(coletasFatP[m]!=null?coletasFatP[m]:col); return `<tr><td>${rotColetaPrint(m)}</td><td>${Math.round(col)}</td><td>${Math.round(fat)}${fat>col+0.001?' (mínima)':''}</td></tr>`;}).join('')}</table>`;
   } else { coletasHtml = '<p style="color:#999;">Sem coletas registradas.</p>'; }
 
   const htmlDoc = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Ficha ${c['CLIENTE']||''}</title>
@@ -2846,9 +2866,15 @@ async function renderAbaFaturamento(corpo) {
       <div style="flex:1;background:var(--verde-claro-bg);border-radius:8px;padding:10px;text-align:center;"><div style="font-size:22px;font-weight:700;color:var(--verde-escuro);font-family:var(--fonte-display);">${media}</div><div style="font-size:11px;color:var(--cinza-600);">média/mês</div></div>
       <div style="flex:1;background:var(--cinza-100);border-radius:8px;padding:10px;text-align:center;"><div style="font-size:22px;font-weight:700;color:var(--cinza-800);font-family:var(--fonte-display);">${coletasNovas[ultMes]}</div><div style="font-size:11px;color:var(--cinza-600);">último (${rotMes(ultMes)})</div></div>
     </div>`;
-    html += '<table class="ficha-tab"><tr style="background:var(--cinza-100);"><td style="font-weight:600;">Mês</td><td style="font-weight:600;">Equipamentos coletados</td></tr>';
-    meses.forEach(m => { html += `<tr><td>${rotMes(m)}</td><td><b>${coletasNovas[m]}</b></td></tr>`; });
+    const coletasFat = (typeof coletasFatDoCliente==='function') ? (coletasFatDoCliente(fichaClienteAtual['CNPJ'])||{}) : {};
+    html += '<table class="ficha-tab"><tr style="background:var(--cinza-100);"><td style="font-weight:600;">Mês</td><td style="font-weight:600;">Coletado</td><td style="font-weight:600;">Faturado</td></tr>';
+    meses.forEach(m => {
+      const col = coletasNovas[m]||0, fat = coletasFat[m]!=null ? coletasFat[m] : col;
+      const usouMin = fat > col + 0.001;
+      html += `<tr><td>${rotMes(m)}</td><td><b>${Math.round(col)}</b></td><td>${usouMin?`<b style="color:var(--roxo);" title="A mínima do contrato entrou na conta">${Math.round(fat)}</b> <span style="font-size:10px;color:var(--roxo);">mín.</span>`:`<span style="color:var(--cinza-600);">${Math.round(fat)}</span>`}</td></tr>`;
+    });
     html += '</table>';
+    html += '<div style="font-size:11px;color:var(--cinza-500);margin-top:6px;"><b>Coletado</b> = recolhido de verdade. <b>Faturado</b> = o que entra na nota, já com a mínima do contrato. Em roxo, os meses em que o cliente gerou menos que a mínima.</div>';
   } else {
   const todasColetas = (rc.ok?rc.linhas:[]).filter(l => cnpjLimpo(l['CNPJ'])===alvo);
   if (todasColetas.length) {
@@ -5069,11 +5095,36 @@ async function renderFaturamento(area) {
   const compSel = window._fatMesComp && meses.includes(window._fatMesComp) && window._fatMesComp!==mesAtual ? window._fatMesComp : null;
   const mesAnterior = compSel || (idxMes > 0 ? meses[idxMes-1] : null);
 
-  // mapa de tipo por NOME do cliente (a fonte de variação não traz CNPJ; casar por nome é mais confiável,
-  // e clientes multi-unidade são agrupados por nome mesmo).
+  // mapa de tipo por NOME do cliente (a fonte de variação não traz CNPJ).
+  // O casamento é TOLERANTE: o mesmo cliente aparece com grafias diferentes nos dois lugares
+  // (LTDA a mais, acento, pontuação). Antes a comparação era exata e, quando não casava,
+  // o sistema assumia "Contrato" — foi assim que a LCS Construtora, que é Eventual,
+  // apareceu como contratual. Agora, quando não casa mesmo, mostra "—" em vez de chutar.
   const norm = s => String(s||'').trim().toUpperCase().replace(/\s+/g,' ');
   const tipoPorNome = {};
-  cacheClientes.forEach(c => { tipoPorNome[norm(c['CLIENTE'])] = (c['TIPO']==='Eventual'?'Eventual':'Contrato'); });
+  const tipoPorNomeSolto = {};   // chave "frouxa": sem acento, sem pontuação, sem LTDA/SA/ME/EPP
+  const tipoDe = c => (String(c['TIPO']||'')==='Eventual' ? 'Eventual' : 'Contrato');
+  cacheClientes.forEach(c => {
+    tipoPorNome[norm(c['CLIENTE'])] = tipoDe(c);
+    const k = _finNormNome(c['CLIENTE']);
+    if (k && !(k in tipoPorNomeSolto)) tipoPorNomeSolto[k] = tipoDe(c);
+  });
+  // resolve o tipo do cliente do relatório: exato -> tolerante -> primeiras palavras -> "—"
+  function tipoDoCliente(nomeRel){
+    const ex = tipoPorNome[norm(nomeRel)];
+    if (ex) return ex;
+    const k = _finNormNome(nomeRel);
+    if (k && tipoPorNomeSolto[k]) return tipoPorNomeSolto[k];
+    if (k) {
+      const toks = k.split(' ').filter(w=>w.length>=3);
+      if (toks.length) {
+        const p2 = toks.slice(0,2).join(' ');
+        const achou = Object.keys(tipoPorNomeSolto).find(kk => kk===p2 || kk.startsWith(p2+' ') || (p2.length>=8 && (kk.includes(p2)||p2.includes(kk))));
+        if (achou) return tipoPorNomeSolto[achou];
+      }
+    }
+    return '';   // não achei este cliente na aba Clientes — não invento o tipo
+  }
 
   // valor do mês de uma linha. 'mes' é o mês de SERVIÇO; traduz pra coluna original (mês faturado).
   function valMes(linha, mes) {
@@ -5179,6 +5230,7 @@ async function renderFaturamento(area) {
   window._fatMesAnt = mesAnterior;
   window._fatRotulo = rotuloMes;
   window._tipoPorNome = tipoPorNome;
+  window._tipoDoCliente = tipoDoCliente;   // resolvedor tolerante, usado também no filtro e na exportação
   window._normNomeFat = norm;
   window._valMes = valMes;
   window._filtroFatTipo = 'todos';
@@ -5207,7 +5259,8 @@ function filtraTabelaFat() {
 
   let lista = cacheFat.slice();
   if (termo) lista = lista.filter(l => String(l['CLIENTE']||'').toLowerCase().includes(termo));
-  if (filtroTipo !== 'todos') lista = lista.filter(l => (tipos[normF(l['CLIENTE'])]||'Contrato') === filtroTipo);
+  const tipoDe = (nome) => (typeof window._tipoDoCliente==='function') ? window._tipoDoCliente(nome) : (tipos[normF(nome)]||'');
+  if (filtroTipo !== 'todos') lista = lista.filter(l => tipoDe(l['CLIENTE']) === filtroTipo);
 
   // funções de valor conforme a visão
   const media3 = l => { const vs=ultimos3.map(m=>vm(l,m)); return vs.reduce((a,b)=>a+b,0)/(vs.length||1); };
@@ -5229,13 +5282,13 @@ function filtraTabelaFat() {
     // colunas: cliente, tipo, mês-2, mês-1, mês atual (esquerda->direita, antigo->recente), variação do último par
     html = `<table class="fat-tabela"><thead><tr><th>Cliente</th><th>Tipo</th>${ultimos3.map(m=>`<th class="num">${rot(m)}</th>`).join('')}<th class="num">Variação</th></tr></thead><tbody>`;
     lista.slice(0,200).forEach(l => {
-      const tipo = tipos[normF(l['CLIENTE'])] || 'Contrato';
+      const tipo = tipoDe(l['CLIENTE']);
       const vs = ultimos3.map(m=>vm(l,m));
       const p = (vs.length>=2 && vs[vs.length-2]!==0) ? ((vs[vs.length-1]-vs[vs.length-2])/vs[vs.length-2]*100) : null;
       const varCol = p===null ? '<td class="num fat-var-zero">—</td>' : `<td class="num ${p>0.05?'fat-var-pos':p<-0.05?'fat-var-neg':'fat-var-zero'}">${p>0?'+':''}${p.toFixed(1)}%</td>`;
       html += `<tr onclick="abrirFicha('${cnpjLimpo(l['CNPJ']||'')}','${String(l['CLIENTE']||'').replace(/'/g,"\\'")}')">
         <td><b style="color:var(--cinza-900);">${l['CLIENTE']||'—'}</b></td>
-        <td><span class="tag ${tipo==='Eventual'?'tag-eventual':'tag-contrato'}">${tipo}</span></td>
+        <td>${tipo?`<span class="tag ${tipo==='Eventual'?'tag-eventual':'tag-contrato'}">${tipo}</span>`:`<span class="tag" style="background:var(--amarelo-bg);color:#8a6d00;" title="Este nome não foi encontrado na aba Clientes">—</span>`}</td>
         ${vs.map((v,i)=>`<td class="num" style="${i===vs.length-1?'font-weight:700;':'color:var(--cinza-600);'}">${fmtMoeda(v)}</td>`).join('')}
         ${varCol}
       </tr>`;
@@ -5244,12 +5297,12 @@ function filtraTabelaFat() {
   } else if (visao === 'media3') {
     html = `<table class="fat-tabela"><thead><tr><th>Cliente</th><th>Tipo</th><th class="num">Média 3 meses</th><th class="num" style="font-size:11px;">(${ultimos3.map(rot).join(', ')})</th></tr></thead><tbody>`;
     lista.slice(0,200).forEach(l => {
-      const tipo = tipos[normF(l['CLIENTE'])] || 'Contrato';
+      const tipo = tipoDe(l['CLIENTE']);
       const m = media3(l);
       const detalhe = ultimos3.map(mm=>fmtMoeda(vm(l,mm))).join(' · ');
       html += `<tr onclick="abrirFicha('${cnpjLimpo(l['CNPJ']||'')}','${String(l['CLIENTE']||'').replace(/'/g,"\\'")}')">
         <td><b style="color:var(--cinza-900);">${l['CLIENTE']||'—'}</b></td>
-        <td><span class="tag ${tipo==='Eventual'?'tag-eventual':'tag-contrato'}">${tipo}</span></td>
+        <td>${tipo?`<span class="tag ${tipo==='Eventual'?'tag-eventual':'tag-contrato'}">${tipo}</span>`:`<span class="tag" style="background:var(--amarelo-bg);color:#8a6d00;" title="Este nome não foi encontrado na aba Clientes">—</span>`}</td>
         <td class="num"><b>${fmtMoeda(m)}</b></td>
         <td class="num" style="color:var(--cinza-500);font-size:12px;">${detalhe}</td>
       </tr>`;
@@ -5266,7 +5319,7 @@ function filtraTabelaFat() {
     lista.slice(0,200).forEach(l => {
       const atual = vm(l, mes);
       const ant = mesAnt ? vm(l, mesAnt) : null;
-      const tipo = tipos[normF(l['CLIENTE'])] || 'Contrato';
+      const tipo = tipoDe(l['CLIENTE']);
       const pVar = (mesAnt && ant) ? ((atual-ant)/ant*100) : null;
       let varCol = '';
       if (mesAnt) {
@@ -5290,7 +5343,7 @@ function filtraTabelaFat() {
       const cliJs=String(l['CLIENTE']||'').replace(/'/g,"\\'");
       html += `<tr onclick="abrirFicha('${cnpjLimpo(l['CNPJ']||'')}','${cliJs}')">
         <td><b style="color:var(--cinza-900);">${l['CLIENTE']||'—'}</b></td>
-        <td><span class="tag ${tipo==='Eventual'?'tag-eventual':'tag-contrato'}">${tipo}</span></td>
+        <td>${tipo?`<span class="tag ${tipo==='Eventual'?'tag-eventual':'tag-contrato'}">${tipo}</span>`:`<span class="tag" style="background:var(--amarelo-bg);color:#8a6d00;" title="Este nome não foi encontrado na aba Clientes">—</span>`}</td>
         ${mesAnt?`<td class="num" style="color:var(--cinza-600);">${fmtMoeda(ant)}</td>`:''}
         <td class="num"><b>${fmtMoeda(atual)}</b></td>
         ${varCol}
@@ -5318,15 +5371,15 @@ function exportarFaturamento() {
   if (visao === '3meses') {
     cabTab = `<th>Cliente</th><th>Tipo</th>${ultimos3.map(m=>`<th>${rot(m)}</th>`).join('')}<th>Variação</th>`;
     linhas = lista.map(l=>{ const vs=ultimos3.map(m=>vm(l,m)); const p=(vs.length>=2&&vs[vs.length-2]!==0)?((vs[vs.length-1]-vs[vs.length-2])/vs[vs.length-2]*100):null;
-      return `<tr><td>${l['CLIENTE']||'—'}</td><td>${tipos[normF(l['CLIENTE'])]||'Contrato'}</td>${vs.map(v=>`<td>${fmtMoeda(v)}</td>`).join('')}<td>${p===null?'—':(p>0?'+':'')+p.toFixed(1)+'%'}</td></tr>`; }).join('');
+      return `<tr><td>${l['CLIENTE']||'—'}</td><td>${(typeof window._tipoDoCliente==='function'?window._tipoDoCliente(l['CLIENTE']):'')||'—'}</td>${vs.map(v=>`<td>${fmtMoeda(v)}</td>`).join('')}<td>${p===null?'—':(p>0?'+':'')+p.toFixed(1)+'%'}</td></tr>`; }).join('');
   } else if (visao === 'media3') {
     cabTab = `<th>Cliente</th><th>Tipo</th><th>Média 3 meses (${ultimos3.map(rot).join(', ')})</th>`;
     linhas = lista.map(l=>{ const vs=ultimos3.map(m=>vm(l,m)); const md=vs.reduce((a,b)=>a+b,0)/(vs.length||1);
-      return `<tr><td>${l['CLIENTE']||'—'}</td><td>${tipos[normF(l['CLIENTE'])]||'Contrato'}</td><td>${fmtMoeda(md)}</td></tr>`; }).join('');
+      return `<tr><td>${l['CLIENTE']||'—'}</td><td>${(typeof window._tipoDoCliente==='function'?window._tipoDoCliente(l['CLIENTE']):'')||'—'}</td><td>${fmtMoeda(md)}</td></tr>`; }).join('');
   } else {
     cabTab = `<th>Cliente</th><th>Tipo</th>${mesAnt?`<th>${rot(mesAnt)}</th>`:''}<th>${rot(mes)}</th>${mesAnt?'<th>Variação</th>':''}`;
     linhas = lista.map(l=>{ const a=vm(l,mes), b=mesAnt?vm(l,mesAnt):null; const p=(mesAnt&&b!==0)?((a-b)/b*100):null;
-      return `<tr><td>${l['CLIENTE']||'—'}</td><td>${tipos[normF(l['CLIENTE'])]||'Contrato'}</td>${mesAnt?`<td>${fmtMoeda(b)}</td>`:''}<td>${fmtMoeda(a)}</td>${mesAnt?`<td>${p===null?'novo':(p>0?'+':'')+p.toFixed(1)+'%'}</td>`:''}</tr>`; }).join('');
+      return `<tr><td>${l['CLIENTE']||'—'}</td><td>${(typeof window._tipoDoCliente==='function'?window._tipoDoCliente(l['CLIENTE']):'')||'—'}</td>${mesAnt?`<td>${fmtMoeda(b)}</td>`:''}<td>${fmtMoeda(a)}</td>${mesAnt?`<td>${p===null?'novo':(p>0?'+':'')+p.toFixed(1)+'%'}</td>`:''}</tr>`; }).join('');
   }
   const win = window.open('', '_blank');
   win.document.write(`<html><head><title>Faturamento — ${rot(mes)}</title>
@@ -9943,59 +9996,126 @@ function FIN_processarComissao(wb, st, nomeArquivo){
 // só p/ caçamba/roll-on/compactadora). Ignora cabeçalhos repetidos e linhas de resumo.
 // Deduplica por Num. Interno (identificador único de cada coleta).
 function FIN_processarServicos(texto, st){
-  // parse CSV simples (separador ;) — o relatório não tem aspas escapando ;
+  // ============================================================
+  // Importador do RELATÓRIO DE SERVIÇOS (.csv, separador ;)
+  //
+  // Duas medidas, porque são coisas diferentes:
+  //   COLETADO = o que a equipe realmente recolheu no mês
+  //   FATURADO = o que o cliente paga (respeita a mínima do contrato)
+  //
+  // O relatório já traz uma "linha de complemento de mínima": quando o
+  // cliente coleta menos que a mínima, aparece uma linha extra no último dia
+  // do mês fechando a conta. Ex.: La Braciera Matriz em junho — 20 coletas
+  // somando 149 sacos + 1 linha de 151 no dia 30 = 300, que é a mínima.
+  // Aqui essa linha é identificada e marcada, pra não contar como coleta.
+  // ============================================================
   const linhas = texto.split(/\r?\n/).filter(l=>l.trim());
   if (!linhas.length) { st.textContent='Arquivo vazio.'; return; }
   const parseLinha = l => l.split(';').map(c=>c.trim().replace(/^"|"$/g,''));
-  // usa o PRIMEIRO cabeçalho pra achar os índices (é o único com todas as colunas)
-  const cab = parseLinha(linhas[0]).map(c=>c.replace(/\uFEFF/g,''));
+  const cab = parseLinha(linhas[0]).map(c=>c.replace(/﻿/g,''));
   const norm = s => String(s).toLowerCase().replace(/ç/g,'c').replace(/ã|á|à/g,'a').replace(/é|ê/g,'e').replace(/í/g,'i').replace(/ó|ô/g,'o').replace(/ú/g,'u');
   const acha = termo => cab.findIndex(c => norm(c).includes(norm(termo)));
-  const iCli=acha('cliente'), iCnpj=acha('cnpj'), iData=acha('data'), iClasse=acha('classe'),
+  // O layout do relatório MUDA entre exportações (junho veio com 35 colunas,
+  // julho com 36). Por isso toda coluna é localizada pelo NOME, nunca pela posição.
+  const iCli=acha('cliente'), iCnpj=acha('cnpj'), iClasse=acha('classe'),
         iStatus=acha('status'), iEquip=acha('tipo de equip'), iResiduo=acha('residuo'),
-        iEnd=acha('end. de coleta'), iNum=acha('num. interno');
-  // Qtde - Serviço e Qtde - Taxa (cuidado: tem "Qtde. de Equip." que não serve).
-  // casa por "qtde"+"serv"/"taxa" sem depender do acento de "serviço" (encoding varia).
-  let iQServ=-1, iQTaxa=-1;
-  cab.forEach((c,i)=>{ const n=norm(c); if(n.includes('qtde')&&n.includes('serv')) iQServ=i; if(n.includes('qtde')&&n.includes('taxa')) iQTaxa=i; });
-
-  const jaTem = new Set(FINdados.coletas.map(x=>x.num));
+        iEnd=acha('end. de coleta'), iContrato=acha('contrato'), iFreq=acha('frequencia');
+  // "Data" tem que ser exata: existe também "Data de Descarte", que não serve.
+  let iData = cab.findIndex(c => norm(c).trim()==='data');
+  if (iData < 0) iData = acha('data');
+  let iQServ=-1, iMinServ=-1, iQTaxa=-1, iMinTaxa=-1, iTipoServ=-1;
+  cab.forEach((c,i)=>{ const n=norm(c);
+    if(n.includes('qtde')&&n.includes('serv')) iQServ=i;
+    if(n.includes('minima')&&n.includes('serv')) iMinServ=i;
+    if(n.includes('qtde')&&n.includes('taxa')) iQTaxa=i;
+    if(n.includes('minima')&&n.includes('taxa')) iMinTaxa=i;
+    if(n.includes('tipo')&&n.includes('- serv')) iTipoServ=i;
+  });
+  if (iQServ<0 || iData<0 || iCli<0 || iCnpj<0) {
+    st.innerHTML='Não reconheci as colunas deste arquivo (preciso de Cliente, CNPJ, Data e "Qtde. - Serviço"). Exporte de novo pelo mesmo caminho de sempre.';
+    st.style.color='var(--vermelho)'; return;
+  }
   const numColsCab = cab.length;
-  const reNum = /^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/;
+  const reCnpj = /^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/;
   const reData = /^(\d{2})\/(\d{2})\/(\d{2,4})/;
-  const EQUIP_PESO = ['cacamba','caçamba','roll on','roll-on','rollon','compactadora'];
+  const EQUIP_PESO = ['cacamba','caçamba','roll on','roll-on','rollon','compactadora','brooks'];
   const num2 = v => { let s=String(v||'').replace(/\./g,'').replace(',','.').replace(/[^\d.-]/g,''); const n=parseFloat(s); return isNaN(n)?0:n; };
-  let novos=0, ignoradas=0;
-  linhas.slice(1).forEach(l=>{
+
+  // 1) lê as linhas válidas do arquivo
+  const novas = [];
+  const mesesNoArquivo = new Set();
+  let ignoradas = 0;
+  linhas.slice(1).forEach((l, ordem)=>{
     const row = parseLinha(l);
-    // linha válida = tem colunas suficientes, CNPJ e data no formato certo, status concluído/liberado
-    if (row.length < numColsCab-2) { ignoradas++; return; }
+    if (row.length < numColsCab-2) { ignoradas++; return; }        // linha de resumo/rodapé
     const cnpj = (row[iCnpj]||'').trim();
-    if (!reNum.test(cnpj)) { ignoradas++; return; }
+    if (!reCnpj.test(cnpj)) { ignoradas++; return; }                // cabeçalho repetido ou linha solta
     const md = String(row[iData]||'').match(reData);
     if (!md) { ignoradas++; return; }
     const status = norm(row[iStatus]||'');
     if (!status.includes('conclu') && !status.includes('liberad')) { ignoradas++; return; }
-    const numInterno = (row[iNum]||'').trim() || (cnpj+'|'+row[iData]+'|'+row[iEquip]+'|'+Math.random());
-    if (jaTem.has(numInterno)) return; // dedup
-    // data -> ISO e semana do calendário (segunda a domingo)
-    let ano = md[3].length===2 ? '20'+md[3] : md[3];
+    const ano = md[3].length===2 ? '20'+md[3] : md[3];
     const dataISO = `${ano}-${md[2]}-${md[1]}`;
+    const ym = `${ano}-${md[2]}`;
+    mesesNoArquivo.add(ym);
     const dt = new Date(parseInt(ano), parseInt(md[2])-1, parseInt(md[1]));
     const equip = (row[iEquip]||'').trim();
     const ehPeso = EQUIP_PESO.some(e=>norm(equip).includes(norm(e)));
-    FINdados.coletas.push({
-      num: numInterno,
+    novas.push({
+      num: cnpj+'|'+dataISO+'|'+equip+'|'+ordem,   // identificador estável da LINHA (não da OS)
       cnpj, cliente:(row[iCli]||'').trim(),
-      equip, classe:(row[iClasse]||'').trim(), residuo:(row[iResiduo]||'').trim(),
-      endereco:(row[iEnd]||'').trim(),
-      data: dataISO, ym: `${ano}-${md[2]}`, semana: FIN_semanaDoMes(dt),
+      contrato: iContrato>=0 ? (row[iContrato]||'').trim() : '',
+      equip, tipoServ: iTipoServ>=0 ? (row[iTipoServ]||'').trim() : equip,
+      classe:(row[iClasse]||'').trim(), residuo:(row[iResiduo]||'').trim(),
+      endereco: iEnd>=0 ? (row[iEnd]||'').trim() : '',
+      data: dataISO, ym, semana: FIN_semanaDoMes(dt), ordem,
       qtdeServ: num2(row[iQServ]),
-      pesoTon: ehPeso ? num2(row[iQTaxa]) : 0
+      minimaServ: iMinServ>=0 ? num2(row[iMinServ]) : 0,
+      pesoTon: (ehPeso && iQTaxa>=0) ? num2(row[iQTaxa]) : 0,
+      minimaTaxa: (ehPeso && iMinTaxa>=0) ? num2(row[iMinTaxa]) : 0,
+      ehCompl: false
     });
-    jaTem.add(numInterno); novos++;
   });
-  st.textContent = `${novos} coletas novas (${FINdados.coletas.length} no total).`; st.style.color='var(--verde-medio)';
+  if (!novas.length) { st.innerHTML='Não encontrei nenhuma coleta válida neste arquivo. Verifique se é o Relatório de Serviços e se ele veio completo.'; st.style.color='var(--vermelho)'; return; }
+
+  // 2) marca a LINHA DE COMPLEMENTO DE MÍNIMA de cada cliente/serviço/mês.
+  //    Regra: o total do mês bate exatamente com a mínima, a última linha é a
+  //    que fez o total chegar lá, e ela divide a data com outra linha (é o
+  //    acerto lançado junto da última coleta).
+  const grupos = {};
+  novas.forEach(c=>{ const k=c.cliente+'||'+c.tipoServ+'||'+c.ym; (grupos[k]=grupos[k]||[]).push(c); });
+  let nCompl = 0;
+  Object.values(grupos).forEach(g=>{
+    const minima = Math.max(...g.map(x=>x.minimaServ||0));
+    if (!(minima > 0)) return;
+    const total = g.reduce((s,x)=>s+x.qtdeServ,0);
+    if (Math.abs(total-minima) > 0.001) return;         // não fechou na mínima: nada a marcar
+    g.sort((a,b)=> a.data===b.data ? a.ordem-b.ordem : (a.data<b.data?-1:1));
+    const ult = g[g.length-1];
+    const semUlt = total - ult.qtdeServ;
+    const dividiData = g.filter(x=>x.data===ult.data).length > 1;
+    if (semUlt < minima - 0.001 && dividiData) { ult.ehCompl = true; nCompl++; }
+  });
+
+  // 3) SUBSTITUI os meses presentes no arquivo (não acumula).
+  //    Antes o sistema só evitava repetir pelo "Num. Interno" — que vem em branco
+  //    neste relatório. Resultado: subir o mesmo mês duas vezes dobrava tudo.
+  const antes = FINdados.coletas.length;
+  FINdados.coletas = FINdados.coletas.filter(c=>!mesesNoArquivo.has(c.ym));
+  const removidas = antes - FINdados.coletas.length;
+  novas.forEach(c=>FINdados.coletas.push(c));
+
+  const meses = [...mesesNoArquivo].sort().map(m=>finRotMes(m)).join(', ');
+  const dias = [...new Set(novas.map(c=>c.data))].sort();
+  const nClientes = new Set(novas.map(c=>c.cnpj)).size;
+  const primeiro = dias[0]||'', ultimo = dias[dias.length-1]||'';
+  const fmtD = d => d ? d.split('-').reverse().join('/') : '';
+  // de propósito não somamos as quantidades aqui: saco, contêiner e quilo não se somam
+  st.innerHTML = `${novas.length} linhas de ${meses} · ${nClientes} clientes · ${fmtD(primeiro)} a ${fmtD(ultimo)}`
+    + (nCompl?` · ${nCompl} complemento(s) de mínima identificado(s)`:'')
+    + (removidas?` · substituiu ${removidas} linha(s) do mesmo mês`:'')
+    + `<div style="font-size:11px;color:var(--cinza-500);margin-top:3px;"><i class="ti ti-info-circle"></i> Confira o período: se o mês não veio inteiro, os números ficam menores que o real.</div>`;
+  st.style.color='var(--verde-medio)';
 }
 
 // número da semana dentro do mês por BLOCOS FIXOS DE DIAS (opção A):
@@ -10513,13 +10633,23 @@ function FIN_renderColetas(){
   // meses disponíveis
   const meses=[...new Set(FINdados.coletas.map(c=>c.ym))].sort();
   const modo = window._coletaModo || 'mescomp';
+  const agrup = window._coletaAgrup || 'unidade';
   const rotYM = ym=>{ const [a,m]=ym.split('-'); return (FIN_MESNOME[m]||m)+'/'+a.slice(2); };
+  // pra agrupar por GRUPO é preciso ter a aba Clientes carregada (é de lá que vem o campo Grupo)
+  if (agrup==='grupo' && !cacheClientes && typeof carregarClientes==='function') {
+    carregarClientes().then(()=>FIN_renderColetas()).catch(()=>{});
+  }
   p.innerHTML=`
     <div class="filtros">
       <select onchange="window._coletaModo=this.value;FIN_renderColetas()">
         <option value="mescomp" ${modo==='mescomp'?'selected':''}>Comparar por mês (entre 2 meses)</option>
         <option value="semana" ${modo==='semana'?'selected':''}>Comparar por semana (entre 2 meses)</option>
         <option value="mes" ${modo==='mes'?'selected':''}>Visão mensal por cliente</option>
+      </select>
+      <span style="font-size:13px;color:var(--cinza-600);">Ver:</span>
+      <select onchange="window._coletaAgrup=this.value;FIN_renderColetas()" title="Unidade = cada loja separada (La Braciera). Grupo = junta os CNPJs pelo campo Grupo da aba Clientes (Gara School, PUC).">
+        <option value="unidade" ${agrup==='unidade'?'selected':''}>Por unidade (cada CNPJ)</option>
+        <option value="grupo" ${agrup==='grupo'?'selected':''}>Por grupo (junta as unidades)</option>
       </select>
       <button class="btn sec" onclick="window.print()"><i class="ti ti-printer"></i> Exportar / Imprimir</button>
     </div>
@@ -10529,25 +10659,73 @@ function FIN_renderColetas(){
   else FIN_renderColetaMes(meses, rotYM);
 }
 
-// agrupa coletas por chave, somando qtde e peso
+// ============================================================
+// Agrupamento das coletas.
+// A pessoa escolhe na tela como quer ver:
+//   'unidade' (padrão) — cada unidade separada, como vem no relatório.
+//                        É o certo pra La Braciera, que tem 12 lojas.
+//   'grupo'            — junta pelo campo GRUPO da aba Clientes.
+//                        É o certo pra Gara School (3 CNPJs) e pra PUC.
+// Antes o sistema decidia sozinho, removendo sufixos como "- MATRIZ" do nome —
+// e acabava colando lojas diferentes que deviam ficar separadas.
+// ============================================================
+function FIN_grupoDoCliente(cnpj, nome){
+  const alvo=String(cnpj||'').replace(/\D/g,'');
+  let c=null;
+  if (alvo) c=(cacheClientes||[]).find(x=>String(x['CNPJ']||'').replace(/\D/g,'')===alvo);
+  if (!c && nome) { const n=FIN_finNormNomeCli(nome); c=(cacheClientes||[]).find(x=>FIN_finNormNomeCli(x['CLIENTE'])===n); }
+  const g=c?String(c['GRUPO']||'').trim():'';
+  return g || '';
+}
+function FIN_chaveCliente(c){
+  if ((window._coletaAgrup||'unidade')==='grupo'){
+    const g=FIN_grupoDoCliente(c.cnpj, c.cliente);
+    if (g) return 'G::'+g.toUpperCase();
+    return 'N::'+FIN_finNormNomeCli(c.cliente);   // sem grupo definido: fica sozinho, pelo nome
+  }
+  return 'U::'+String(c.cliente||'').trim().toUpperCase();
+}
+function FIN_rotuloCliente(c){
+  if ((window._coletaAgrup||'unidade')==='grupo'){
+    const g=FIN_grupoDoCliente(c.cnpj, c.cliente);
+    if (g) return g + ' (grupo)';
+  }
+  return c.cliente;
+}
+// agrupa as coletas somando COLETADO (real) e FATURADO (respeitando a mínima)
 function FIN_agrupaColetas(filtro){
   const g={};
   FINdados.coletas.filter(filtro).forEach(c=>{
-    // agrupa por NOME do cliente (junta todas as unidades/CNPJs da mesma empresa) + equipamento + classe.
-    // Antes usava CNPJ, mas clientes como PUC têm vários CNPJs por unidade, e a numeração muda
-    // entre relatórios — isso fazia a mesma empresa parecer que "parou" numa unidade e "nasceu" em outra.
-    const nomeChave = FIN_finNormNomeCli(c.cliente);
-    const chave=nomeChave+'||'+c.equip+'||'+c.classe;
-    if(!g[chave]) g[chave]={cliente:c.cliente,cnpj:c.cnpj,equip:c.equip,classe:c.classe,residuo:c.residuo,qtde:0,peso:0};
-    g[chave].qtde+=c.qtdeServ; g[chave].peso+=c.pesoTon;
+    // A chave NÃO inclui a classe de propósito: a mínima do contrato é por equipamento,
+    // e um mesmo equipamento pode aparecer com classes diferentes. Se a classe entrasse na
+    // chave, a mínima seria aplicada uma vez em cada pedaço e o faturado saía dobrado.
+    const chave=FIN_chaveCliente(c)+'||'+c.equip;
+    if(!g[chave]) g[chave]={cliente:FIN_rotuloCliente(c),cnpj:c.cnpj,equip:c.equip,classe:'',residuo:c.residuo,
+                            qtde:0,coletado:0,linhas:0,minima:0,peso:0,_porServ:{},_classes:new Set()};
+    const o=g[chave];
+    o.linhas++;
+    if(c.classe) o._classes.add(c.classe);
+    o.peso+=(c.pesoTon||0);
+    if(!c.ehCompl) o.coletado+=(c.qtdeServ||0);
+    // faturado precisa respeitar a mínima de cada tipo de serviço separadamente
+    const ks=(c.tipoServ||c.equip||'')+'||'+(c.cnpj||'');
+    const p=o._porServ[ks]||(o._porServ[ks]={soma:0,minima:0});
+    p.soma+=(c.qtdeServ||0);
+    if((c.minimaServ||0)>p.minima) p.minima=(c.minimaServ||0);
+  });
+  Object.values(g).forEach(o=>{
+    o.faturado=Object.values(o._porServ).reduce((s,p)=>s+Math.max(p.soma,p.minima),0);
+    o.minima=Object.values(o._porServ).reduce((s,p)=>s+p.minima,0);
+    o.classe=[...o._classes].join(', ');
+    o.qtde=o.coletado;                       // compatibilidade com telas antigas
+    delete o._porServ; delete o._classes;
   });
   return g;
 }
-// normaliza o nome do cliente pra juntar unidades (remove sufixos de unidade, acentos, etc)
+// normaliza o nome do cliente (acentos/pontuação) — usado só pra casar com a aba Clientes
 function FIN_finNormNomeCli(s){
   return String(s||'').toUpperCase()
     .replace(/[ÁÀÂÃ]/g,'A').replace(/[ÉÊ]/g,'E').replace(/[Í]/g,'I').replace(/[ÓÔÕ]/g,'O').replace(/[Ú]/g,'U').replace(/Ç/g,'C')
-    .replace(/\s*[-–]\s*(UNIDADE|UNID|FILIAL|MATRIZ|CAMPUS|BLOCO|PREDIO).*$/i,'')
     .replace(/[^A-Z0-9 ]/g,'').replace(/\s+/g,' ').trim();
 }
 
@@ -10570,9 +10748,11 @@ function FIN_renderColetaComp(meses, rotYM, porSemana){
   const chaves=[...new Set([...Object.keys(gA),...Object.keys(gB)])];
   let linhas=chaves.map(k=>{
     const a=gA[k], b=gB[k]; const base=a||b;
-    const qa=a?a.qtde:0, qb=b?b.qtde:0;
+    const qa=a?a.coletado:0, qb=b?b.coletado:0;                 // COLETADO de verdade
+    const fa=a?a.faturado:0, fb=b?b.faturado:0;                 // FATURADO (respeita a mínima)
     const varPct = qa===0 ? (qb>0?null:0) : ((qb-qa)/qa*100);
-    return {cliente:base.cliente, equip:base.equip, classe:base.classe, qa, qb, varPct, peso_a:a?a.peso:0, peso_b:b?b.peso:0};
+    return {cliente:base.cliente, equip:base.equip, classe:base.classe, qa, qb, fa, fb, varPct,
+            minima:(b?b.minima:(a?a.minima:0)), peso_a:a?a.peso:0, peso_b:b?b.peso:0};
   });
   // busca por nome do cliente
   const busca=(window._coletaBusca||'').toLowerCase();
@@ -10624,15 +10804,26 @@ function FIN_renderColetaComp(meses, rotYM, porSemana){
     <div class="card">
       <h2>${titulo}</h2>
       <p style="font-size:12px;color:var(--cinza-500);margin-bottom:8px;">Verde = subiu, vermelho = caiu. Mostrando ${linhasEx.length} de ${linhas.length}.</p>
-      <table><thead><tr><th>Cliente</th><th>Equipamento / Resíduo</th><th>${rotYM(mesA)}</th><th>${rotYM(mesB)}</th><th>Variação</th></tr></thead><tbody>
+      <table><thead><tr>
+        <th rowspan="2" style="vertical-align:bottom;">Cliente</th><th rowspan="2" style="vertical-align:bottom;">Equipamento / Resíduo</th>
+        <th colspan="2" style="text-align:center;border-bottom:1px solid rgba(255,255,255,.25);">${rotYM(mesA)}</th>
+        <th colspan="2" style="text-align:center;border-bottom:1px solid rgba(255,255,255,.25);">${rotYM(mesB)}</th>
+        <th rowspan="2" style="vertical-align:bottom;">Variação<br><span style="font-weight:400;font-size:10px;">(coletado)</span></th></tr>
+        <tr><th style="font-size:11px;">Coletado</th><th style="font-size:11px;">Faturado</th><th style="font-size:11px;">Coletado</th><th style="font-size:11px;">Faturado</th></tr></thead><tbody>
       ${linhasEx.map(l=>{
         const cor = l.varPct===null?'':(l.varPct>0.5?'pos':l.varPct<-0.5?'neg':'');
         const vtxt = l.varPct===null?'<span class="badge" style="background:var(--verde-claro-bg);color:var(--verde-escuro);">novo</span>':(l.qb===0?'<span class="neg">parou</span>':(l.varPct>0?'+':'')+l.varPct.toFixed(0)+'%');
         const pa = l.peso_a?` <span style="color:var(--cinza-400);font-size:11px;">(${l.peso_a.toFixed(1)}t)</span>`:'';
         const pb = l.peso_b?` <span style="color:var(--cinza-400);font-size:11px;">(${l.peso_b.toFixed(1)}t)</span>`:'';
-        return `<tr><td><b>${l.cliente}</b></td><td style="font-size:12px;color:var(--cinza-600);">${l.equip}<br>${l.classe}</td><td>${l.qa}${pa}</td><td>${l.qb}${pb}</td><td class="${cor}">${vtxt}</td></tr>`;
-      }).join('')||'<tr><td colspan=5 class="vazio">Nenhum cliente neste filtro.</td></tr>'}
+        // faturado acima do coletado = a mínima entrou na conta (o cliente pagou mais do que gerou)
+        const fmtF=(f,q)=>f>q+0.001?`<b style="color:var(--roxo);" title="A mínima do contrato entrou na conta">${Math.round(f)}</b> <span style="font-size:10px;color:var(--roxo);">mín.</span>`:`<span style="color:var(--cinza-500);">${Math.round(f)}</span>`;
+        return `<tr><td><b>${l.cliente}</b></td><td style="font-size:12px;color:var(--cinza-600);">${l.equip}<br>${l.classe}</td><td>${l.qa}${pa}</td><td>${fmtF(l.fa,l.qa)}</td><td>${l.qb}${pb}</td><td>${fmtF(l.fb,l.qb)}</td><td class="${cor}">${vtxt}</td></tr>`;
+      }).join('')||'<tr><td colspan=7 class="vazio">Nenhum cliente neste filtro.</td></tr>'}
       </tbody></table>
+      <p style="font-size:11.5px;color:var(--cinza-500);margin-top:10px;line-height:1.6;">
+        <b>Coletado</b> = o que a equipe realmente recolheu. <b>Faturado</b> = o que o cliente paga, já respeitando a mínima do contrato.<br>
+        Quando o faturado aparece <b style="color:var(--roxo);">em roxo com "mín."</b>, o cliente gerou menos que a mínima e está pagando por ela — a coleta caiu, mas a receita não.
+      </p>
     </div>`;
 }
 
@@ -10642,35 +10833,47 @@ function FIN_renderColetaMes(meses, rotYM){
   const mesAnt = meses[meses.indexOf(mes)-1];
   const g=FIN_agrupaColetas(c=>c.ym===mes);
   const gAnt = mesAnt ? FIN_agrupaColetas(c=>c.ym===mesAnt) : {};
-  // agrupa por cliente (junta os equipamentos/resíduos dentro)
+  // agrupa por cliente/grupo (junta os equipamentos/resíduos dentro).
+  // A chave é o RÓTULO já resolvido — assim funciona tanto por unidade quanto por grupo.
   const porCliente={};
-  Object.keys(g).forEach(k=>{ const it=g[k]; if(!porCliente[it.cnpj]) porCliente[it.cnpj]={cliente:it.cliente,itens:[],totalQ:0,totalP:0}; 
-    const ant=gAnt[k]; porCliente[it.cnpj].itens.push({equip:it.equip,classe:it.classe,qtde:it.qtde,peso:it.peso,qtdeAnt:ant?ant.qtde:null});
-    porCliente[it.cnpj].totalQ+=it.qtde; porCliente[it.cnpj].totalP+=it.peso;
+  Object.keys(g).forEach(k=>{ const it=g[k];
+    const kc=it.cliente;
+    if(!porCliente[kc]) porCliente[kc]={cliente:it.cliente,itens:[],totalQ:0,totalF:0,totalP:0};
+    const ant=gAnt[k];
+    porCliente[kc].itens.push({equip:it.equip,classe:it.classe,coletado:it.coletado,faturado:it.faturado,peso:it.peso,qtdeAnt:ant?ant.coletado:null});
+    porCliente[kc].totalQ+=it.coletado; porCliente[kc].totalF+=it.faturado; porCliente[kc].totalP+=it.peso;
   });
-  const lista=Object.values(porCliente).sort((a,b)=>b.totalQ-a.totalQ);
+  const busca=(window._coletaBusca||'').toLowerCase();
+  let lista=Object.values(porCliente);
+  if(busca) lista=lista.filter(x=>String(x.cliente||'').toLowerCase().includes(busca));
+  lista.sort((a,b)=>b.totalQ-a.totalQ);
   area.innerHTML=`
-    <div class="filtros" style="margin-bottom:10px;">
+    <div class="filtros" style="margin-bottom:10px;flex-wrap:wrap;">
       <span style="font-size:13px;color:var(--cinza-600);">Mês</span>
       <select onchange="window._coletaMesUnico=this.value;FIN_renderColetas()">${meses.map(m=>`<option value="${m}" ${m===mes?'selected':''}>${rotYM(m)}</option>`).join('')}</select>
       ${mesAnt?`<span style="font-size:12px;color:var(--cinza-500);">(comparando com ${rotYM(mesAnt)})</span>`:''}
+      <input type="text" placeholder="Buscar cliente..." value="${(window._coletaBusca||'').replace(/"/g,'&quot;')}" oninput="window._coletaBusca=this.value;FIN_renderColetas()" style="padding:7px 10px;border:1.5px solid var(--cinza-300);border-radius:8px;font-size:13px;min-width:180px;margin-left:auto;">
     </div>
-    ${lista.map(cl=>`
-      <div class="card" style="padding:14px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+    <div style="font-size:11.5px;color:var(--cinza-500);margin-bottom:10px;"><b>Coletado</b> = recolhido de verdade · <b>Faturado</b> = o que o cliente paga (com a mínima do contrato). ${lista.length} cliente(s).</div>
+    ${lista.map(cl=>{
+      const usouMin = cl.totalF > cl.totalQ + 0.001;
+      return `
+      <div class="card" style="padding:14px;${usouMin?'border-left:3px solid var(--roxo);':''}">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:10px;flex-wrap:wrap;">
           <b style="font-size:14px;">${cl.cliente}</b>
-          <span style="font-size:12px;color:var(--cinza-500);">${cl.totalQ} equip.${cl.totalP?` · ${cl.totalP.toFixed(1)}t`:''}</span>
+          <span style="font-size:12px;color:var(--cinza-500);">Coletado <b style="color:var(--cinza-800);">${Math.round(cl.totalQ)}</b> · Faturado <b style="color:${usouMin?'var(--roxo)':'var(--cinza-800)'};">${Math.round(cl.totalF)}</b>${usouMin?' <span style="color:var(--roxo);">(mínima)</span>':''}${cl.totalP?` · ${cl.totalP.toFixed(1)}t`:''}</span>
         </div>
         <table><tbody>
         ${cl.itens.map(it=>{
           let vtxt='';
-          if(it.qtdeAnt!=null && it.qtdeAnt>0){ const v=(it.qtde-it.qtdeAnt)/it.qtdeAnt*100; vtxt=`<span class="${v>0.5?'pos':v<-0.5?'neg':''}">${v>0?'+':''}${v.toFixed(0)}%</span> <span style="color:var(--cinza-400);font-size:11px;">(era ${it.qtdeAnt})</span>`; }
+          if(it.qtdeAnt!=null && it.qtdeAnt>0){ const v=(it.coletado-it.qtdeAnt)/it.qtdeAnt*100; vtxt=`<span class="${v>0.5?'pos':v<-0.5?'neg':''}">${v>0?'+':''}${v.toFixed(0)}%</span> <span style="color:var(--cinza-400);font-size:11px;">(era ${Math.round(it.qtdeAnt)})</span>`; }
           else if(it.qtdeAnt===null && mesAnt){ vtxt='<span class="badge" style="background:var(--verde-claro-bg);color:var(--verde-escuro);">novo</span>'; }
-          return `<tr><td style="font-size:12px;">${it.equip} · ${it.classe}</td><td style="text-align:right;"><b>${it.qtde}</b>${it.peso?` <span style="color:var(--cinza-400);font-size:11px;">${it.peso.toFixed(1)}t</span>`:''}</td><td style="text-align:right;">${vtxt}</td></tr>`;
+          const fat = it.faturado>it.coletado+0.001 ? `<span style="color:var(--roxo);font-size:11px;"> · fat. ${Math.round(it.faturado)} (mín.)</span>` : '';
+          return `<tr><td style="font-size:12px;">${it.equip} · ${it.classe}</td><td style="text-align:right;"><b>${Math.round(it.coletado)}</b>${fat}${it.peso?` <span style="color:var(--cinza-400);font-size:11px;">${it.peso.toFixed(1)}t</span>`:''}</td><td style="text-align:right;">${vtxt}</td></tr>`;
         }).join('')}
         </tbody></table>
-      </div>
-    `).join('')}`;
+      </div>`;
+    }).join('')||'<div class="card"><div class="vazio">Nenhum cliente encontrado.</div></div>'}`;
 }
 
 // ============ VARIAÇÃO DE FATURAMENTO (relatório geral de todos os clientes) ============
@@ -10736,7 +10939,9 @@ function FIN_anoRefFat(){ const anos=(FINdados.coletas||[]).map(c=>parseInt(Stri
 function FIN_ymServicoDeNome(nomeFaturado, ano){ const idx=FIN_MES_IDX[String(nomeFaturado||'').trim().toLowerCase()]; if(!idx) return ''; let m=idx-1, a=ano; if(m<1){ m=12; a=ano-1; } return a+'-'+String(m).padStart(2,'0'); }
 function FIN_normNomeMot(s){ return String(s||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Z0-9 ]/g,'').replace(/\s+/g,' ').trim(); }
 function FIN_chaveMotivo(cliente,mes){ return FIN_normNomeMot(cliente)+'||'+String(mes||'').trim().toUpperCase(); }
-function FIN_qtdeColetasClienteYM(cliente, ym){ const n=FIN_normNomeMot(cliente); return (FINdados.coletas||[]).filter(c=>c.ym===ym && FIN_normNomeMot(c.cliente)===n).reduce((s,c)=>s+(parseFloat(c.qtdeServ)||0),0); }
+// para explicar a variação do faturamento, o que interessa é o COLETADO de verdade
+// (a linha de complemento de mínima não é coleta — incluí-la mascararia a queda)
+function FIN_qtdeColetasClienteYM(cliente, ym){ const n=FIN_normNomeMot(cliente); return (FINdados.coletas||[]).filter(c=>c.ym===ym && !c.ehCompl && FIN_normNomeMot(c.cliente)===n).reduce((s,c)=>s+(parseFloat(c.qtdeServ)||0),0); }
 
 let _motivosFat=null, _reajFat=null, _assessFat=null;
 window._fatMotivoSugestoes = window._fatMotivoSugestoes || {};
