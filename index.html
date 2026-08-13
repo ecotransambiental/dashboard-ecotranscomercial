@@ -393,10 +393,10 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.13</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.13c</div>
       </div>
     </aside>
-    <!-- VERSÃO DO DASHBOARD: v2026.08.13 — desempenho: leituras filtradas no servidor, cache invalidado por ação, escrita sem repetição cega -->
+    <!-- VERSÃO DO DASHBOARD: v2026.08.13c — desempenho: leituras filtradas no servidor, cache invalidado por ação, escrita sem repetição cega -->
 
     <!-- Coluna nível 2: submódulos -->
     <div class="subcoluna" id="subcoluna">
@@ -808,6 +808,24 @@ const _cacheBusca = {};
 // Assim ganhamos velocidade sem o risco de mostrar dado velho após salvar.
 const _cacheDados = {};
 const _CACHE_TTL = 300000; // 5 minutos (a invalidação por ação cuida do que ficou velho)
+// Contador de pedidos em andamento + relógio na tela. Serve pra distinguir
+// "está lento" de "travou" — a diferença mais importante pra quem está usando.
+window._reqAtivas = 0;
+function _reqMostrar(){
+  let el = document.getElementById('req-indicador');
+  if (window._reqAtivas <= 0) { if (el) el.remove(); if (window._reqTimer) { clearInterval(window._reqTimer); window._reqTimer=null; } return; }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'req-indicador';
+    el.style.cssText = 'position:fixed;bottom:16px;left:16px;z-index:9998;background:var(--verde-escuro);color:#fff;padding:8px 14px;border-radius:20px;font-size:12px;font-family:var(--fonte-corpo);box-shadow:0 4px 12px rgba(0,0,0,.2);display:flex;align-items:center;gap:8px;';
+    document.body.appendChild(el);
+    window._reqInicio = Date.now();
+    window._reqTimer = setInterval(_reqMostrar, 1000);
+  }
+  const seg = Math.round((Date.now()-window._reqInicio)/1000);
+  el.innerHTML = `<i class="ti ti-loader"></i> Buscando dados no servidor… ${seg}s`
+    + (seg>=20 ? ' <span style="opacity:.8;">(hoje está devagar, aguarde)</span>' : '');
+}
 async function buscarDados(aba, forcar, filtroCnpj) {
   const agora = Date.now();
   // chave de cache inclui o CNPJ quando filtrado (não mistura filtrado com aba inteira)
@@ -818,13 +836,18 @@ async function buscarDados(aba, forcar, filtroCnpj) {
   }
   const payload = { acao: 'dados', token: sessaoToken, aba: aba };
   if (filtroCnpj) payload.filtroCnpj = filtroCnpj;
-  const resp = await fetch(API_URL, {
-    method: 'POST',
-    body: JSON.stringify(payload)
-  });
-  const dados = await resp.json();
-  _cacheDados[chave] = { t: agora, dados: dados };
-  return dados;
+  window._reqAtivas++; _reqMostrar();
+  try {
+    const resp = await fetch(API_URL, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+    const dados = await resp.json();
+    _cacheDados[chave] = { t: agora, dados: dados };
+    return dados;
+  } finally {
+    window._reqAtivas--; _reqMostrar();
+  }
 }
 function limparCacheBusca(){ for (const k in _cacheDados) delete _cacheDados[k]; }
 
@@ -905,8 +928,12 @@ function iniciarApp() {
   document.getElementById('footer-role').textContent = usuarioAtual.role;
   document.getElementById('badge-perfil').textContent = usuarioAtual.role;
   renderModulos();
-  // sininho roda em segundo plano (não trava a entrada no sistema)
-  setTimeout(()=>{ atualizarSino(); }, 1500);
+  // O sininho lê várias abas. Como o servidor atende um pedido por vez, se ele disparar
+  // junto com a primeira tela, os dois disputam a fila e tudo parece travado.
+  // Por isso ele espera a tela inicial acabar de carregar (ou 8s, o que vier primeiro).
+  const _iniciarSino = () => { if (window._sinoIniciado) return; window._sinoIniciado = true; atualizarSino(); };
+  const _esperaFila = setInterval(()=>{ if ((window._reqAtivas||0) === 0) { clearInterval(_esperaFila); _iniciarSino(); } }, 1200);
+  setTimeout(()=>{ clearInterval(_esperaFila); _iniciarSino(); }, 8000);
 }
 
 
@@ -972,6 +999,29 @@ function selecionarSub(subId, subNome, btnEl) {
   renderConteudo(subId, subNome);
 }
 
+// ============================================================
+// REDE DE SEGURANÇA DAS TELAS
+// Toda tela é carregada por aqui. Se a leitura falhar (servidor demorou, aba não existe,
+// internet caiu), em vez de deixar o "Carregando..." girando pra sempre, mostramos o que
+// aconteceu e um botão pra tentar de novo. Ficar girando sem fim era o pior dos mundos:
+// a pessoa não sabia se era lento ou se tinha quebrado.
+// ============================================================
+function _telaErro(area, nome, e){
+  const msg = String((e && e.message) || e || 'erro desconhecido');
+  area.innerHTML = `<div class="placeholder" style="border-color:var(--vermelho-borda);">
+    <i class="ti ti-plug-connected-x" style="color:var(--vermelho);"></i>
+    <h2>Não consegui carregar ${nome||'esta tela'}</h2>
+    <p>O servidor não respondeu a tempo. Costuma ser passageiro — normalmente funciona na segunda tentativa.</p>
+    <p style="font-size:11px;color:var(--cinza-400);margin-top:6px;">Detalhe técnico: ${msg}</p>
+    <button class="ficha-btn-primario" style="margin-top:14px;padding:10px 18px;border:none;border-radius:8px;cursor:pointer;font-size:13px;" onclick="renderConteudo(subAtual, subNomeAtual)"><i class="ti ti-refresh"></i> Tentar de novo</button>
+  </div>`;
+}
+function _tela(fn, area, nome, arg2){
+  try {
+    const p = (arg2!==undefined) ? fn(area, arg2) : fn(area);
+    if (p && typeof p.catch === 'function') p.catch(e=>_telaErro(area, nome, e));
+  } catch(e) { _telaErro(area, nome, e); }
+}
 // ---- Conteúdo: telas-chave já leem dados reais; resto é placeholder ----
 async function renderConteudo(subId, subNome) {
   const area = document.getElementById('area-conteudo');
@@ -984,31 +1034,31 @@ async function renderConteudo(subId, subNome) {
   }
 
   // Telas ricas (componentes próprios)
-  if (subId === 'cart-clientes') { renderClientes(area); return; }
-  if (subId === 'pend-home')     { renderPendencias(area); return; }
-  if (subId === 'crm-funil')     { renderKanban(area); return; }
-  if (subId === 'cart-reajustes'){ renderReajustes(area); return; }
-  if (subId === 'cart-inadimplencia'){ renderInadimplencia(area); return; }
-  if (subId === 'cart-graficos'){ renderGraficos(area); return; }
-  if (subId === 'cart-faturamento'){ renderFaturamento(area); return; }
-  if (subId === 'cart-aprovacoes'){ renderAprovacoes(area); return; }
-  if (subId === 'crm-precificacao'){ renderPrecificacao(area); return; }
-  if (subId === 'crm-roteirizacao'){ renderRoteirizacao(area); return; }
-  if (subId === 'crm-propostas'){ renderPropostas(area); return; }
-  if (subId === 'crm-solicitacoes'){ renderSolicitacoes(area); return; }
-  if (subId === 'crm-atividades'){ renderAtividadesCRM(area); return; }
-  if (subId === 'crm-relatorios'){ renderRelatoriosCRM(area); return; }
-  if (subId === 'crm-resultados'){ renderResultadosCRM(area); return; }
-  if (subId === 'cart-cancelados'){ renderCancelados(area); return; }
-  if (subId && subId.indexOf('fin-')===0){ renderFinanceiro(area, subId); return; }
-  if (subId === 'cart-contratos'){ renderContratos(area); return; }
-  if (subId === 'cart-quematende'){ renderQuemAtende(area); return; }
-  if (subId === 'ag-dia' || subId === 'ag-mes' || subId === 'ag-semana'){ renderAgenda(area, subId.replace('ag-','')); return; }
-  if (subId === 'cart-visao'){ renderVisaoCarteira(area); return; }
-  if (subId === 'reg-rgg'){ renderRegula(area, 'rgg'); return; }
-  if (subId === 'reg-sigor'){ renderRegula(area, 'sigor'); return; }
-  if (subId === 'reg-renov'){ renderRenovados(area); return; }
-  if (subId === 'reg-visao'){ renderRegulaVisao(area); return; }
+  if (subId === 'cart-clientes') { _tela(renderClientes, area, subNome); return; }
+  if (subId === 'pend-home')     { _tela(renderPendencias, area, subNome); return; }
+  if (subId === 'crm-funil')     { _tela(renderKanban, area, subNome); return; }
+  if (subId === 'cart-reajustes'){ _tela(renderReajustes, area, subNome); return; }
+  if (subId === 'cart-inadimplencia'){ _tela(renderInadimplencia, area, subNome); return; }
+  if (subId === 'cart-graficos'){ _tela(renderGraficos, area, subNome); return; }
+  if (subId === 'cart-faturamento'){ _tela(renderFaturamento, area, subNome); return; }
+  if (subId === 'cart-aprovacoes'){ _tela(renderAprovacoes, area, subNome); return; }
+  if (subId === 'crm-precificacao'){ _tela(renderPrecificacao, area, subNome); return; }
+  if (subId === 'crm-roteirizacao'){ _tela(renderRoteirizacao, area, subNome); return; }
+  if (subId === 'crm-propostas'){ _tela(renderPropostas, area, subNome); return; }
+  if (subId === 'crm-solicitacoes'){ _tela(renderSolicitacoes, area, subNome); return; }
+  if (subId === 'crm-atividades'){ _tela(renderAtividadesCRM, area, subNome); return; }
+  if (subId === 'crm-relatorios'){ _tela(renderRelatoriosCRM, area, subNome); return; }
+  if (subId === 'crm-resultados'){ _tela(renderResultadosCRM, area, subNome); return; }
+  if (subId === 'cart-cancelados'){ _tela(renderCancelados, area, subNome); return; }
+  if (subId && subId.indexOf('fin-')===0){ _tela(renderFinanceiro, area, subNome, subId); return; }
+  if (subId === 'cart-contratos'){ _tela(renderContratos, area, subNome); return; }
+  if (subId === 'cart-quematende'){ _tela(renderQuemAtende, area, subNome); return; }
+  if (subId === 'ag-dia' || subId === 'ag-mes' || subId === 'ag-semana'){ _tela(renderAgenda, area, subNome, subId.replace('ag-','')); return; }
+  if (subId === 'cart-visao'){ _tela(renderVisaoCarteira, area, subNome); return; }
+  if (subId === 'reg-rgg'){ _tela(renderRegula, area, subNome, 'rgg'); return; }
+  if (subId === 'reg-sigor'){ _tela(renderRegula, area, subNome, 'sigor'); return; }
+  if (subId === 'reg-renov'){ _tela(renderRenovados, area, subNome); return; }
+  if (subId === 'reg-visao'){ _tela(renderRegulaVisao, area, subNome); return; }
 
   // Telas que ainda usam tabela genérica (serão estilizadas nas próximas etapas)
   const TELAS_TABELA = {
@@ -1588,8 +1638,16 @@ async function mostrarOrigemLead(cnpj) {
   const alvo = cnpjLimpo(cnpj);
   if (!alvo) return;
   try {
-    await carregarLeads();
-    const lead = (kanbanLeads||[]).find(l => cnpjLimpo(l['CNPJ'])===alvo);
+    // Este bloco mostra só uns chips de "veio do funil". Antes ele chamava carregarLeads(),
+    // que baixa a aba CRM_Leads INTEIRA — a cada abertura de ficha de cliente. Agora:
+    // se os leads já estão em memória, usa; se não, pede ao servidor só as linhas deste CNPJ.
+    let lead = null;
+    if (kanbanLeads && kanbanLeads.length) {
+      lead = kanbanLeads.find(l => cnpjLimpo(l['CNPJ'])===alvo);
+    } else {
+      const rl = await buscarDados('CRM_Leads', false, alvo);
+      lead = (rl && rl.ok ? rl.linhas : []).find(l => cnpjLimpo(l['CNPJ'])===alvo);
+    }
     const div = document.getElementById('ficha-origem-lead');
     if (!div || !lead) return;
     const itens = [];
@@ -1875,14 +1933,30 @@ async function excluirContato(id, nomeContato, cnpj, nomeCliente) {
 }
 
 // ===== IMPRIMIR FICHA COMPLETA =====
+// Abre a janela de impressão e delega a montagem. Se algo falhar no caminho, a janela
+// mostra O QUE deu errado em vez de ficar eternamente em "Gerando a ficha do cliente…".
 async function imprimirFichaCliente(cnpj) {
-  const alvo = cnpjLimpo(cnpj);
-  const c = fichaClienteAtual;
-  // ABRIR A JANELA JÁ, dentro do clique (antes dos awaits) — senão o navegador bloqueia o popup
-  // porque os carregamentos (faturamento, contratos...) fazem o popup "perder" o gesto do usuário.
+  // a janela precisa abrir DENTRO do clique, senão o navegador bloqueia o popup
   let win = null;
   try { win = window.open('', '_blank'); } catch(e) {}
-  if (win) { try { win.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Gerando ficha…</title></head><body style="font-family:Arial,sans-serif;padding:40px;color:#2d5a3d;">Gerando a ficha do cliente…</body></html>'); } catch(e){} }
+  const escreve = html => { if (win && !win.closed) { try { win.document.open(); win.document.write(html); win.document.close(); } catch(e){} } };
+  escreve('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Gerando ficha…</title></head><body style="font-family:Arial,sans-serif;padding:40px;color:#2d5a3d;">Gerando a ficha do cliente…<div style="color:#888;font-size:13px;margin-top:8px;">Buscando contratos, reajustes e coletas.</div></body></html>');
+  try {
+    await _imprimirFichaClienteInterno(cnpj, win);
+  } catch(e) {
+    const msg = String((e && e.message) || e);
+    escreve('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Não foi possível gerar</title></head>'
+      + '<body style="font-family:Arial,sans-serif;padding:40px;color:#222;">'
+      + '<h2 style="color:#c53030;margin:0 0 8px;">Não consegui gerar a ficha</h2>'
+      + '<p style="font-size:14px;">O servidor não respondeu a tempo. Feche esta janela e tente de novo — normalmente funciona na segunda vez.</p>'
+      + '<p style="font-size:12px;color:#888;">Detalhe técnico: ' + msg + '</p>'
+      + '<button onclick="window.close()" style="margin-top:14px;padding:10px 18px;background:#4a8c5c;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;">Fechar</button>'
+      + '</body></html>');
+  }
+}
+async function _imprimirFichaClienteInterno(cnpj, win) {
+  const alvo = cnpjLimpo(cnpj);
+  const c = fichaClienteAtual;
   // registrar a impressão (vai pro relatório) — sem bloquear a impressão se falhar
   try {
     fetch(API_URL, { method:'POST', body: JSON.stringify({
@@ -1890,11 +1964,12 @@ async function imprimirFichaCliente(cnpj) {
       dados:{ cnpj: cnpj, cliente: c['CLIENTE']||'', tipo:'Impressão de ficha', titulo:'Ficha impressa', descricao:'', dataAgendada:'', registradoPor: usuarioAtual.nome }
     })});
   } catch(e) {}
-  // buscar contratos, reajustes, faturamento, equipamentos — JÁ FILTRADOS por CNPJ no servidor
-  // (em vez de baixar a aba inteira e filtrar aqui). Reduz muito o tráfego e a lentidão.
+  // buscar contratos, reajustes, faturamento, equipamentos — JÁ FILTRADOS por CNPJ no servidor.
+  // Cada leitura tem o SEU catch: se uma aba falhar (ou não existir), a ficha sai com o resto
+  // em vez de não sair nada. Antes, uma leitura ruim travava a impressão inteira.
+  const _ler = (aba) => buscarDados(aba, false, cnpj).then(r=>r).catch(()=>({ok:false, linhas:[]}));
   const [rc, rr, rf, re] = await Promise.all([
-    buscarDados('Contratos', false, cnpj), buscarDados('Reajustes', false, cnpj),
-    buscarDados('Faturamento', false, cnpj), buscarDados('Valores_Equipamento', false, cnpj)
+    _ler('Contratos'), _ler('Reajustes'), _ler('Faturamento'), _ler('Valores_Equipamento')
   ]);
   const contratos = (rc.ok?rc.linhas:[]).filter(x=>cnpjLimpo(x['CNPJ'])===alvo);
   const reajustes = (rr.ok?rr.linhas:[]).filter(x=>cnpjLimpo(x['CNPJ'])===alvo);
@@ -2250,14 +2325,29 @@ async function trocarAbaFicha(el, aba) {
   document.querySelectorAll('.ficha-aba').forEach(a=>a.classList.remove('ativa'));
   el.classList.add('ativa');
   const corpo = document.getElementById('ficha-corpo');
-  if (aba === 'geral') { abrirFicha(fichaClienteAtual['CNPJ']); return; }
-  if (aba === 'historico') { renderHistoricoCliente(corpo); return; }
-  if (aba === 'contratos') { renderAbaContratos(corpo); return; }
-  if (aba === 'aditivos') { renderAbaAditivos(corpo); return; }
-  if (aba === 'servicos') { renderAbaServicos(corpo); return; }
-  if (aba === 'reajustes') { renderAbaReajustes(corpo); return; }
-  if (aba === 'faturamento') { renderAbaFaturamento(corpo); return; }
-  if (aba === 'contatos') { renderAbaContatos(corpo); return; }
+  // mesma rede de segurança das telas: se a aba do card falhar em carregar, ela avisa
+  // e oferece tentar de novo, em vez de ficar com "Carregando..." pra sempre.
+  const _abaSegura = (fn) => {
+    try {
+      const p = fn(corpo);
+      if (p && typeof p.catch === 'function') p.catch(e=>{
+        corpo.innerHTML = `<div style="text-align:center;padding:24px;">
+          <i class="ti ti-plug-connected-x" style="font-size:28px;color:var(--vermelho);"></i>
+          <div style="font-size:13.5px;color:var(--cinza-700);margin-top:8px;">Não consegui carregar esta aba.</div>
+          <div style="font-size:11px;color:var(--cinza-400);margin-top:4px;">${String((e&&e.message)||e)}</div>
+          <button class="ficha-btn-primario" style="margin-top:12px;padding:8px 14px;border:none;border-radius:8px;cursor:pointer;font-size:12.5px;" onclick="trocarAbaFicha(document.querySelector('.ficha-aba.ativa'),'${aba}')"><i class="ti ti-refresh"></i> Tentar de novo</button>
+        </div>`;
+      });
+    } catch(e) { corpo.innerHTML = '<div class="sem-acesso" style="margin:14px;">Erro ao abrir a aba: '+String((e&&e.message)||e)+'</div>'; }
+  };
+  if (aba === 'geral') { abrirFicha(fichaClienteAtual['CNPJ'], fichaClienteAtual['CLIENTE']); return; }
+  if (aba === 'historico') { _abaSegura(renderHistoricoCliente); return; }
+  if (aba === 'contratos') { _abaSegura(renderAbaContratos); return; }
+  if (aba === 'aditivos') { _abaSegura(renderAbaAditivos); return; }
+  if (aba === 'servicos') { _abaSegura(renderAbaServicos); return; }
+  if (aba === 'reajustes') { _abaSegura(renderAbaReajustes); return; }
+  if (aba === 'faturamento') { _abaSegura(renderAbaFaturamento); return; }
+  if (aba === 'contatos') { _abaSegura(renderAbaContatos); return; }
 }
 
 function cnpjLimpo(v){ return String(v||'').replace(/\D/g,''); }
@@ -3267,8 +3357,10 @@ async function carregarLeads(forcar) {
 async function renderKanban(area) {
   area.innerHTML = `<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando funil...</h2></div>`;
   await carregarLeads();
-  // carrega as tratativas (atividades) uma vez, pro filtro "com tratativa no período"
-  try { const ra = await buscarDados('Atividades_Cliente'); window._kanbanAtivs = ra.ok?ra.linhas:[]; } catch(e){ window._kanbanAtivs = []; }
+  // As tratativas NÃO são carregadas aqui. Essa aba cresce sem parar e só é usada pelo filtro
+  // "Com tratativa" — que quase ninguém usa no dia a dia. Baixá-la a cada abertura do funil
+  // deixava a tela girando por muito tempo. Agora ela é buscada quando o filtro é escolhido.
+  window._kanbanAtivs = window._kanbanAtivs || null;
   const consultores = [...new Set(kanbanLeads.map(l=>l['CONSULTOR']).filter(Boolean))].sort();
   const fontes = [...new Set(kanbanLeads.map(l=>l['FONTE']).filter(Boolean))].sort();
   area.innerHTML = `
@@ -3371,6 +3463,18 @@ function aplicarKanban() {
     const fim = dFim ? new Date(dFim+'T23:59:59') : null;
     const tipoData = (document.getElementById('k-data-tipo')||{}).value || 'entrada';
     if (tipoData === 'tratativa') {
+      // busca as tratativas só agora (e uma vez só por sessão)
+      if (!window._kanbanAtivs) {
+        if (!window._kanbanAtivsCarregando) {
+          window._kanbanAtivsCarregando = true;
+          buscarDados('Atividades_Cliente').then(ra=>{ window._kanbanAtivs = (ra&&ra.ok)?ra.linhas:[]; })
+            .catch(()=>{ window._kanbanAtivs = []; })
+            .then(()=>{ window._kanbanAtivsCarregando=false; aplicarKanban(); });
+        }
+        const av=document.getElementById('kanban-area');
+        if(av) av.innerHTML='<div class="placeholder"><i class="ti ti-loader"></i><h2>Buscando as tratativas do período...</h2><p>Só desta vez — depois o filtro fica instantâneo.</p></div>';
+        return;
+      }
       // parse que preserva a hora da tratativa
       const parseTrat = v => { if(!v) return null; const s=String(v).trim(); let m=s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/); if(m) return new Date(+m[1],+m[2]-1,+m[3],+m[4],+m[5]); return parseDataReaj(v); };
       // conjunto de leads (por cnpj limpo e por nome) que tiveram tratativa no período
