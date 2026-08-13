@@ -393,10 +393,10 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.12e</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.13</div>
       </div>
     </aside>
-    <!-- VERSÃO DO DASHBOARD: v2026.08.12e — conexão (leitura 25s x2 / escrita 90s x3), Pendências à prova de falha, clientes garantidos nos formulários de Solicitação -->
+    <!-- VERSÃO DO DASHBOARD: v2026.08.13 — desempenho: leituras filtradas no servidor, cache invalidado por ação, escrita sem repetição cega -->
 
     <!-- Coluna nível 2: submódulos -->
     <div class="subcoluna" id="subcoluna">
@@ -448,8 +448,8 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbw-nMudRjf8DkkzdJi9mLFx
     // entao damos mais tempo e mais tentativas: perder um salvamento e pior que esperar.
     let ehLeitura = false;
     try { ehLeitura = !!(opts && opts.body && String(opts.body).indexOf('"acao":"dados"') >= 0); } catch(e){}
-    const TENTATIVAS = ehLeitura ? 2 : 3;
-    const TIMEOUT_MS = ehLeitura ? 25000 : 90000;   // leitura: 25s x2 | escrita: 90s x3
+    const TENTATIVAS = ehLeitura ? 2 : 2;
+    const TIMEOUT_MS = ehLeitura ? 25000 : 75000;   // leitura: 25s | escrita: 75s
     let ultimoErro;
     for (let i = 0; i < TENTATIVAS; i++) {
       const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
@@ -457,13 +457,19 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbw-nMudRjf8DkkzdJi9mLFx
       try {
         const resp = await _fetchOriginal(url, ctrl ? {...(opts||{}), signal: ctrl.signal} : opts);
         if (t) clearTimeout(t);
-        // 5xx = erro temporário do servidor: vale tentar de novo
+        // 5xx = o servidor recusou; a operação não aconteceu, então repetir é seguro
         if (resp.status >= 500 && i < TENTATIVAS-1) { await espera(1200*(i+1)); continue; }
         return resp;
       } catch(e) {
         if (t) clearTimeout(t);
         ultimoErro = e;
-        if (i < TENTATIVAS-1) { await espera(1200*(i+1)); continue; } // espera 1.2s, depois 2.4s
+        // ESTOUROU O TEMPO numa ESCRITA: não repetimos. O pedido pode ter chegado e
+        // estar sendo processado — repetir criaria registro duplicado. Melhor avisar a pessoa.
+        const abortou = e && (e.name==='AbortError' || String(e.message||'').toLowerCase().includes('abort'));
+        if (!ehLeitura && abortou) {
+          throw new Error('O servidor demorou mais de 75 segundos para confirmar. O registro PODE ter sido salvo — atualize a tela e confira antes de lançar de novo.');
+        }
+        if (i < TENTATIVAS-1) { await espera(1200*(i+1)); continue; }
       }
     }
     throw ultimoErro || new Error('Falha de conexão com o servidor.');
@@ -801,7 +807,7 @@ const _cacheBusca = {};
 // (ver enviarAcao abaixo), e (2) o cache expira em 90s como rede de segurança.
 // Assim ganhamos velocidade sem o risco de mostrar dado velho após salvar.
 const _cacheDados = {};
-const _CACHE_TTL = 90000; // 90 segundos
+const _CACHE_TTL = 300000; // 5 minutos (a invalidação por ação cuida do que ficou velho)
 async function buscarDados(aba, forcar, filtroCnpj) {
   const agora = Date.now();
   // chave de cache inclui o CNPJ quando filtrado (não mistura filtrado com aba inteira)
@@ -825,6 +831,51 @@ function limparCacheBusca(){ for (const k in _cacheDados) delete _cacheDados[k];
 // Interceptador global: qualquer POST para a API com ação de escrita limpa o cache
 // automaticamente. Assim, todas as ~30 operações de salvar/editar/excluir já existentes
 // invalidam o cache sem eu precisar alterar cada uma (à prova de esquecimento).
+// Qual aba cada ação mexe. Serve pra jogar fora SÓ o cache que ficou velho, em vez de
+// apagar tudo a cada salvamento — era isso que fazia toda troca de página rebuscar o
+// Google inteiro depois de qualquer clique em "salvar".
+// Ação que não estiver nesta lista limpa tudo (é o comportamento seguro, como antes).
+const CACHE_ABAS_POR_ACAO = {
+  registrarAtividade:        ['Atividades_Cliente','CRM_Leads'],
+  concluirAtividade:         ['Atividades_Cliente'],
+  atualizarLeadCampos:       ['CRM_Leads'],
+  atualizarConsultorLead:    ['CRM_Leads'],
+  atualizarValorLead:        ['CRM_Leads'],
+  novoLead:                  ['CRM_Leads'],
+  arquivarLead:              ['CRM_Leads'],
+  moverLead:                 ['CRM_Leads','Historico_Etapas','Atividades_Cliente'],
+  criarSolicitacao:          ['Solicitacoes'],
+  atualizarStatusSolicitacao:['Solicitacoes','Servicos_Cliente','Reajustes'],
+  novoServico:               ['Servicos_Cliente','Reajustes'],
+  atualizarContrato:         ['Contratos'],
+  excluirContrato:           ['Contratos'],
+  novoContrato:              ['Contratos','Reajustes','Taxa_Fislurb'],
+  atualizarEndereco:         ['Clientes'],
+  atualizarCoordCliente:     ['Clientes'],
+  atualizarConsultor:        ['Clientes','Contratos'],
+  mudarTipoCliente:          ['Clientes'],
+  solicitarPreco:            ['Precificacao'],
+  responderPreco:            ['Precificacao'],
+  excluirPrecificacao:       ['Precificacao'],
+  inadimplencia:             ['Inadimplencia'],
+  darBaixaInad:              ['Inadimplencia','Atividades_Cliente'],
+  quitarInadCliente:         ['Inadimplencia','Atividades_Cliente'],
+  atualizarStatusInad:       ['Inadimplencia'],
+  marcarAlertaRegula:        ['Clientes_RGG','SIGOR','Atividades_Cliente'],
+  salvarRenovacaoSP:         ['Clientes_RGG','Historico_Renovacoes_SP'],
+  salvarTaxaFislurb:         ['Taxa_Fislurb'],
+  salvarMotivoFat:           ['Fin_Motivos'],
+  solicitarReajuste:         ['Aprovacoes_Reajuste'],
+  decidirReajuste:           ['Aprovacoes_Reajuste','Reajustes','Historico_Reajustes'],
+  aplicarReajusteDireto:     ['Reajustes','Historico_Reajustes'],
+  reajustar:                 ['Reajustes','Historico_Reajustes'],
+  limparDuplicatasReajustes: ['Reajustes'],
+};
+function limparCacheDaAcao(acao){
+  const abas = CACHE_ABAS_POR_ACAO[acao];
+  if (!abas) { limparCacheBusca(); return; }        // não sei o que mexeu: limpa tudo
+  abas.forEach(aba=>{ for (const k in _cacheDados) { if (k===aba || k.indexOf(aba+'::')===0) delete _cacheDados[k]; } });
+}
 (function(){
   const _fetchOriginal = window.fetch;
   window.fetch = function(url, opts){
@@ -832,7 +883,7 @@ function limparCacheBusca(){ for (const k in _cacheDados) delete _cacheDados[k];
       if (opts && opts.body && typeof opts.body === 'string' && String(url).indexOf('script.google.com') !== -1) {
         const corpo = JSON.parse(opts.body);
         if (corpo && corpo.acao && corpo.acao !== 'dados' && corpo.acao !== 'login') {
-          limparCacheBusca();
+          limparCacheDaAcao(corpo.acao);
         }
       }
     } catch(e) { /* se não der pra ler o corpo, ignora */ }
@@ -1055,6 +1106,26 @@ function faturamentoReceberDoCliente(cnpj){
   return Object.keys(porMes).length ? porMes : null;
 }
 
+// Carrega as coletas de UM cliente pedindo o filtro AO SERVIDOR (~50 linhas em vez de 12.000).
+// Era daqui que vinha a lentidão geral: qualquer card de cliente baixava a aba de coletas inteira,
+// e como o Apps Script atende um pedido por vez, isso travava até quem só queria salvar uma tratativa.
+async function finColetasDoCnpj(cnpj){
+  const alvo=String(cnpj||'').replace(/\D/g,'');
+  if(!alvo || alvo.length<11) return false;
+  window._coletasCli = window._coletasCli || {};
+  if (window._coletasCli[alvo]) return true;                 // já buscado nesta sessão
+  try{
+    const r = await buscarDados('Fin_Coletas', false, alvo);
+    if(!r || !r.ok) return false;
+    const novas = (r.linhas||[]).map(l=>{ const o={...l};
+      ['qtdeServ','pesoTon','minimaServ','minimaTaxa','semana'].forEach(k=>{ if(o[k]!==undefined&&o[k]!=='') o[k]=finN(o[k]); });
+      return o; });
+    const resto = (FINdados.coletas||[]).filter(c=>String(c.cnpj||'').replace(/\D/g,'')!==alvo);
+    FINdados.coletas = resto.concat(novas);
+    window._coletasCli[alvo]=true;
+    return true;
+  }catch(e){ return false; }
+}
 // coletas de UM cliente por mês (retorna {mes: quantidade}). Casa por CNPJ.
 function coletasDoCliente(cnpj){
   try { if(typeof finCarregar==='function' && (!FINdados.coletas||!FINdados.coletas.length)) finCarregar(); } catch(e){}
@@ -1259,7 +1330,8 @@ async function renderClientes(area) {
   }
   // carrega faturamento (Variação) e coletas do módulo financeiro, pra aparecer no card e na ficha
   if (typeof finCarregarDoSheets==='function') {
-    finCarregarDoSheets(['faturamento','coletas']).then(()=>{ aplicarFiltrosCli(); }).catch(()=>{});
+    // só o faturamento: as coletas não aparecem nesta lista e baixavam 12.000 linhas à toa
+    finCarregarDoSheets(['faturamento']).then(()=>{ aplicarFiltrosCli(); }).catch(()=>{});
   }
 }
 
@@ -1830,7 +1902,8 @@ async function imprimirFichaCliente(cnpj) {
   const equip = (re.ok?re.linhas:[]).filter(x=>cnpjLimpo(x['CNPJ'])===alvo);
   // MESMAS fontes do card: faturamento (Fin_Faturamento, por nome, todos os meses) e coletas (Fin_Coletas, por CNPJ)
   if (typeof FIN_garantirSheetJS==='function'){ try{ await new Promise(r=>FIN_garantirSheetJS(r)); }catch(e){} }
-  if (typeof finCarregarDoSheets==='function'){ try{ await finCarregarDoSheets(['faturamento','coletas']); }catch(e){} }
+  if (typeof finCarregarDoSheets==='function'){ try{ await finCarregarDoSheets(['faturamento']); }catch(e){} }
+  if (typeof finColetasDoCnpj==='function'){ try{ await finColetasDoCnpj(c['CNPJ']); }catch(e){} }
   let fatValores = (typeof faturamentoDoCliente==='function') ? faturamentoDoCliente(c['CLIENTE'], c['CNPJ']) : null;
   let fatFonteReceberP = false;
   if(!fatValores){
@@ -2339,10 +2412,12 @@ async function renderAbaServicos(corpo){
   // coletas do cliente: usa só o que já está em cache; NÃO trava esperando a base inteira de coletas.
   // Se ainda não carregou, dispara o carregamento em 2º plano e re-renderiza a aba quando terminar.
   const coletasCli=((typeof FINdados!=='undefined'&&FINdados.coletas)?FINdados.coletas:[]).filter(c=>cnpjLimpo(c.cnpj)===alvo);
-  const coletasProntas=(typeof FINdados!=='undefined'&&FINdados.coletas&&FINdados.coletas.length>0);
-  if(!coletasProntas && typeof finCarregarDoSheets==='function' && !window._servLoadColetas){
+  const coletasProntas=coletasCli.length>0;
+  // busca as coletas SÓ deste cliente (filtro no servidor). Antes baixava a aba inteira
+  // em segundo plano — era rápido pra quem abria, e lento pra todo mundo no sistema.
+  if(!coletasProntas && typeof finColetasDoCnpj==='function' && !window._servLoadColetas){
     window._servLoadColetas=true;
-    finCarregarDoSheets(['coletas']).then(()=>{ window._servLoadColetas=false; const c=document.getElementById('ficha-corpo'); if(c && document.getElementById('serv-tabela')) renderAbaServicos(c); }).catch(()=>{ window._servLoadColetas=false; });
+    finColetasDoCnpj(cnpj).then(ok=>{ window._servLoadColetas=false; const c=document.getElementById('ficha-corpo'); if(ok && c && document.getElementById('serv-tabela')) renderAbaServicos(c); }).catch(()=>{ window._servLoadColetas=false; });
   }
   const jaSalvoKeys=salvos.map(s=>servNormKey(s['EQUIPAMENTO'])).filter(Boolean);
   // esconde a sugestão se já existe um serviço salvo igual OU que contenha a sugestão (ex: "Roll ON" some quando há "Caçamba Roll ON")
@@ -2797,7 +2872,8 @@ async function renderAbaFaturamento(corpo) {
   if (typeof FIN_garantirSheetJS==='function') { await new Promise(r=>FIN_garantirSheetJS(r)); }
   const jaTemFat = (typeof FINdados!=='undefined' && FINdados.faturamento && FINdados.faturamento.length);
   const jaTemColetas = (typeof FINdados!=='undefined' && FINdados.coletas && FINdados.coletas.length);
-  if ((!jaTemFat || !jaTemColetas) && typeof finCarregarDoSheets==='function') { try { await finCarregarDoSheets(['faturamento','coletas']); } catch(e){} }
+  if (!jaTemFat && typeof finCarregarDoSheets==='function') { try { await finCarregarDoSheets(['faturamento']); } catch(e){} }
+  if (typeof finColetasDoCnpj==='function') { try { await finColetasDoCnpj(fichaClienteAtual['CNPJ']); } catch(e){} }
   if (typeof FIN_carregarAuxMotivo==='function') { try { await FIN_carregarAuxMotivo(); } catch(e){} }
   const rc = await buscarDados('Coletas_Mes');
   const normN = s => String(s||'').trim().toUpperCase().replace(/\s+/g,' ');
@@ -2972,8 +3048,10 @@ async function renderAbaContatos(corpo) {
 
 async function renderHistoricoCliente(corpo) {
   corpo.innerHTML = `<div style="text-align:center;color:var(--cinza-500);padding:20px;">Carregando histórico...</div>`;
-  const r = await buscarDados('Atividades_Cliente');
   const cnpj = cnpjLimpo(fichaClienteAtual['CNPJ']);
+  // filtro no servidor quando há CNPJ: a aba de atividades cresce sem parar
+  const r = (cnpj && cnpj.length>=11) ? await buscarDados('Atividades_Cliente', false, cnpj)
+                                      : await buscarDados('Atividades_Cliente');
   const nomeAlvo = String(fichaClienteAtual['CLIENTE']||'').trim().toUpperCase();
   // casa por CNPJ; se o cliente não tem CNPJ, casa por NOME (senão atividades sem CNPJ somem do histórico)
   const ativs = (r.ok?r.linhas:[]).filter(a=>{
@@ -3086,7 +3164,12 @@ async function salvarAtividade(cnpj, cliente, avisarCliente) {
     const corpo = document.getElementById('ficha-corpo');
     if (corpo && document.getElementById('lead-hist')) { carregarHistoricoLead(cliente, cnpj); }
     else if (corpo) renderHistoricoCliente(corpo);
-  } catch(e) { document.getElementById('at-msg').innerHTML='<div class="sem-acesso">Erro de conexão.</div>'; }
+  } catch(e) {
+    const cJs=String(cnpj||'').replace(/'/g,''), nJs=String(cliente||'').replace(/'/g,"\\'");
+    document.getElementById('at-msg').innerHTML=`<div class="sem-acesso" style="margin-top:10px;">${String((e&&e.message)||e)}
+      <div style="margin-top:8px;font-size:11.5px;">O que você escreveu continua no formulário.</div>
+      <div style="margin-top:8px;"><button onclick="salvarAtividade('${cJs}','${nJs}',${!!avisarCliente})" style="padding:7px 12px;border:none;background:var(--verde-medio);color:white;border-radius:7px;cursor:pointer;font-size:12px;"><i class="ti ti-refresh"></i> Tentar de novo</button></div></div>`;
+  }
 }
 
 // abre o Outlook com o aviso da visita/reunião para o cliente
@@ -9364,9 +9447,11 @@ async function carregarHistoricoLead(cliente, cnpj) {
   const area = document.getElementById('lead-hist');
   if (!area) return;
   try {
-    const r = await buscarDados('Atividades_Cliente');
-    const todas = r.ok ? r.linhas : [];
+    // com CNPJ, pede o filtro AO SERVIDOR (traz ~10 linhas em vez da aba inteira)
     const alvo = String(cnpj||'').replace(/\D/g,'');
+    const r = (alvo && alvo.length>=11) ? await buscarDados('Atividades_Cliente', false, alvo)
+                                        : await buscarDados('Atividades_Cliente');
+    const todas = r.ok ? r.linhas : [];
     const minhas = todas.filter(a =>
       (alvo && String(a['CNPJ']||'').replace(/\D/g,'')===alvo) ||
       String(a['CLIENTE']||'').toLowerCase()===String(cliente||'').toLowerCase()
@@ -9724,7 +9809,9 @@ function FIN_lerArquivo(input, tipo){
     const reader = new FileReader();
     reader.onload = async e => {
       try {
-        try { await finCarregarDoSheets(['coletas'], true); } catch(e){}
+        // NÃO baixamos a aba de coletas antes de processar: o envio agora é por mês,
+        // então os meses antigos ficam intactos no servidor sem precisar passar por aqui.
+        // (esse download de 12.000 linhas antes de cada upload era puro desperdício)
         FIN_processarServicos(e.target.result, st);
         finSalvar(); finAtualizarTudo();
         document.getElementById('ub-servicos').classList.add('ok');
@@ -11284,7 +11371,8 @@ function renderFinanceiro(area, subId){
       area.innerHTML = '<div id="fin-wrap">' + FIN_HTML_RELATORIOS + '</div>';
       finAtualizarTudo(); // mostra o que já tem no cache local, na hora
       // atualiza o resumo com os dados do Sheets quando chegarem (não trava a tela)
-      finCarregarDoSheets(['pagar','receber','recebeReceb','fechamentos','coletas','faturamento'])
+      // 'coletas' fica fora de propósito: são milhares de linhas e aqui serve só pra um contador
+      finCarregarDoSheets(['pagar','receber','recebeReceb','fechamentos','faturamento'])
         .then(()=>{ if (document.getElementById('resumo-acumulado')) finAtualizarTudo(); })
         .catch(()=>{});
       return;
