@@ -393,10 +393,10 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.13c</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.13d</div>
       </div>
     </aside>
-    <!-- VERSÃO DO DASHBOARD: v2026.08.13c — desempenho: leituras filtradas no servidor, cache invalidado por ação, escrita sem repetição cega -->
+    <!-- VERSÃO DO DASHBOARD: v2026.08.13d — desempenho: leituras filtradas no servidor, cache invalidado por ação, escrita sem repetição cega -->
 
     <!-- Coluna nível 2: submódulos -->
     <div class="subcoluna" id="subcoluna">
@@ -1964,29 +1964,44 @@ async function _imprimirFichaClienteInterno(cnpj, win) {
       dados:{ cnpj: cnpj, cliente: c['CLIENTE']||'', tipo:'Impressão de ficha', titulo:'Ficha impressa', descricao:'', dataAgendada:'', registradoPor: usuarioAtual.nome }
     })});
   } catch(e) {}
-  // buscar contratos, reajustes, faturamento, equipamentos — JÁ FILTRADOS por CNPJ no servidor.
-  // Cada leitura tem o SEU catch: se uma aba falhar (ou não existir), a ficha sai com o resto
-  // em vez de não sair nada. Antes, uma leitura ruim travava a impressão inteira.
-  const _ler = (aba) => buscarDados(aba, false, cnpj).then(r=>r).catch(()=>({ok:false, linhas:[]}));
-  const [rc, rr, rf, re] = await Promise.all([
-    _ler('Contratos'), _ler('Reajustes'), _ler('Faturamento'), _ler('Valores_Equipamento')
-  ]);
-  const contratos = (rc.ok?rc.linhas:[]).filter(x=>cnpjLimpo(x['CNPJ'])===alvo);
-  const reajustes = (rr.ok?rr.linhas:[]).filter(x=>cnpjLimpo(x['CNPJ'])===alvo);
-  const fatur = (rf.ok?rf.linhas:[]).filter(x=>cnpjLimpo(x['CNPJ'])===alvo);
-  const equip = (re.ok?re.linhas:[]).filter(x=>cnpjLimpo(x['CNPJ'])===alvo);
-  // MESMAS fontes do card: faturamento (Fin_Faturamento, por nome, todos os meses) e coletas (Fin_Coletas, por CNPJ)
-  if (typeof FIN_garantirSheetJS==='function'){ try{ await new Promise(r=>FIN_garantirSheetJS(r)); }catch(e){} }
-  if (typeof finCarregarDoSheets==='function'){ try{ await finCarregarDoSheets(['faturamento']); }catch(e){} }
-  if (typeof finColetasDoCnpj==='function'){ try{ await finColetasDoCnpj(c['CNPJ']); }catch(e){} }
-  let fatValores = (typeof faturamentoDoCliente==='function') ? faturamentoDoCliente(c['CLIENTE'], c['CNPJ']) : null;
-  let fatFonteReceberP = false;
-  if(!fatValores){
-    const temReceber = (typeof FINdados!=='undefined' && FINdados.receber && FINdados.receber.length);
-    if(!temReceber && typeof finCarregarDoSheets==='function'){ try{ await finCarregarDoSheets(['receber']); }catch(e){} }
-    if(typeof faturamentoReceberDoCliente==='function'){ const fr=faturamentoReceberDoCliente(c['CNPJ']); if(fr){ fatValores=fr; fatFonteReceberP=true; } }
+  // UMA requisição só traz contratos, reajustes, equipamentos, coletas e faturamento.
+  // Antes eram cinco (mais o carregamento da biblioteca de planilhas, que nem é usada aqui).
+  // Como o servidor atende um pedido por vez, cinco pedidos = cinco esperas em fila.
+  const rf1 = await apiPost({ acao:'dadosFicha', token: sessaoToken, dados:{ cnpj: cnpj, cliente: c['CLIENTE']||'' } });
+  if (!rf1.ok) throw new Error(rf1.erro || 'não consegui buscar os dados do cliente.');
+  const D = rf1.dados;
+  const contratos = (D.contratos||[]).filter(x=>cnpjLimpo(x['CNPJ'])===alvo);
+  const reajustes = (D.reajustes||[]).filter(x=>cnpjLimpo(x['CNPJ'])===alvo);
+  const equip     = (D.equip||[]).filter(x=>cnpjLimpo(x['CNPJ'])===alvo);
+  // coletas deste cliente já vieram no mesmo pacote — usa direto, sem nova ida ao servidor
+  const _numF = v => { if(v==null||v==='') return 0; if(typeof v==='number') return v; const n2=parseFloat(String(v).replace(',','.').replace(/[^\d.-]/g,'')); return isNaN(n2)?0:n2; };
+  const coletasCli = (D.coletas||[]).map(l=>{ const o={...l}; ['qtdeServ','pesoTon','minimaServ','minimaTaxa','semana'].forEach(k=>{ if(o[k]!==undefined&&o[k]!=='') o[k]=_numF(o[k]); }); return o; });
+  const coletasMes = {}, _fatPorServ = {};
+  coletasCli.forEach(x=>{
+    if(x.ym) coletasMes[x.ym] = (coletasMes[x.ym]||0) + (x.qtdeServ||0);
+    const k = x.ym+'||'+(x.tipoServ||x.equip||'');
+    const p = _fatPorServ[k] || (_fatPorServ[k] = {ym:x.ym, soma:0, minima:0});
+    p.soma += (x.qtdeServ||0);
+    if ((x.minimaServ||0) > p.minima) p.minima = (x.minimaServ||0);
+  });
+  const coletasFatP = {};
+  Object.keys(_fatPorServ).forEach(k=>{ const p=_fatPorServ[k]; coletasFatP[p.ym] = (coletasFatP[p.ym]||0) + Math.max(p.soma, p.minima); });
+  // faturamento: veio casado por nome lá no servidor
+  let fatValores = null, fatFonteReceberP = false;
+  try { if (D.faturamentoJSON) fatValores = JSON.parse(D.faturamentoJSON); } catch(e) {}
+  if (fatValores && !Object.keys(fatValores).length) fatValores = null;
+  if (!fatValores && (D.receber||[]).length) {
+    // cliente fora do relatório de Variação: monta pelos títulos emitidos (já filtrados por CNPJ)
+    const MESNOME=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+    const porMes={};
+    (D.receber||[]).forEach(r=>{
+      if (String(r.situacao||'').toLowerCase().includes('cancel')) return;
+      const ym = r._mesEmissao || (typeof finYmDeData==='function'?finYmDeData(r.emissao):'');
+      const m = String(ym||'').match(/(\d{4})-(\d{2})/); if(!m) return;
+      porMes[MESNOME[parseInt(m[2],10)-1]] = (porMes[MESNOME[parseInt(m[2],10)-1]]||0) + _numF(r.valor);
+    });
+    if (Object.keys(porMes).length) { fatValores = porMes; fatFonteReceberP = true; }
   }
-  const coletasMes = (typeof coletasDoCliente==='function') ? coletasDoCliente(c['CNPJ']) : null;
   const _MN=['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
   const _MNC=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
   const mesServPrint=nm=>{const i=_MN.indexOf(String(nm||'').trim().toLowerCase().replace('marco','março'));return i<0?nm:_MNC[(i-1+12)%12];};
@@ -2019,7 +2034,6 @@ async function _imprimirFichaClienteInterno(cnpj, win) {
   // Coletas por mês (Fin_Coletas, por CNPJ) — mesma fonte do card
   let coletasHtml;
   if (coletasMes && Object.keys(coletasMes).length) {
-    const coletasFatP = (typeof coletasFatDoCliente==='function') ? (coletasFatDoCliente(c['CNPJ'])||{}) : {};
     coletasHtml = `<table class="t"><tr style="background:#f0f7ec;"><th>Mês</th><th>Coletado</th><th>Faturado (com mínima)</th></tr>${Object.keys(coletasMes).sort().map(m=>{const col=coletasMes[m]||0, fat=(coletasFatP[m]!=null?coletasFatP[m]:col); return `<tr><td>${rotColetaPrint(m)}</td><td>${Math.round(col)}</td><td>${Math.round(fat)}${fat>col+0.001?' (mínima)':''}</td></tr>`;}).join('')}</table>`;
   } else { coletasHtml = '<p style="color:#999;">Sem coletas registradas.</p>'; }
 
