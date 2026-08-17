@@ -393,10 +393,10 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.13c</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.14</div>
       </div>
     </aside>
-    <!-- VERSÃO DO DASHBOARD: v2026.08.13c — desempenho: leituras filtradas no servidor, cache invalidado por ação, escrita sem repetição cega -->
+    <!-- VERSÃO DO DASHBOARD: v2026.08.14 — base na 13c (estável) + flag obrigatória SP Regula/MTR no cadastro de cliente, card automático "Cliente novo - irregular" e troca entre as duas páginas. NÃO usa nenhuma ação nova do Apps Script. -->
 
     <!-- Coluna nível 2: submódulos -->
     <div class="subcoluna" id="subcoluna">
@@ -1494,6 +1494,11 @@ function abrirFormNovoCliente(){
               <input type="text" id="ncli-email" style="${inp}"></div>
             <div style="grid-column:1/3;"><label style="font-size:13px;color:var(--cinza-700);">Endereço</label>
               <input type="text" id="ncli-end" style="${inp}"></div>
+            <div style="grid-column:1/3;background:var(--verde-claro-bg);border-radius:9px;padding:10px;">
+              <label style="font-size:13px;color:var(--verde-escuro);font-weight:600;display:block;margin-bottom:4px;"><i class="ti ti-file-certificate"></i> Regularização obrigatória *</label>
+              <div style="font-size:11px;color:var(--cinza-600);margin-bottom:6px;">Onde este cliente precisa ser regularizado? Vai abrir um card como "${REG_STATUS_NOVO}" para a Dany acompanhar. Se errar, ela ou a Mafe movem depois.</div>
+              ${REG_selectHtml('ncli-reg', inp)}
+            </div>
           </div>
           <div class="ficha-botoes" style="margin-top:14px;">
             <button class="ficha-btn-primario" onclick="salvarNovoCliente()"><i class="ti ti-check"></i> Criar cliente</button>
@@ -1508,6 +1513,8 @@ async function salvarNovoCliente(){
   const gv=id=>((document.getElementById(id)||{}).value||'').trim();
   const nome=gv('ncli-nome');
   if(!nome){ document.getElementById('ncli-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Informe o nome do cliente.</div>'; return; }
+  const regTipo=gv('ncli-reg');
+  if(!regTipo){ document.getElementById('ncli-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Escolha a regularização: SP Regula (RGG) ou SIGOR (MTR).</div>'; return; }
   const consultor = gv('ncli-consultor')==='— a definir' ? '' : gv('ncli-consultor');
   const campos={ 'CLIENTE':nome, 'CNPJ':gv('ncli-cnpj'), 'TIPO':gv('ncli-tipo')||'Contrato', 'GRUPO':gv('ncli-grupo'), 'UNIDADE':gv('ncli-unidade'), 'CONSULTOR':consultor, 'CONTATO':gv('ncli-contato'), 'TELEFONE':gv('ncli-tel'), 'EMAIL':gv('ncli-email'), 'ENDERECO':gv('ncli-end') };
   document.getElementById('ncli-msg').innerHTML='<div style="text-align:center;padding:10px;color:var(--cinza-500);">Criando...</div>';
@@ -1516,12 +1523,120 @@ async function salvarNovoCliente(){
     const r=await resp.json();
     if(!r.ok){ document.getElementById('ncli-msg').innerHTML=`<div class="sem-acesso" style="margin-top:10px;">${r.erro||'Erro. Republique o Apps Script.'}</div>`; return; }
     cacheClientes=null; if(typeof limparCacheBusca==='function') limparCacheBusca();
+    // abre o card de regularização (SP Regula ou MTR) como "Cliente novo - irregular"
+    const dadosReg={ cliente:nome, cnpj:campos['CNPJ'], consultor:consultor, contato:campos['CONTATO'], email:campos['EMAIL'], origem:'Cadastro na carteira' };
+    REG_guardarPendente(regTipo, dadosReg);
+    const rReg = await REG_criarCard(regTipo, dadosReg);
+    if (rReg.ok) window._regPendente = null;
+    document.getElementById('ncli-msg').innerHTML = REG_mensagem(rReg, regTipo, 'ncli-msg');
     await carregarClientes();
-    fecharFicha();
-    renderClientes(document.getElementById('area-conteudo'));
-  }catch(e){ document.getElementById('ncli-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Erro de conexão.</div>'; }
+    if (rReg.ok) {
+      setTimeout(()=>{ fecharFicha(); renderClientes(document.getElementById('area-conteudo')); }, 1600);
+    }
+  }catch(e){ document.getElementById('ncli-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Erro de conexão: '+String((e&&e.message)||e)+'</div>'; }
 }
 
+// ============================================================
+// REGULARIZAÇÃO OBRIGATÓRIA (SP Regula / MTR)
+// Todo cliente novo — criado na Carteira ou vindo de um lead fechado — nasce com um card
+// de regularização para a Dany acompanhar, sempre como "Cliente novo - irregular".
+// O consultor escolhe a página no cadastro; se errar, Mafe e Dany movem depois.
+// Usa apenas ações que já existem no Apps Script (novoRegistro / excluirLinha),
+// então não precisa republicar o backend.
+// ============================================================
+const REG_STATUS_NOVO = 'Cliente novo - irregular';
+const REG_ABAS = { rgg:'Clientes_RGG', mtr:'SIGOR' };
+function REG_rotulo(tipo){ return tipo==='mtr' ? 'SIGOR (MTR)' : 'SP Regula (RGG)'; }
+// select reutilizável nos dois formulários de cadastro
+function REG_selectHtml(id, estilo){
+  return `<select id="${id}" style="${estilo||''}">
+    <option value="">— selecione —</option>
+    <option value="rgg">SP Regula (RGG)</option>
+    <option value="mtr">SIGOR (MTR)</option>
+  </select>`;
+}
+// cria a linha na aba escolhida. Devolve o resultado para quem chamou decidir o que mostrar.
+async function REG_criarCard(tipo, dados){
+  const aba = REG_ABAS[tipo];
+  if (!aba) return { ok:false, erro:'Escolha SP Regula ou SIGOR (MTR).' };
+  const campos = {
+    'ID': (tipo==='mtr'?'SG':'RGG') + Date.now(),
+    'CLIENTE': dados.cliente || '',
+    'CNPJ': dados.cnpj || '',
+    'CONSULTOR': dados.consultor || '',
+    'RESPONSAVEL_CLIENTE': dados.contato || '',
+    'CONTATO_EMAIL': dados.email || '',
+    'STATUS': REG_STATUS_NOVO,
+    'ORIGEM': dados.origem || 'Cliente novo',
+    'DATA_CADASTRO': new Date().toISOString().split('T')[0]
+  };
+  if (tipo==='mtr') campos['PLATAFORMA'] = 'Sigor';
+  const r = await apiPost({ acao:'novoRegistro', token: sessaoToken, dados:{ aba, campos, permitirDuplicado:true } });
+  if (r.ok) { cacheRGG = null; cacheSIGOR = null; if (typeof limparCacheBusca==='function') limparCacheBusca(); }
+  return r;
+}
+// guarda o que falta criar, pra dar pra tentar de novo sem redigitar nada
+function REG_guardarPendente(tipo, dados){ window._regPendente = { tipo, dados }; }
+async function REG_tentarPendente(idMsg){
+  const p = window._regPendente;
+  const msg = document.getElementById(idMsg||'reg-msg');
+  if (!p) { if(msg) msg.innerHTML=''; return; }
+  if (msg) msg.innerHTML = '<div style="text-align:center;padding:8px;color:var(--cinza-500);">Abrindo o card de regularização...</div>';
+  const r = await REG_criarCard(p.tipo, p.dados);
+  if (msg) msg.innerHTML = REG_mensagem(r, p.tipo, idMsg);
+  if (r.ok) window._regPendente = null;
+}
+// mensagem padrão do resultado (sucesso discreto, falha visível e recuperável)
+function REG_mensagem(r, tipo, idMsg){
+  if (r.ok) {
+    return `<div style="background:var(--verde-ok-bg);border-radius:8px;padding:9px 11px;margin-top:8px;color:var(--verde-ok);font-size:12.5px;">
+      <i class="ti ti-circle-check"></i> Card aberto em <b>${REG_rotulo(tipo)}</b> como "${REG_STATUS_NOVO}" — a Dany já vê na lista dela.</div>`;
+  }
+  return `<div style="background:var(--amarelo-bg);border:1px solid var(--amarelo-borda);border-radius:8px;padding:10px;margin-top:8px;color:#8a6d00;font-size:12.5px;">
+    <b><i class="ti ti-alert-triangle"></i> O cliente foi criado, mas o card de regularização NÃO abriu.</b>
+    <div style="margin-top:3px;font-size:11.5px;">${r.erro||''}</div>
+    <div style="margin-top:8px;"><button onclick="REG_tentarPendente('${idMsg||'reg-msg'}')" style="padding:6px 11px;border:none;background:#8a6d00;color:white;border-radius:7px;cursor:pointer;font-size:12px;"><i class="ti ti-refresh"></i> Tentar abrir o card de novo</button></div>
+  </div>`;
+}
+// quem pode corrigir a página do cliente (Mafe e Dany, mais a diretoria)
+function podeMoverRegula(){
+  if (!usuarioAtual) return false;
+  const id = String(usuarioAtual.id||'').toLowerCase();
+  if (['mafe','danielly','andrea','roberto'].includes(id)) return true;
+  return ['admin','diretor'].includes(usuarioAtual.perfil);
+}
+// Move um cadastro de SP Regula para SIGOR (ou o contrário), quando o consultor marcou errado.
+// Copia para a aba certa e remove da antiga — nas duas etapas usando ações que já existem.
+async function moverEntreRegula(origem, id){
+  const destino = origem==='rgg' ? 'mtr' : 'rgg';
+  const lista = origem==='rgg' ? (cacheRGG||[]) : (cacheSIGOR||[]);
+  const d = lista.find(x=>String(x['ID'])===String(id));
+  if (!d) { alert('Cadastro não encontrado. Recarregue a página e tente de novo.'); return; }
+  if (!confirm(`Mover "${d['CLIENTE']||'este cliente'}" de ${REG_rotulo(origem)} para ${REG_rotulo(destino)}?\n\nO histórico de status volta para "${REG_STATUS_NOVO}".`)) return;
+  const av = document.createElement('div');
+  av.style.cssText='position:fixed;bottom:20px;right:20px;background:#6B5B95;color:white;padding:10px 18px;border-radius:8px;font-size:13px;z-index:9999;';
+  av.textContent='Movendo...'; document.body.appendChild(av);
+  // 1) cria na aba de destino
+  const r1 = await REG_criarCard(destino, {
+    cliente: d['CLIENTE'], cnpj: d['CNPJ'], consultor: d['CONSULTOR'],
+    contato: d['RESPONSAVEL_CLIENTE'], email: d['CONTATO_EMAIL'],
+    origem: 'Movido de ' + REG_rotulo(origem)
+  });
+  if (!r1.ok) { av.remove(); alert('Não consegui criar o cadastro em '+REG_rotulo(destino)+'.\n\n'+(r1.erro||'')); return; }
+  // 2) só então remove da aba de origem (nesta ordem, pra nunca perder o cliente no caminho)
+  const r2 = await apiPost({ acao:'excluirLinha', token: sessaoToken, dados:{ aba: REG_ABAS[origem], id: String(id), nome: d['CLIENTE'], cnpj: d['CNPJ'] } });
+  av.remove();
+  if (!r2.ok) {
+    alert('O cliente foi criado em '+REG_rotulo(destino)+', mas não consegui removê-lo de '+REG_rotulo(origem)+'.\n\n'+(r2.erro||'')+'\n\nEle vai aparecer nas duas listas até isso ser resolvido.');
+  }
+  cacheRGG = null; cacheSIGOR = null;
+  if (typeof limparCacheBusca==='function') limparCacheBusca();
+  renderRegula(document.getElementById('area-conteudo'), origem);
+  const ok = document.createElement('div');
+  ok.textContent = 'Movido para ' + REG_rotulo(destino) + '!';
+  ok.style.cssText='position:fixed;bottom:20px;right:20px;background:var(--verde-escuro);color:white;padding:10px 18px;border-radius:8px;font-size:13px;z-index:9999;';
+  document.body.appendChild(ok); setTimeout(()=>ok.remove(), 2600);
+}
 // ---- Ficha do cliente (modal) ----
 let fichaAbaAtual = 'geral';
 let fichaClienteAtual = null;
@@ -3857,6 +3972,11 @@ function abrirCriarClienteDeLead(lead) {
               <input type="text" id="cl-tel" value="${lead['TELEFONE']||''}" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
             <div style="grid-column:1/3;"><label style="font-size:13px;color:var(--cinza-700);">E-mail</label>
               <input type="text" id="cl-email" value="${(lead['EMAIL']||'').replace(/"/g,'&quot;')}" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+            <div style="grid-column:1/3;background:var(--verde-claro-bg);border-radius:9px;padding:10px;">
+              <label style="font-size:13px;color:var(--verde-escuro);font-weight:600;display:block;margin-bottom:4px;"><i class="ti ti-file-certificate"></i> Regularização obrigatória *</label>
+              <div style="font-size:11px;color:var(--cinza-600);margin-bottom:6px;">Todo cliente fechado abre um card como "${REG_STATUS_NOVO}" para a Dany acompanhar. Escolha a página; se errar, ela ou a Mafe movem depois.</div>
+              ${REG_selectHtml('cl-reg','width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;')}
+            </div>
           </div>
           <div class="ficha-botoes" style="margin-top:14px;flex-wrap:wrap;">
             <button class="ficha-btn-primario" style="background:#185FA5;" onclick="salvarClienteDeLead('${String(lead['CNPJ']||'').replace(/'/g,'')}','solicitar')"><i class="ti ti-file-import"></i> Criar cliente e solicitar contrato</button>
@@ -3925,6 +4045,9 @@ async function salvarClienteDeLead(cnpjLead, tipo, permitirDuplicado) {
     'TIPO': TIPOS[tipo] || 'Contratual - pendente'
   };
   if (!campos['CLIENTE']) { document.getElementById('cl-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Informe o nome do cliente.</div>'; return; }
+  const regTipo = ((document.getElementById('cl-reg')||{}).value||'').trim();
+  if (!regTipo) { document.getElementById('cl-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Escolha a regularização: SP Regula (RGG) ou SIGOR (MTR). Todo cliente novo precisa dessa marcação.</div>'; return; }
+  window._regTipoLead = regTipo;   // usado depois de criar o cliente
   document.getElementById('cl-msg').innerHTML = '<div style="text-align:center;padding:10px;color:var(--cinza-500);">Criando...</div>';
   // guarda os dados da solicitação num lugar seguro: se o cliente for criado mas a solicitação
   // falhar, dá pra reenviar SÓ a solicitação, sem duplicar cliente e sem preencher tudo de novo.
@@ -3961,6 +4084,21 @@ async function salvarClienteDeLead(cnpjLead, tipo, permitirDuplicado) {
     }
     cacheClientes = null;
     if (typeof limparCacheBusca==='function') limparCacheBusca();
+    // ABRE O CARD DE REGULARIZAÇÃO (SP Regula ou MTR) — antes de qualquer outro passo,
+    // pra não depender de a pessoa terminar o contrato/solicitação para o card existir.
+    const _regT = window._regTipoLead || regTipo;
+    const _dadosReg = { cliente:campos['CLIENTE'], cnpj:campos['CNPJ'], consultor:campos['CONSULTOR'], contato:campos['CONTATO'], email:campos['EMAIL'], origem:'Lead fechado' };
+    REG_guardarPendente(_regT, _dadosReg);
+    const _rReg = await REG_criarCard(_regT, _dadosReg);
+    if (_rReg.ok) window._regPendente = null;
+    window._regAvisoHtml = REG_mensagem(_rReg, _regT, 'cl-msg');
+    if (!_rReg.ok) {
+      // falhou o card: mostra e PARA aqui, pra ninguém achar que ficou tudo certo
+      document.getElementById('cl-msg').innerHTML = _rReg.erro
+        ? `<div style="background:var(--verde-ok-bg);border-radius:8px;padding:9px;margin-top:8px;color:var(--verde-ok);font-size:12.5px;"><i class="ti ti-circle-check"></i> Cliente criado.</div>` + window._regAvisoHtml
+        : window._regAvisoHtml;
+      return;
+    }
     if (tipo === 'contrato') {
       await carregarClientes();
       // leva o rascunho de serviços do lead (se houver) pro form do contrato
@@ -3972,11 +4110,11 @@ async function salvarClienteDeLead(cnpjLead, tipo, permitirDuplicado) {
       // mesmo quando a solicitação não tinha ido — foi o que aconteceu com a consultora.
       await reenviarSolicDeLead();
     } else if (tipo === 'eventual') {
-      document.getElementById('cl-msg').innerHTML = '<div style="background:var(--verde-ok-bg);border-radius:8px;padding:10px;margin-top:10px;color:var(--verde-ok);font-size:13px;"><i class="ti ti-circle-check"></i> Cliente criado como Eventual!</div>';
-      setTimeout(fecharFicha, 1800);
+      document.getElementById('cl-msg').innerHTML = '<div style="background:var(--verde-ok-bg);border-radius:8px;padding:10px;margin-top:10px;color:var(--verde-ok);font-size:13px;"><i class="ti ti-circle-check"></i> Cliente criado como Eventual!</div>' + (window._regAvisoHtml||'');
+      setTimeout(fecharFicha, 2600);
     } else {
-      document.getElementById('cl-msg').innerHTML = '<div style="background:var(--amarelo-bg);border-radius:8px;padding:10px;margin-top:10px;color:#8a6d00;font-size:13px;"><i class="ti ti-alert-triangle"></i> Cliente criado como "Contratual - pendente". Lembre de preencher o contrato depois.</div>';
-      setTimeout(fecharFicha, 2200);
+      document.getElementById('cl-msg').innerHTML = '<div style="background:var(--amarelo-bg);border-radius:8px;padding:10px;margin-top:10px;color:#8a6d00;font-size:13px;"><i class="ti ti-alert-triangle"></i> Cliente criado como "Contratual - pendente". Lembre de preencher o contrato depois.</div>' + (window._regAvisoHtml||'');
+      setTimeout(fecharFicha, 3000);
     }
   } catch(e) {
     document.getElementById('cl-msg').innerHTML=`<div class="sem-acesso" style="margin-top:10px;">Erro de conexão com o servidor.<br><span style="font-size:11.5px;">${String((e&&e.message)||e)}</span><div style="margin-top:8px;"><button onclick="salvarClienteDeLead('${cnpjLead}','${tipo}',${!!permitirDuplicado})" style="padding:7px 12px;border:none;background:var(--verde-medio);color:white;border-radius:7px;cursor:pointer;font-size:12px;"><i class="ti ti-refresh"></i> Tentar de novo</button></div></div>`;
@@ -3994,7 +4132,7 @@ async function reenviarSolicDeLead(){
   if (r.ok) {
     window._solicPendenteLead = null;
     if (typeof limparCacheBusca==='function') limparCacheBusca();
-    if (msg) msg.innerHTML = '<div style="background:var(--verde-ok-bg);border-radius:8px;padding:10px;margin-top:10px;color:var(--verde-ok);font-size:13px;"><i class="ti ti-circle-check"></i> Cliente criado e <b>solicitação de contrato enviada pra Mafe</b> (aba Solicitações).</div>';
+    if (msg) msg.innerHTML = '<div style="background:var(--verde-ok-bg);border-radius:8px;padding:10px;margin-top:10px;color:var(--verde-ok);font-size:13px;"><i class="ti ti-circle-check"></i> Cliente criado e <b>solicitação de contrato enviada pra Mafe</b> (aba Solicitações).</div>' + (window._regAvisoHtml||'');
     if (typeof atualizarSino==='function') atualizarSino();
     setTimeout(fecharFicha, 2200);
   } else {
@@ -6057,10 +6195,13 @@ function rggPrecisaAcao(d) {
   const st = String(d['STATUS']||'').toLowerCase();
   if (st.includes('renova')) return false;   // Em renovação não recebe
   if (st.includes('proposta')) return false; // Proposta já solicitada não recebe alerta
-  return true;
+  return true;                               // cliente novo irregular precisa de ação, sim
 }
 function rggStatusEfetivo(d) {
   const st = String(d['STATUS']||'').toLowerCase();
+  // Cliente recém-criado: entra sem validade nenhuma. Sem este caso, o sistema não
+  // encontrava data de vencimento e classificava como "Vigente" — o oposto da verdade.
+  if (st.includes('cliente novo') || st.includes('irregular')) return 'novo_irregular';
   if (st.includes('pendente')) return 'pendente';
   if (st.includes('proposta')) return 'proposta_solicitada';
   if (st.includes('renova')) return 'em_renovacao';
@@ -6179,11 +6320,13 @@ async function renderRegula(area, tipo) {
     <span class="filtro-chip" id="rgf-30" onclick="setFiltroReg('${tipo}','30',this)">Até 30d</span>
     <span class="filtro-chip" id="rgf-60" onclick="setFiltroReg('${tipo}','60',this)">31-60d</span>
     <span class="filtro-chip" id="rgf-vig" onclick="setFiltroReg('${tipo}','vigente',this)">Vigentes</span>
+    <span class="filtro-chip" id="rgf-novo" onclick="setFiltroReg('${tipo}','novo',this)" style="border-color:var(--vermelho);color:var(--vermelho);">Clientes novos</span>
     <span class="filtro-chip" id="rgf-pend" onclick="setFiltroReg('${tipo}','pendente',this)">Sem cadastro</span>
     <span class="filtro-chip" id="rgf-renov" onclick="setFiltroReg('${tipo}','renov',this)">Em renovação</span>
     <span class="filtro-chip" id="rgf-prop" onclick="setFiltroReg('${tipo}','proposta',this)">Proposta solicitada</span>`;
   const filtrosSIGOR = `
     <span class="filtro-chip ativo" id="rgf-todos" onclick="setFiltroReg('${tipo}','todos',this)">Todos</span>
+    <span class="filtro-chip" id="rgf-novosg" onclick="setFiltroReg('${tipo}','novo',this)" style="border-color:var(--vermelho);color:var(--vermelho);">Clientes novos</span>
     <span class="filtro-chip" id="rgf-irreg" onclick="setFiltroReg('${tipo}','irregular',this)">Irregulares</span>
     <span class="filtro-chip" id="rgf-reg" onclick="setFiltroReg('${tipo}','regular',this)">Regulares</span>
     <span class="filtro-chip" id="rgf-event" onclick="setFiltroReg('${tipo}','eventual',this)">Eventuais</span>
@@ -6233,20 +6376,29 @@ function filtraRegula(tipo) {
   }
 
   if (tipo==='rgg') {
-    if (f==='venc') lista = lista.filter(d=>d._ef==='vencido');
+    if (f==='novo') lista = lista.filter(d=>d._ef==='novo_irregular');
+    else if (f==='venc') lista = lista.filter(d=>d._ef==='vencido');
     else if (f==='30') lista = lista.filter(d=>d._dias!=null && d._dias>=0 && d._dias<=30);
     else if (f==='60') lista = lista.filter(d=>d._dias!=null && d._dias>30 && d._dias<=60);
     else if (f==='vigente') lista = lista.filter(d=>d._ef==='vigente' && (d._dias==null||d._dias>60));
+    else if (f==='todos') { /* mostra tudo, com os clientes novos no topo (ordenação abaixo) */ }
     else if (f==='pendente') lista = lista.filter(d=>d._ef==='pendente');
     else if (f==='renov') lista = lista.filter(d=>d._ef==='em_renovacao');
     else if (f==='proposta') lista = lista.filter(d=>d._ef==='proposta_solicitada');
-    lista.sort((a,b)=>(a._dias==null?99999:a._dias)-(b._dias==null?99999:b._dias));
+    // clientes novos irregulares vão para o topo — são os que precisam de ação imediata
+    lista.sort((a,b)=>{
+      const na=a._ef==='novo_irregular'?0:1, nb=b._ef==='novo_irregular'?0:1;
+      if(na!==nb) return na-nb;
+      return (a._dias==null?99999:a._dias)-(b._dias==null?99999:b._dias);
+    });
   } else {
     const st = x => String(x['STATUS']||'').toLowerCase();
-    if (f==='irregular') lista = lista.filter(d=>st(d).includes('irregular'));
+    if (f==='novo') lista = lista.filter(d=>st(d).includes('cliente novo'));
+    else if (f==='irregular') lista = lista.filter(d=>st(d).includes('irregular'));
     else if (f==='regular') lista = lista.filter(d=>st(d).includes('regular') && !st(d).includes('eventual'));
     else if (f==='eventual') lista = lista.filter(d=>st(d).includes('eventual'));
     else if (f==='analise') lista = lista.filter(d=>st(d).includes('análise')||st(d).includes('analise'));
+    lista.sort((a,b)=>{ const na=st(a).includes('cliente novo')?0:1, nb=st(b).includes('cliente novo')?0:1; return na-nb; });
   }
 
   const res = document.getElementById('reg-resultado');
@@ -6257,17 +6409,20 @@ function filtraRegula(tipo) {
       const ef = d._ef;
       const emRenov = ef==='em_renovacao';
       const propSolic = ef==='proposta_solicitada';
-      const podeEmail = !propSolic && (ef==='vencido'||ef==='pendente'|| (d._dias!=null && d._dias>=0 && d._dias<=60));
-      const podeRenovar = ef==='vencido'||ef==='pendente'||propSolic|| (d._dias!=null && d._dias>=0 && d._dias<=60);
-      const pillTxt = ef==='pendente'?'Sem cadastro':propSolic?'Proposta solicitada':ef==='em_renovacao'?'Em renovação':ef==='vencido'?'Vencido':d._c.txt;
-      const pillCls = ef==='pendente'?'pill-ok':(propSolic||ef==='em_renovacao')?'pill-r60':d._c.pill;
-      const cardCls = (propSolic||ef==='em_renovacao')?'ok':ef==='pendente'?'ok':d._c.cls;
+      const ehNovo = ef==='novo_irregular';
+      const podeEmail = !propSolic && (ehNovo||ef==='vencido'||ef==='pendente'|| (d._dias!=null && d._dias>=0 && d._dias<=60));
+      const podeRenovar = ehNovo||ef==='vencido'||ef==='pendente'||propSolic|| (d._dias!=null && d._dias>=0 && d._dias<=60);
+      const pillTxt = ehNovo?'Cliente novo — irregular':ef==='pendente'?'Sem cadastro':propSolic?'Proposta solicitada':ef==='em_renovacao'?'Em renovação':ef==='vencido'?'Vencido':d._c.txt;
+      const pillCls = ehNovo?'pill-venc':ef==='pendente'?'pill-ok':(propSolic||ef==='em_renovacao')?'pill-r60':d._c.pill;
+      const cardCls = ehNovo?'venc':(propSolic||ef==='em_renovacao')?'ok':ef==='pendente'?'ok':d._c.cls;
       const jaEnviado = d['ALERTA_ENVIADO_EM'] ? fmtDataBR(d['ALERTA_ENVIADO_EM']) : null;
       const valProp = d['VALOR_PROPOSTA'] ? fmtMoeda(d['VALOR_PROPOSTA']) : null;
       html += `<div class="reaj-card ${cardCls}" style="cursor:default;">
         <div class="reaj-topo"><div style="min-width:0;"><div class="reaj-nome" onclick="abrirFicha('${String(d['CNPJ']||'').replace(/'/g,'')}','${String(d['CLIENTE']||'').replace(/'/g,'')}')" style="cursor:pointer;" title="Abrir ficha do cliente">${d['CLIENTE']||'—'}</div><div class="reaj-cnpj">${d['RESPONSAVEL_CLIENTE']||''}${d['CONSULTOR']?' · '+d['CONSULTOR']:''}</div></div>
         <span class="reaj-pill ${pillCls}">${pillTxt}</span></div>
-        <div class="reaj-linhas"><div><span>Validade</span><b>${fmtDataBR(d['DATA_VALIDADE'])}</b></div><div><span>Consultor</span><b style="font-size:12px;">${d['CONSULTOR']||'—'}</b></div></div>
+        <div class="reaj-linhas"><div><span>Validade</span><b>${ehNovo?'—':fmtDataBR(d['DATA_VALIDADE'])}</b></div><div><span>Consultor</span><b style="font-size:12px;">${d['CONSULTOR']||'—'}</b></div></div>
+        ${ehNovo?`<div style="background:var(--vermelho-bg);border-radius:8px;padding:8px 10px;margin-top:8px;font-size:11.5px;color:var(--vermelho);"><i class="ti ti-user-plus"></i> Cliente novo${d['ORIGEM']?' ('+d['ORIGEM']+')':''} — ainda sem cadastro no SP Regula. Atualize o status quando regularizar.</div>`:''}
+        ${podeMoverRegula()?`<div style="margin-top:8px;text-align:right;"><span onclick="moverEntreRegula('rgg','${String(d['ID']||'').replace(/'/g,'')}')" style="font-size:11px;color:#6B5B95;cursor:pointer;text-decoration:underline;"><i class="ti ti-arrows-exchange"></i> é MTR, mover para SIGOR</span></div>`:''}
         ${propSolic&&valProp?`<div style="font-size:11px;color:#8a6d00;margin-top:8px;"><i class="ti ti-file-dollar"></i> Proposta: <b>${valProp}</b></div>`:''}
         ${jaEnviado?`<div style="font-size:11px;color:var(--verde-ok);margin-top:8px;"><i class="ti ti-mail-check"></i> Alerta enviado em ${jaEnviado}</div>`:''}
         <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;">
@@ -6281,12 +6436,17 @@ function filtraRegula(tipo) {
       const irreg = String(d['STATUS']||'').toLowerCase().includes('irregular');
       const jaEnviado = d['ALERTA_ENVIADO_EM'] ? fmtDataBR(d['ALERTA_ENVIADO_EM']) : null;
       const stAtual = String(d['STATUS']||'').trim();
-      const OPCOES_SIT = ['Regular','Regular - Eventual','Irregular','Em análise'];
-      html += `<div class="reaj-card ${irreg?'venc':'ok'}" style="cursor:default;">
+      // "Cliente novo - irregular" entra na lista: sem isso, o seletor abriria em "Regular"
+      // e um clique sem querer mudaria o status de um cliente que acabou de chegar.
+      const OPCOES_SIT = [REG_STATUS_NOVO,'Regular','Regular - Eventual','Irregular','Em análise'];
+      const ehNovoSg = String(d['STATUS']||'').toLowerCase().includes('cliente novo');
+      html += `<div class="reaj-card ${(irreg||ehNovoSg)?'venc':'ok'}" style="cursor:default;">
         <div class="reaj-topo"><div style="min-width:0;"><div class="reaj-nome" onclick="abrirFicha('${String(d['CNPJ']||'').replace(/'/g,'')}','${String(d['CLIENTE']||'').replace(/'/g,'')}')" style="cursor:pointer;" title="Abrir ficha do cliente">${d['CLIENTE']||'—'}</div><div class="reaj-cnpj">${d['RESPONSAVEL_CLIENTE']||''}${d['CONSULTOR']?' · '+d['CONSULTOR']:''}</div></div>
         <span class="reaj-pill ${irreg?'pill-venc':'pill-ok'}">${d['STATUS']||'—'}</span></div>
         <div class="reaj-linhas"><div><span>Plataforma</span><b style="font-size:13px;">${d['PLATAFORMA']||'Sigor'}</b></div><div><span>Consultor</span><b style="font-size:12px;">${d['CONSULTOR']||'—'}</b></div></div>
+        ${ehNovoSg?`<div style="background:var(--vermelho-bg);border-radius:8px;padding:8px 10px;margin-top:8px;font-size:11.5px;color:var(--vermelho);"><i class="ti ti-user-plus"></i> Cliente novo${d['ORIGEM']?' ('+d['ORIGEM']+')':''} — ainda sem emissão de MTR. Atualize a situação quando regularizar.</div>`:''}
         ${jaEnviado?`<div style="font-size:11px;color:var(--verde-ok);margin-top:8px;"><i class="ti ti-mail-check"></i> Alerta enviado em ${jaEnviado}</div>`:''}
+        ${podeMoverRegula()?`<div style="margin-top:8px;text-align:right;"><span onclick="moverEntreRegula('mtr','${String(d['ID']||'').replace(/'/g,'')}')" style="font-size:11px;color:#6B5B95;cursor:pointer;text-decoration:underline;"><i class="ti ti-arrows-exchange"></i> é SP Regula, mover para RGG</span></div>`:''}
         <div style="display:flex;gap:6px;align-items:center;margin-top:10px;">
           <select id="sit-sigor-${d['ID']}" style="flex:1;padding:6px;border:1.5px solid var(--cinza-300);border-radius:7px;font-size:12px;">
             ${OPCOES_SIT.map(o=>`<option value="${o}" ${stAtual===o?'selected':''}>${o}</option>`).join('')}
