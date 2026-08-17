@@ -393,10 +393,10 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.14c</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.14d</div>
       </div>
     </aside>
-    <!-- VERSÃO DO DASHBOARD: v2026.08.14c — base na 13c (estável) + flag obrigatória SP Regula/MTR no cadastro de cliente, card automático "Cliente novo - irregular" e troca entre as duas páginas. NÃO usa nenhuma ação nova do Apps Script. -->
+    <!-- VERSÃO DO DASHBOARD: v2026.08.14d — base na 13c (estável) + flag obrigatória SP Regula/MTR no cadastro de cliente, card automático "Cliente novo - irregular" e troca entre as duas páginas. NÃO usa nenhuma ação nova do Apps Script. -->
 
     <!-- Coluna nível 2: submódulos -->
     <div class="subcoluna" id="subcoluna">
@@ -2568,7 +2568,7 @@ async function servCriarLote(cnpj, cliente, servicos, dataBase, indice){
         // destinação por tonelada também entra no Reajuste, com linha própria
         if (vai && parseFloat(String(s.valorDestinacao||'').replace(',','.')) > 0) {
           try { await servReajusteDestinacao({ cnpj, cliente, equipamento:s.servico, valorDest:s.valorDestinacao,
-                  indice:(s.indice||indice||''), dataInicio:dataServ, minima:s.minima }); } catch(e){}
+                  unidade:(s.unidDestinacao||'ton'), indice:(s.indice||indice||''), dataInicio:dataServ, minima:s.minima }); } catch(e){}
         }
       }
     }catch(e){}
@@ -2626,41 +2626,51 @@ function servDerivar(cliente, reajLinhas, coletasCli){
 // com o sufixo "— Destinação (R$/t)", para as duas subirem juntas todo ano.
 // Feito no frontend de propósito, usando ações que já existem no Apps Script.
 // ============================================================
-const SERV_SUFIXO_DEST = ' — Destinação (R$/t)';
+// Nome ESTÁVEL, sem a unidade: se o cliente mudar de tonelada para quilo, a linha continua
+// sendo a mesma (a unidade fica numa coluna à parte). Se o nome mudasse, nasceria linha duplicada.
+const SERV_SUFIXO_DEST = ' — Destinação';
+const SERV_UNID_LABEL = { ton:'R$/tonelada', kg:'R$/quilograma' };
 function servEhLinhaDestinacao(nome){ return /destina[çc][ãa]o/i.test(String(nome||'')); }
 function _servNormR(s){ return String(s||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim(); }
 // cria ou atualiza a linha de reajuste da destinação. Idempotente: editar não duplica.
 async function servReajusteDestinacao(p){
   const valorDest = parseFloat(String(p.valorDest||'').replace(',','.'));
   if (!(valorDest > 0)) return { ok:true, pulou:true };            // sem destinação, nada a fazer
-  const nomeServ = String(p.equipamento||'').trim() + SERV_SUFIXO_DEST;
+  const equipN = String(p.equipamento||'').trim();
+  const nomeServ = equipN + SERV_SUFIXO_DEST;
+  const unidLabel = SERV_UNID_LABEL[p.unidade||'ton'] || SERV_UNID_LABEL.ton;
   const cnpj = String(p.cnpj||'').replace(/\D/g,'');
-  // procura se já existe (filtro por CNPJ no servidor quando possível, pra não baixar a aba toda)
-  let existe = false;
+  // procura a linha existente. Aceita também o nome antigo "— Destinação (R$/t)",
+  // criado antes de a unidade virar coluna separada — assim não duplica no cliente já cadastrado.
+  let nomeExistente = '';
   try {
     const r = (cnpj && cnpj.length>=11) ? await buscarDados('Reajustes', true, cnpj) : await buscarDados('Reajustes', true);
     const linhas = (r && r.ok) ? r.linhas : [];
-    const alvoNome = _servNormR(nomeServ), alvoCli = _servNormR(p.cliente);
-    existe = linhas.some(x=>{
-      const mesmoServ = _servNormR(x['TP DE SERVIÇO']) === alvoNome;
+    const prefixo = _servNormR(equipN + SERV_SUFIXO_DEST), alvoCli = _servNormR(p.cliente);
+    const achou = linhas.find(x=>{
+      const serv = _servNormR(x['TP DE SERVIÇO']);
+      const mesmoServ = serv === prefixo || serv.indexOf(prefixo) === 0;   // pega "(R$/t)" no fim
       const mesmoCli = (cnpj && String(x['CNPJ']||'').replace(/\D/g,'')===cnpj) || _servNormR(x['CLIENTE'])===alvoCli;
       return mesmoServ && mesmoCli;
     });
+    if (achou) nomeExistente = String(achou['TP DE SERVIÇO']||'');
   } catch(e) {}
   const dataR = p.dataInicio || '';
-  if (existe) {
-    // já existe: atualiza o valor e a data-base, sem criar linha nova
+  if (nomeExistente) {
+    // já existe: atualiza valor, unidade, mínima e data-base — sem criar linha nova
     return await apiPost({ acao:'salvar', token: sessaoToken, aba:'Reajustes', chaveExtra:'TP DE SERVIÇO',
-      dados:{ 'CNPJ': p.cnpj||'', 'TP DE SERVIÇO': nomeServ, 'VALOR REAJUSTADO': valorDest,
+      dados:{ 'CNPJ': p.cnpj||'', 'TP DE SERVIÇO': nomeExistente, 'VALOR REAJUSTADO': valorDest,
+              'UNIDADE': unidLabel, 'MÍN. CONTRATUAL': p.minima||'',
               'ÍNDICE': p.indice||'', 'DATA ÚLTIMO REAJUSTE ': dataR } });
   }
   return await apiPost({ acao:'novoRegistro', token: sessaoToken, dados:{ aba:'Reajustes', permitirDuplicado:true, campos:{
     'CLIENTE': p.cliente||'', 'CNPJ': p.cnpj||'', 'TP DE SERVIÇO': nomeServ,
     'PREÇO ANTERIOR': valorDest, 'VALOR REAJUSTADO': valorDest,
+    'UNIDADE': unidLabel,
     'ÍNDICE': p.indice||'', '% PREVISTO': 30,
     'DATA ÚLTIMO REAJUSTE ': dataR, 'DATA ÚLTIMO REAJUSTE': dataR,
     'MÍN. CONTRATUAL': p.minima||'',
-    'OBS.': 'Destinação por tonelada do serviço "' + String(p.equipamento||'') + '". Reajuste previsto de 30% em 12 meses (base = data de início).'
+    'OBS.': 'Destinação por peso (' + unidLabel + ') do serviço "' + equipN + '". Reajuste previsto de 30% em 12 meses (base = data de início).'
   }}});
 }
 async function renderAbaServicos(corpo){
@@ -2692,7 +2702,7 @@ async function renderAbaServicos(corpo){
   if(!salvos.length && !derivados.length){ corpo.innerHTML=html+`<div style="text-align:center;color:var(--cinza-500);padding:24px;font-size:13px;">Nenhum serviço cadastrado ainda para este cliente.</div>`; return; }
   const vfmt=v=>{ const n=parseMoedaReaj(v); return (n!=null&&n!=='')?fmtMoeda(n):'—'; };
   if(!coletasProntas) html+=`<div style="font-size:11px;color:var(--cinza-500);margin-bottom:8px;"><i class="ti ti-loader"></i> Carregando coletas em segundo plano para sugerir resíduo/frequência…</div>`;
-  html+=`<table id="serv-tabela" class="ficha-tab"><thead><tr style="color:var(--cinza-600);font-weight:600;"><td>Equipamento</td><td>Resíduo</td><td>Frequência</td><td>Valor coleta</td><td>Destinação (R$/t)</td><td>Início</td><td>Reajuste</td><td></td></tr></thead><tbody>`;
+  html+=`<table id="serv-tabela" class="ficha-tab"><thead><tr style="color:var(--cinza-600);font-weight:600;"><td>Equipamento</td><td>Resíduo</td><td>Frequência</td><td>Valor coleta</td><td>Destinação</td><td>Início</td><td>Reajuste</td><td></td></tr></thead><tbody>`;
   salvos.forEach(s=>{
     const rj=String(s['VAI_REAJUSTE']||'').toLowerCase()==='sim';
     const temDest=(parseMoedaReaj(s['VALOR_DESTINACAO'])||0)>0;
@@ -2701,14 +2711,16 @@ async function renderAbaServicos(corpo){
       ? `<span style="background:var(--verde-claro-bg);color:var(--verde-escuro);border-radius:5px;padding:1px 7px;font-size:11px;font-weight:600;" title="${temDest?'Duas linhas na aba Reajustes: coleta e destinação (R$/t)':'Uma linha na aba Reajustes'}">sim${temDest?' (2 linhas)':''}</span>`
       : `<span style="color:var(--cinza-400);font-size:11px;">não</span>`;
     // detalhes embaixo do equipamento: mínima, tipo de preço fechado, proposta, locação
-    const minTxt = s['MINIMA_QTD'] ? `Mín: ${s['MINIMA_QTD']} ${s['MINIMA_UNIDADE']||''} ${s['MINIMA_PERIODO']||''}`.trim() : (s['MINIMA_OBS']?('Mín: '+s['MINIMA_OBS']):'');
+    const minTxt = s['MINIMA_QTD'] ? `Mín. coleta: ${s['MINIMA_QTD']} ${s['MINIMA_UNIDADE']||''} ${s['MINIMA_PERIODO']||''}`.trim() : (s['MINIMA_OBS']?('Mín. coleta: '+s['MINIMA_OBS']):'');
+    const minDestTxt = s['MINIMA_DEST_QTD'] ? `Mín. destinação: ${s['MINIMA_DEST_QTD']} ${s['MINIMA_DEST_UNIDADE']||''} ${s['MINIMA_DEST_PERIODO']||''}`.trim() : '';
     const modTxt = String(s['MODELO_PRECO']||'')==='fechado' ? `fechado até ${s['QTD_FECHADO']||'?'}` : '';
-    const det=[minTxt, modTxt, s['NUM_PROPOSTA']?('Prop. '+s['NUM_PROPOSTA']):'', s['TEMPO_LOCACAO']?('Locação: '+s['TEMPO_LOCACAO']):''].filter(Boolean).join(' · ');
+    const det=[minTxt, minDestTxt, modTxt, s['NUM_PROPOSTA']?('Prop. '+s['NUM_PROPOSTA']):'', s['TEMPO_LOCACAO']?('Locação: '+s['TEMPO_LOCACAO']):''].filter(Boolean).join(' · ');
     const extra=det?`<div style="font-size:10.5px;color:var(--cinza-500);">${det}</div>`:'';
-    const preEdit={ id:s['ID'], equipamento:s['EQUIPAMENTO'], residuo:s['RESIDUO'], frequencia:s['FREQUENCIA'], valor:s['VALOR'], valorDestinacao:s['VALOR_DESTINACAO'], destinacao:s['VALOR_DESTINACAO'], modeloPreco:s['MODELO_PRECO'], qtdFechado:s['QTD_FECHADO'], minimaQtd:s['MINIMA_QTD'], minimaUnidade:s['MINIMA_UNIDADE'], minimaPeriodo:s['MINIMA_PERIODO'], minimaObs:s['MINIMA_OBS'], dataInicio:s['DATA_INICIO'], indice:s['INDICE'], numProposta:s['NUM_PROPOSTA'], tempoLocacao:s['TEMPO_LOCACAO'], vaiReajuste:rj };
+    const preEdit={ id:s['ID'], equipamento:s['EQUIPAMENTO'], residuo:s['RESIDUO'], frequencia:s['FREQUENCIA'], valor:s['VALOR'], valorDestinacao:s['VALOR_DESTINACAO'], destinacao:s['VALOR_DESTINACAO'], modeloPreco:s['MODELO_PRECO'], qtdFechado:s['QTD_FECHADO'], minimaQtd:s['MINIMA_QTD'], minimaUnidade:s['MINIMA_UNIDADE'], minimaPeriodo:s['MINIMA_PERIODO'], minimaObs:s['MINIMA_OBS'],
+      unidDestinacao:s['UNID_DESTINACAO'], minimaDestQtd:s['MINIMA_DEST_QTD'], minimaDestUnidade:s['MINIMA_DEST_UNIDADE'], minimaDestPeriodo:s['MINIMA_DEST_PERIODO'], dataInicio:s['DATA_INICIO'], indice:s['INDICE'], numProposta:s['NUM_PROPOSTA'], tempoLocacao:s['TEMPO_LOCACAO'], vaiReajuste:rj };
     const preJsonE=JSON.stringify(preEdit).replace(/'/g,"&#39;").replace(/"/g,'&quot;');
     const btnExcluir = s['ID'] ? `<button class="ficha-btn-secundario" title="Excluir serviço" style="padding:4px 8px;font-size:11px;border-color:var(--vermelho);color:var(--vermelho);margin-left:4px;" onclick="excluirServicoFront('${String(s['ID']).replace(/'/g,'')}')"><i class="ti ti-trash"></i></button>` : '';
-    html+=`<tr><td><b>${s['EQUIPAMENTO']||'—'}</b>${extra}</td><td>${s['RESIDUO']||'—'}</td><td>${s['FREQUENCIA']||'—'}</td><td>${vfmt(s['VALOR'])}</td><td>${vfmt(s['VALOR_DESTINACAO'])}</td><td>${s['DATA_INICIO']?fmtDataBR(s['DATA_INICIO']):'—'}</td><td>${badge}</td><td style="white-space:nowrap;"><button class="ficha-btn-secundario" style="padding:4px 9px;font-size:11px;" onclick='abrirFormServico("${alvo}","${(cliente||'').replace(/"/g,'&quot;')}", JSON.parse(this.getAttribute("data-pre")))' data-pre="${preJsonE}"><i class="ti ti-edit"></i> editar</button>${btnExcluir}</td></tr>`;
+    html+=`<tr><td><b>${s['EQUIPAMENTO']||'—'}</b>${extra}</td><td>${s['RESIDUO']||'—'}</td><td>${s['FREQUENCIA']||'—'}</td><td>${vfmt(s['VALOR'])}</td><td>${(parseMoedaReaj(s['VALOR_DESTINACAO'])||0)>0 ? vfmt(s['VALOR_DESTINACAO'])+`<span style="font-size:10.5px;color:var(--cinza-500);"> /${s['UNID_DESTINACAO']==='kg'?'kg':'ton'}</span>` : '—'}</td><td>${s['DATA_INICIO']?fmtDataBR(s['DATA_INICIO']):'—'}</td><td>${badge}</td><td style="white-space:nowrap;"><button class="ficha-btn-secundario" style="padding:4px 9px;font-size:11px;" onclick='abrirFormServico("${alvo}","${(cliente||'').replace(/"/g,'&quot;')}", JSON.parse(this.getAttribute("data-pre")))' data-pre="${preJsonE}"><i class="ti ti-edit"></i> editar</button>${btnExcluir}</td></tr>`;
   });
   derivados.forEach(d=>{
     const preJson=JSON.stringify(d).replace(/'/g,"&#39;").replace(/"/g,'&quot;');
@@ -2743,9 +2755,8 @@ function abrirFormServico(cnpj, cliente, pre){
       </div>
       <div style="margin-top:12px;border-top:1px dashed var(--cinza-300);padding-top:10px;">
         <div style="font-size:12px;font-weight:600;color:var(--verde-escuro);margin-bottom:6px;"><i class="ti ti-cash"></i> Preço</div>
-        <div id="sv-peso-wrap" style="display:none;grid-template-columns:1fr 1fr;gap:10px;">
-          <div><label style="font-size:12px;color:var(--cinza-700);">Transporte (R$/caixa coletada)</label><input id="sv-transporte" type="number" step="0.01" value="${g(pre.valor)}" style="${inp}"></div>
-          <div><label style="font-size:12px;color:var(--cinza-700);">Destinação (R$/tonelada)</label><input id="sv-dest" type="number" step="0.01" value="${g(pre.destinacao||pre.valorDestinacao)}" style="${inp}"></div>
+        <div id="sv-peso-wrap" style="display:none;">
+          <label style="font-size:12px;color:var(--cinza-700);">Transporte (R$ por coleta / caixa)</label><input id="sv-transporte" type="number" step="0.01" value="${g(pre.valor)}" style="${inp}">
         </div>
         <div id="sv-modelo-wrap" style="display:none;">
           <label style="font-size:12px;color:var(--cinza-700);">Tipo de preço</label>
@@ -2757,21 +2768,39 @@ function abrirFormServico(cnpj, cliente, pre){
             <div><label id="sv-unit-lbl" style="font-size:12px;color:var(--cinza-700);">Valor unitário (R$)</label><input id="sv-unit" type="number" step="0.01" value="${g(pre.valor)}" style="${inp}"></div>
             <div id="sv-fechado-wrap" style="display:none;"><label style="font-size:12px;color:var(--cinza-700);">Para até (qtde de equip.)</label><input id="sv-qtdfechado" type="number" value="${g(pre.qtdFechado)}" placeholder="ex: 20" style="${inp}"></div>
           </div>
-          <div style="margin-top:8px;">
-            <label style="font-size:12px;color:var(--cinza-700);">Destinação (R$/tonelada) <span style="color:var(--cinza-400);">— opcional</span></label>
-            <input id="sv-dest2" type="number" step="0.01" value="${g(pre.destinacao||pre.valorDestinacao)}" placeholder="deixe em branco se não houver" style="${inp}">
-            <div style="font-size:11px;color:var(--cinza-500);margin-top:3px;">Preencha quando o cliente paga a destinação por peso, além do valor do equipamento. É a coluna "Destinação (R$/t)" da lista.</div>
-          </div>
         </div>
       </div>
       <div style="margin-top:12px;border-top:1px dashed var(--cinza-300);padding-top:10px;">
-        <div style="font-size:12px;font-weight:600;color:var(--verde-escuro);margin-bottom:6px;"><i class="ti ti-target"></i> Mínima</div>
+        <div style="font-size:12px;font-weight:600;color:var(--verde-escuro);margin-bottom:2px;"><i class="ti ti-target"></i> Mínima da coleta</div>
+        <div style="font-size:11px;color:var(--cinza-500);margin-bottom:6px;">Ligada ao preço do equipamento/coleta acima.</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
           <input id="sv-min-qtd" type="number" step="0.01" value="${g(pre.minimaQtd)}" placeholder="qtde" style="width:90px;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;">
           <select id="sv-min-un" style="padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;">${optUn}</select>
           <select id="sv-min-per" style="padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;">${optPer}</select>
         </div>
-        <input id="sv-min-obs" value="${g(pre.minimaObs)}" placeholder="observação da mínima (opcional)" style="${inp}margin-top:8px;">
+        <input id="sv-min-obs" value="${g(pre.minimaObs)}" placeholder="observação da mínima da coleta (opcional)" style="${inp}margin-top:8px;">
+      </div>
+      <div style="margin-top:12px;border-top:1px dashed var(--cinza-300);padding-top:10px;background:#faf7ff;border-radius:8px;padding:10px;">
+        <div style="font-size:12px;font-weight:600;color:var(--roxo);margin-bottom:2px;"><i class="ti ti-weight"></i> Destinação por peso <span style="font-weight:400;color:var(--cinza-500);">— opcional</span></div>
+        <div style="font-size:11px;color:var(--cinza-500);margin-bottom:8px;">Preencha quando o cliente paga a destinação por peso, além do valor do equipamento. Vira uma linha própria na aba Reajustes, com a mínima dela.</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <span style="font-size:12px;color:var(--cinza-600);">R$</span>
+          <input id="sv-dest-valor" type="number" step="0.01" value="${g(pre.destinacao||pre.valorDestinacao)}" placeholder="valor" style="width:120px;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;">
+          <span style="font-size:12px;color:var(--cinza-600);">por</span>
+          <select id="sv-dest-unid" style="padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;">
+            <option value="ton" ${(pre.unidDestinacao||'ton')==='ton'?'selected':''}>tonelada</option>
+            <option value="kg" ${pre.unidDestinacao==='kg'?'selected':''}>quilograma</option>
+          </select>
+        </div>
+        <div style="font-size:12px;font-weight:600;color:var(--roxo);margin:10px 0 4px;">Mínima da destinação</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <input id="sv-mindest-qtd" type="number" step="0.01" value="${g(pre.minimaDestQtd)}" placeholder="qtde" style="width:90px;padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;">
+          <select id="sv-mindest-un" style="padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;">
+            <option value="tonelada" ${(pre.minimaDestUnidade||'tonelada')==='tonelada'?'selected':''}>tonelada</option>
+            <option value="quilograma" ${pre.minimaDestUnidade==='quilograma'?'selected':''}>quilograma</option>
+          </select>
+          <select id="sv-mindest-per" style="padding:8px;border:1.5px solid var(--cinza-300);border-radius:8px;">${optPer}</select>
+        </div>
       </div>
       <div style="margin-top:12px;border-top:1px dashed var(--cinza-300);padding-top:10px;">
         <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;font-weight:600;color:var(--verde-escuro);"><input type="checkbox" id="sv-reaj" ${reajChk}> <i class="ti ti-trending-up"></i> Enviar/manter na aba Reajustes</label>
@@ -2793,7 +2822,7 @@ function abrirFormServico(cnpj, cliente, pre){
 function servFormAdapta(){
   const eq=((document.getElementById('sv-equip')||{}).value)||'';
   const peso=(typeof servEhPeso==='function' && servEhPeso(eq));
-  const pesoWrap=document.getElementById('sv-peso-wrap'); if(pesoWrap) pesoWrap.style.display = peso?'grid':'none';
+  const pesoWrap=document.getElementById('sv-peso-wrap'); if(pesoWrap) pesoWrap.style.display = peso?'block':'none';
   const modeloWrap=document.getElementById('sv-modelo-wrap'); if(modeloWrap) modeloWrap.style.display = peso?'none':'block';
   const loc=document.getElementById('sv-loc-wrap'); if(loc) loc.style.display = /ca[çc]amba|roll\s*-?\s*on/i.test(eq)?'':'none';
   const modelo=(document.getElementById('sv-modelo')||{}).value;
@@ -2810,15 +2839,14 @@ async function salvarServico(cnpj, cliente){
   const inicio=gv('sv-inicio');
   if(vaiReaj && !inicio){ msg.innerHTML='<div class="sem-acesso" style="margin-top:10px;">Pra enviar ao reajuste, informe a data de início.</div>'; return; }
   const peso=(typeof servEhPeso==='function' && servEhPeso(equip));
-  let valor='', valorDest='', modeloPreco='', qtdFechado='';
-  if(peso){ valor=gv('sv-transporte'); valorDest=gv('sv-dest'); modeloPreco='peso'; }
-  else {
-    modeloPreco=gv('sv-modelo')||'unitario'; valor=gv('sv-unit');
-    if(modeloPreco==='fechado') qtdFechado=gv('sv-qtdfechado');
-    // A destinação vale para qualquer equipamento, não só para os cobrados por peso.
-    // Antes este campo nem aparecia aqui — e, pior, salvar zerava o valor que já existia.
-    valorDest=gv('sv-dest2');
-  }
+  let valor='', modeloPreco='', qtdFechado='';
+  if(peso){ valor=gv('sv-transporte'); modeloPreco='peso'; }
+  else { modeloPreco=gv('sv-modelo')||'unitario'; valor=gv('sv-unit'); if(modeloPreco==='fechado') qtdFechado=gv('sv-qtdfechado'); }
+  // A destinação vale para qualquer equipamento, não só para os cobrados por peso —
+  // e pode ser cobrada por tonelada OU por quilo.
+  const valorDest=gv('sv-dest-valor');
+  const unidDest=gv('sv-dest-unid')||'ton';
+  const minDestQtd=gv('sv-mindest-qtd'), minDestUn=gv('sv-mindest-un'), minDestPer=gv('sv-mindest-per');
   const locWrap=document.getElementById('sv-loc-wrap');
   const tempoLoc=(locWrap && locWrap.style.display!=='none') ? gv('sv-loc') : '';
   const idEl=document.getElementById('sv-id');
@@ -2833,11 +2861,29 @@ async function salvarServico(cnpj, cliente){
     const r=await resp.json();
     if(!r.ok){ msg.innerHTML=`<div class="sem-acesso" style="margin-top:10px;">${r.erro||'Erro. Confirme que o Apps Script foi republicado.'}</div>`; return; }
     cacheReajustes=null;
-    // a destinação por tonelada ganha a SUA linha de reajuste (o backend só cuida da coleta)
+    // Campos que o backend não conhece (unidade da destinação e mínima dela) são gravados
+    // logo depois, pelo ID do serviço. A ação 'salvar' cria as colunas que faltarem.
+    const idSalvo = (r && r.id) ? r.id : (idEl?idEl.value:'');
+    if (idSalvo) {
+      try {
+        await apiPost({ acao:'salvar', token: sessaoToken, aba:'Servicos_Cliente', dados:{
+          'ID': idSalvo, 'UNID_DESTINACAO': valorDest ? unidDest : '',
+          'MINIMA_DEST_QTD': minDestQtd, 'MINIMA_DEST_UNIDADE': minDestUn, 'MINIMA_DEST_PERIODO': minDestPer
+        }});
+      } catch(e) {}
+    }
+    // a mínima da COLETA acompanha a linha de reajuste da coleta
+    if (vaiReaj) {
+      const minColeta = [gv('sv-min-qtd'), gv('sv-min-un'), gv('sv-min-per')].filter(Boolean).join(' ');
+      if (minColeta) { try { await apiPost({ acao:'salvar', token: sessaoToken, aba:'Reajustes', chaveExtra:'TP DE SERVIÇO',
+        dados:{ 'CNPJ': campos.cnpj, 'TP DE SERVIÇO': equip, 'MÍN. CONTRATUAL': minColeta } }); } catch(e){} }
+    }
+    // a destinação por peso ganha a SUA linha de reajuste, com a mínima dela
     if (vaiReaj && parseFloat(String(valorDest||'').replace(',','.')) > 0) {
-      msg.innerHTML='<div style="text-align:center;padding:10px;color:var(--cinza-500);">Enviando a destinação (R$/t) para o Reajuste...</div>';
+      msg.innerHTML='<div style="text-align:center;padding:10px;color:var(--cinza-500);">Enviando a destinação para o Reajuste...</div>';
+      const minDest = [minDestQtd, minDestUn, minDestPer].filter(Boolean).join(' ');
       const rd = await servReajusteDestinacao({ cnpj: campos.cnpj, cliente: campos.cliente, equipamento: equip,
-        valorDest: valorDest, indice: campos.indice, dataInicio: inicio, minima: campos.minimaObs });
+        valorDest: valorDest, unidade: unidDest, indice: campos.indice, dataInicio: inicio, minima: minDest });
       if (!rd.ok) {
         msg.innerHTML = `<div style="background:var(--amarelo-bg);border:1px solid var(--amarelo-borda);border-radius:8px;padding:11px;margin-top:10px;color:#8a6d00;font-size:12.5px;">
           <b><i class="ti ti-alert-triangle"></i> O serviço foi salvo, mas a destinação (R$/t) não entrou no Reajuste.</b>
@@ -4693,6 +4739,7 @@ function detalheReaj(idx) {
             ${(r['% PREVISTO']!=null && r['% PREVISTO']!=='' && pctReaj==null) ? `<tr><td>Reajuste previsto</td><td><b style="color:var(--verde-escuro);">${parseFloat(r['% PREVISTO'])}%</b> em 12 meses da assinatura</td></tr>` : ''}
             <tr><td>Diferença (R$)</td><td>${dif!=null?fmtMoeda(dif):'—'}</td></tr>
             <tr><td>Índice de referência</td><td>${r['ÍNDICE']||'—'}</td></tr>
+            ${r['UNIDADE']?`<tr><td>Cobrado por</td><td><b>${r['UNIDADE']}</b></td></tr>`:''}
             <tr><td>Mínima contratual</td><td>${r['MÍN. CONTRATUAL']||'—'}</td></tr>
             <tr><td>Mês-base</td><td>${r['MÊS']||'—'}</td></tr>
             <tr><td>Último reajuste</td><td>${fmtDataLonga(parseDataReaj(r['DATA ÚLTIMO REAJUSTE ']))}</td></tr>
