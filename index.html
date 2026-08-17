@@ -393,10 +393,10 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.14</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.14c</div>
       </div>
     </aside>
-    <!-- VERSÃO DO DASHBOARD: v2026.08.14 — base na 13c (estável) + flag obrigatória SP Regula/MTR no cadastro de cliente, card automático "Cliente novo - irregular" e troca entre as duas páginas. NÃO usa nenhuma ação nova do Apps Script. -->
+    <!-- VERSÃO DO DASHBOARD: v2026.08.14c — base na 13c (estável) + flag obrigatória SP Regula/MTR no cadastro de cliente, card automático "Cliente novo - irregular" e troca entre as duas páginas. NÃO usa nenhuma ação nova do Apps Script. -->
 
     <!-- Coluna nível 2: submódulos -->
     <div class="subcoluna" id="subcoluna">
@@ -2560,7 +2560,18 @@ async function servCriarLote(cnpj, cliente, servicos, dataBase, indice){
     const vai = (s.reajusta!==false); // por serviço: eventuais podem ser desmarcados
     const dataServ = s.data || dataBase || ''; // data-base do reajuste do serviço
     const campos={ cnpj:cnpjLimpo(cnpj), cliente, equipamento:s.servico, residuo:s.residuo||'', frequencia:s.frequencia||'', valor:s.valor||'', valorDestinacao:s.valorDestinacao||'', minimaObs:s.minima||'', dataInicio:(vai?dataServ:''), indice:s.indice||indice||'', vaiReajuste:vai };
-    try{ const resp=await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'novoServico',token:sessaoToken,dados:{campos}})}); const r=await resp.json(); if(r&&r.ok) n++; }catch(e){}
+    try{
+      const resp=await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'novoServico',token:sessaoToken,dados:{campos}})});
+      const r=await resp.json();
+      if(r&&r.ok){
+        n++;
+        // destinação por tonelada também entra no Reajuste, com linha própria
+        if (vai && parseFloat(String(s.valorDestinacao||'').replace(',','.')) > 0) {
+          try { await servReajusteDestinacao({ cnpj, cliente, equipamento:s.servico, valorDest:s.valorDestinacao,
+                  indice:(s.indice||indice||''), dataInicio:dataServ, minima:s.minima }); } catch(e){}
+        }
+      }
+    }catch(e){}
   }
   return n;
 }
@@ -2593,6 +2604,7 @@ function servDerivar(cliente, reajLinhas, coletasCli){
   (reajLinhas||[]).forEach(r=>{
     const eq=String(r['TP DE SERVIÇO']||'').trim();
     if(!eq || servNormKey(eq).indexOf('CONTRATONOVO')>=0) return;
+    if(servEhLinhaDestinacao(eq)) return;   // é a linha de reajuste da destinação, não um equipamento
     const k=servNormKey(eq); if(!k || vistos.has(k)) return; vistos.add(k);
     const v=parseMoedaReaj(r['VALOR REAJUSTADO'])||parseMoedaReaj(r['PREÇO ANTERIOR'])||'';
     const peso=servEhPeso(eq); // por tonelada => o valor é de destinação; a coleta fica pra completar
@@ -2606,6 +2618,51 @@ function servDerivar(cliente, reajLinhas, coletasCli){
   return out;
 }
 
+// ============================================================
+// DESTINAÇÃO (R$/tonelada) NO REAJUSTE
+// O backend só manda UM valor para a aba Reajustes: o da coleta/transporte.
+// A destinação por tonelada ficava de fora e nunca era reajustada — o cliente seguia
+// pagando o R$/t de anos atrás. Aqui criamos uma linha PRÓPRIA de reajuste para ela,
+// com o sufixo "— Destinação (R$/t)", para as duas subirem juntas todo ano.
+// Feito no frontend de propósito, usando ações que já existem no Apps Script.
+// ============================================================
+const SERV_SUFIXO_DEST = ' — Destinação (R$/t)';
+function servEhLinhaDestinacao(nome){ return /destina[çc][ãa]o/i.test(String(nome||'')); }
+function _servNormR(s){ return String(s||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim(); }
+// cria ou atualiza a linha de reajuste da destinação. Idempotente: editar não duplica.
+async function servReajusteDestinacao(p){
+  const valorDest = parseFloat(String(p.valorDest||'').replace(',','.'));
+  if (!(valorDest > 0)) return { ok:true, pulou:true };            // sem destinação, nada a fazer
+  const nomeServ = String(p.equipamento||'').trim() + SERV_SUFIXO_DEST;
+  const cnpj = String(p.cnpj||'').replace(/\D/g,'');
+  // procura se já existe (filtro por CNPJ no servidor quando possível, pra não baixar a aba toda)
+  let existe = false;
+  try {
+    const r = (cnpj && cnpj.length>=11) ? await buscarDados('Reajustes', true, cnpj) : await buscarDados('Reajustes', true);
+    const linhas = (r && r.ok) ? r.linhas : [];
+    const alvoNome = _servNormR(nomeServ), alvoCli = _servNormR(p.cliente);
+    existe = linhas.some(x=>{
+      const mesmoServ = _servNormR(x['TP DE SERVIÇO']) === alvoNome;
+      const mesmoCli = (cnpj && String(x['CNPJ']||'').replace(/\D/g,'')===cnpj) || _servNormR(x['CLIENTE'])===alvoCli;
+      return mesmoServ && mesmoCli;
+    });
+  } catch(e) {}
+  const dataR = p.dataInicio || '';
+  if (existe) {
+    // já existe: atualiza o valor e a data-base, sem criar linha nova
+    return await apiPost({ acao:'salvar', token: sessaoToken, aba:'Reajustes', chaveExtra:'TP DE SERVIÇO',
+      dados:{ 'CNPJ': p.cnpj||'', 'TP DE SERVIÇO': nomeServ, 'VALOR REAJUSTADO': valorDest,
+              'ÍNDICE': p.indice||'', 'DATA ÚLTIMO REAJUSTE ': dataR } });
+  }
+  return await apiPost({ acao:'novoRegistro', token: sessaoToken, dados:{ aba:'Reajustes', permitirDuplicado:true, campos:{
+    'CLIENTE': p.cliente||'', 'CNPJ': p.cnpj||'', 'TP DE SERVIÇO': nomeServ,
+    'PREÇO ANTERIOR': valorDest, 'VALOR REAJUSTADO': valorDest,
+    'ÍNDICE': p.indice||'', '% PREVISTO': 30,
+    'DATA ÚLTIMO REAJUSTE ': dataR, 'DATA ÚLTIMO REAJUSTE': dataR,
+    'MÍN. CONTRATUAL': p.minima||'',
+    'OBS.': 'Destinação por tonelada do serviço "' + String(p.equipamento||'') + '". Reajuste previsto de 30% em 12 meses (base = data de início).'
+  }}});
+}
 async function renderAbaServicos(corpo){
   corpo.innerHTML = `<div style="text-align:center;color:var(--cinza-500);padding:20px;">Carregando serviços...</div>`;
   const cnpj=fichaClienteAtual['CNPJ'], cliente=fichaClienteAtual['CLIENTE'];
@@ -2638,7 +2695,11 @@ async function renderAbaServicos(corpo){
   html+=`<table id="serv-tabela" class="ficha-tab"><thead><tr style="color:var(--cinza-600);font-weight:600;"><td>Equipamento</td><td>Resíduo</td><td>Frequência</td><td>Valor coleta</td><td>Destinação (R$/t)</td><td>Início</td><td>Reajuste</td><td></td></tr></thead><tbody>`;
   salvos.forEach(s=>{
     const rj=String(s['VAI_REAJUSTE']||'').toLowerCase()==='sim';
-    const badge=rj?`<span style="background:var(--verde-claro-bg);color:var(--verde-escuro);border-radius:5px;padding:1px 7px;font-size:11px;font-weight:600;">sim</span>`:`<span style="color:var(--cinza-400);font-size:11px;">não</span>`;
+    const temDest=(parseMoedaReaj(s['VALOR_DESTINACAO'])||0)>0;
+    // quando há destinação, são DUAS linhas de reajuste: a da coleta e a do R$/tonelada
+    const badge=rj
+      ? `<span style="background:var(--verde-claro-bg);color:var(--verde-escuro);border-radius:5px;padding:1px 7px;font-size:11px;font-weight:600;" title="${temDest?'Duas linhas na aba Reajustes: coleta e destinação (R$/t)':'Uma linha na aba Reajustes'}">sim${temDest?' (2 linhas)':''}</span>`
+      : `<span style="color:var(--cinza-400);font-size:11px;">não</span>`;
     // detalhes embaixo do equipamento: mínima, tipo de preço fechado, proposta, locação
     const minTxt = s['MINIMA_QTD'] ? `Mín: ${s['MINIMA_QTD']} ${s['MINIMA_UNIDADE']||''} ${s['MINIMA_PERIODO']||''}`.trim() : (s['MINIMA_OBS']?('Mín: '+s['MINIMA_OBS']):'');
     const modTxt = String(s['MODELO_PRECO']||'')==='fechado' ? `fechado até ${s['QTD_FECHADO']||'?'}` : '';
@@ -2696,6 +2757,11 @@ function abrirFormServico(cnpj, cliente, pre){
             <div><label id="sv-unit-lbl" style="font-size:12px;color:var(--cinza-700);">Valor unitário (R$)</label><input id="sv-unit" type="number" step="0.01" value="${g(pre.valor)}" style="${inp}"></div>
             <div id="sv-fechado-wrap" style="display:none;"><label style="font-size:12px;color:var(--cinza-700);">Para até (qtde de equip.)</label><input id="sv-qtdfechado" type="number" value="${g(pre.qtdFechado)}" placeholder="ex: 20" style="${inp}"></div>
           </div>
+          <div style="margin-top:8px;">
+            <label style="font-size:12px;color:var(--cinza-700);">Destinação (R$/tonelada) <span style="color:var(--cinza-400);">— opcional</span></label>
+            <input id="sv-dest2" type="number" step="0.01" value="${g(pre.destinacao||pre.valorDestinacao)}" placeholder="deixe em branco se não houver" style="${inp}">
+            <div style="font-size:11px;color:var(--cinza-500);margin-top:3px;">Preencha quando o cliente paga a destinação por peso, além do valor do equipamento. É a coluna "Destinação (R$/t)" da lista.</div>
+          </div>
         </div>
       </div>
       <div style="margin-top:12px;border-top:1px dashed var(--cinza-300);padding-top:10px;">
@@ -2746,7 +2812,13 @@ async function salvarServico(cnpj, cliente){
   const peso=(typeof servEhPeso==='function' && servEhPeso(equip));
   let valor='', valorDest='', modeloPreco='', qtdFechado='';
   if(peso){ valor=gv('sv-transporte'); valorDest=gv('sv-dest'); modeloPreco='peso'; }
-  else { modeloPreco=gv('sv-modelo')||'unitario'; valor=gv('sv-unit'); if(modeloPreco==='fechado') qtdFechado=gv('sv-qtdfechado'); }
+  else {
+    modeloPreco=gv('sv-modelo')||'unitario'; valor=gv('sv-unit');
+    if(modeloPreco==='fechado') qtdFechado=gv('sv-qtdfechado');
+    // A destinação vale para qualquer equipamento, não só para os cobrados por peso.
+    // Antes este campo nem aparecia aqui — e, pior, salvar zerava o valor que já existia.
+    valorDest=gv('sv-dest2');
+  }
   const locWrap=document.getElementById('sv-loc-wrap');
   const tempoLoc=(locWrap && locWrap.style.display!=='none') ? gv('sv-loc') : '';
   const idEl=document.getElementById('sv-id');
@@ -2761,8 +2833,21 @@ async function salvarServico(cnpj, cliente){
     const r=await resp.json();
     if(!r.ok){ msg.innerHTML=`<div class="sem-acesso" style="margin-top:10px;">${r.erro||'Erro. Confirme que o Apps Script foi republicado.'}</div>`; return; }
     cacheReajustes=null;
+    // a destinação por tonelada ganha a SUA linha de reajuste (o backend só cuida da coleta)
+    if (vaiReaj && parseFloat(String(valorDest||'').replace(',','.')) > 0) {
+      msg.innerHTML='<div style="text-align:center;padding:10px;color:var(--cinza-500);">Enviando a destinação (R$/t) para o Reajuste...</div>';
+      const rd = await servReajusteDestinacao({ cnpj: campos.cnpj, cliente: campos.cliente, equipamento: equip,
+        valorDest: valorDest, indice: campos.indice, dataInicio: inicio, minima: campos.minimaObs });
+      if (!rd.ok) {
+        msg.innerHTML = `<div style="background:var(--amarelo-bg);border:1px solid var(--amarelo-borda);border-radius:8px;padding:11px;margin-top:10px;color:#8a6d00;font-size:12.5px;">
+          <b><i class="ti ti-alert-triangle"></i> O serviço foi salvo, mas a destinação (R$/t) não entrou no Reajuste.</b>
+          <div style="margin-top:3px;font-size:11.5px;">${rd.erro||''}</div>
+          <div style="margin-top:8px;">Salve o serviço de novo para tentar, ou lance a linha manualmente na aba Reajustes.</div></div>`;
+        return;
+      }
+    }
     renderAbaServicos(document.getElementById('ficha-corpo'));
-  }catch(e){ msg.innerHTML='<div class="sem-acesso" style="margin-top:10px;">Erro de conexão.</div>'; }
+  }catch(e){ msg.innerHTML='<div class="sem-acesso" style="margin-top:10px;">Erro de conexão: '+String((e&&e.message)||e)+'</div>'; }
 }
 
 // exclui um serviço salvo (aba Servicos_Cliente) pela coluna ID
@@ -4399,6 +4484,117 @@ function aplicarReaj() {
   res.innerHTML = modoReaj==='cards' ? cardsReaj(lista) : listaReaj(lista);
 }
 
+// ============================================================
+// REAJUSTE SEM CLIENTE NA CARTEIRA
+// Acontece quando o reajuste é colado com um nome diferente do cadastro (ex.: o nome da
+// unidade em vez da razão social), ou quando o cliente foi excluído depois. O reajuste
+// continua na lista e ninguém percebe que não existe cliente por trás dele.
+// Aqui a ficha do reajuste passa a dizer isso na cara, e oferece a saída.
+// ============================================================
+function _reajNorm(s){
+  return String(s||'').toUpperCase()
+    .replace(/[ÁÀÂÃ]/g,'A').replace(/[ÉÊ]/g,'E').replace(/Í/g,'I').replace(/[ÓÔÕ]/g,'O').replace(/Ú/g,'U').replace(/Ç/g,'C')
+    .replace(/[^A-Z0-9 ]/g,' ').replace(/\b(LTDA|SA|EIRELI|ME|EPP)\b/g,' ').replace(/\s+/g,' ').trim();
+}
+// procura o cliente correspondente: primeiro por CNPJ, depois por nome tolerante
+function reajClienteDaCarteira(reaj){
+  const lista = cacheClientes||[];
+  const cj = String(reaj['CNPJ']||'').replace(/\D/g,'');
+  if (cj && cj.length>=11) {
+    const porCnpj = lista.find(c=>String(c['CNPJ']||'').replace(/\D/g,'')===cj);
+    if (porCnpj) return porCnpj;
+  }
+  const n = _reajNorm(reaj['CLIENTE']);
+  if (!n) return null;
+  return lista.find(c=>_reajNorm(c['CLIENTE'])===n) || null;
+}
+// nomes parecidos, pra mostrar quando não achou (quase sempre é diferença de grafia)
+function reajParecidos(reaj){
+  const n=_reajNorm(reaj['CLIENTE']); if(!n) return [];
+  const toks=n.split(' ').filter(w=>w.length>=4);
+  if(!toks.length) return [];
+  return (cacheClientes||[]).filter(c=>{
+    const cn=_reajNorm(c['CLIENTE']);
+    return toks.some(t=>cn.includes(t));
+  }).slice(0,6);
+}
+// monta o bloco que aparece dentro da ficha do reajuste
+function reajBlocoCarteira(idx){
+  const r = cacheReajustes[idx];
+  if (!cacheClientes) {
+    carregarClientes().then(()=>{ const el=document.getElementById('reaj-carteira'); if(el) el.innerHTML=reajBlocoCarteira(idx); }).catch(()=>{});
+    return '<div style="font-size:12px;color:var(--cinza-500);padding:8px 0;"><i class="ti ti-loader"></i> Conferindo se existe cliente na carteira...</div>';
+  }
+  const c = reajClienteDaCarteira(r);
+  if (c) {
+    return `<div style="background:var(--verde-ok-bg);border-radius:8px;padding:9px 11px;font-size:12.5px;color:var(--verde-ok);">
+      <i class="ti ti-circle-check"></i> Cliente na carteira: <b>${c['CLIENTE']}</b>
+      <span onclick="abrirFicha('${String(c['CNPJ']||'').replace(/'/g,'')}','${String(c['CLIENTE']||'').replace(/'/g,"\\'")}')" style="margin-left:6px;text-decoration:underline;cursor:pointer;">abrir ficha</span>
+    </div>`;
+  }
+  const par = reajParecidos(r);
+  return `<div style="background:var(--amarelo-bg);border:1px solid var(--amarelo-borda);border-radius:8px;padding:11px;font-size:12.5px;color:#8a6d00;">
+    <b><i class="ti ti-alert-triangle"></i> Este reajuste não tem cliente na aba Clientes.</b>
+    <div style="margin-top:4px;font-size:11.5px;">Por isso ele não aparece na Carteira nem em Contratos. Quase sempre é o nome escrito diferente do cadastro — ou o cliente foi excluído depois.</div>
+    ${par.length?`<div style="margin-top:8px;font-size:11.5px;"><b>Clientes com nome parecido:</b><br>${par.map(c=>`<span onclick="abrirFicha('${String(c['CNPJ']||'').replace(/'/g,'')}','${String(c['CLIENTE']||'').replace(/'/g,"\\'")}')" style="cursor:pointer;text-decoration:underline;">${c['CLIENTE']}</span>`).join('<br>')}
+      <div style="margin-top:4px;color:var(--cinza-600);">Se for um destes, o certo é acertar o nome no reajuste (botão "Corrigir valores") para os dois casarem.</div></div>`:''}
+    <div style="margin-top:10px;">
+      <button onclick="criarClienteDeReajuste(${idx})" style="padding:7px 12px;border:none;background:#8a6d00;color:white;border-radius:7px;cursor:pointer;font-size:12px;"><i class="ti ti-user-plus"></i> É cliente mesmo — cadastrar na carteira</button>
+    </div>
+    <div id="reaj-cli-msg"></div>
+  </div>`;
+}
+// cria o cliente a partir do reajuste (com a marcação de regularização, como todo cliente novo)
+function criarClienteDeReajuste(idx){
+  const r = cacheReajustes[idx];
+  const inp='width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;';
+  const cont=document.getElementById('ficha-container');
+  cont.insertAdjacentHTML('beforeend', `
+    <div class="ficha-overlay" id="reajcli-overlay" onclick="if(event.target===this)document.getElementById('reajcli-overlay').remove()" style="z-index:700;">
+      <div class="ficha" style="width:470px;">
+        <div class="ficha-topo"><button class="fechar" onclick="document.getElementById('reajcli-overlay').remove()"><i class="ti ti-x"></i></button>
+          <div class="nome"><i class="ti ti-user-plus"></i> Cadastrar na carteira</div><div class="cnpj">${r['CLIENTE']||''}</div></div>
+        <div class="ficha-corpo">
+          <div style="margin-bottom:10px;"><label style="font-size:13px;color:var(--cinza-700);">Cliente *</label>
+            <input type="text" id="rcli-nome" value="${String(r['CLIENTE']||'').replace(/"/g,'&quot;')}" style="${inp}"></div>
+          <div style="margin-bottom:10px;"><label style="font-size:13px;color:var(--cinza-700);">CNPJ</label>
+            <input type="text" id="rcli-cnpj" value="${String(r['CNPJ']||'').replace(/"/g,'&quot;')}" style="${inp}"></div>
+          <div style="margin-bottom:10px;"><label style="font-size:13px;color:var(--cinza-700);">Consultor</label>
+            <select id="rcli-cons" style="${inp}">${['— a definir','Bruna Campos','Elaine Souza','Rogério Sabino','Danielly Santos','Maria Fernanda','Andrea Fernandes','Roberto Fernandes'].map(n=>`<option>${n}</option>`).join('')}</select></div>
+          <div style="background:var(--verde-claro-bg);border-radius:9px;padding:10px;margin-bottom:12px;">
+            <label style="font-size:13px;color:var(--verde-escuro);font-weight:600;display:block;margin-bottom:4px;"><i class="ti ti-file-certificate"></i> Regularização obrigatória *</label>
+            ${REG_selectHtml('rcli-reg', inp)}
+          </div>
+          <div class="ficha-botoes">
+            <button class="ficha-btn-primario" onclick="salvarClienteDeReajuste(${idx})"><i class="ti ti-check"></i> Cadastrar</button>
+            <button class="ficha-btn-secundario" onclick="document.getElementById('reajcli-overlay').remove()">Cancelar</button>
+          </div>
+          <div id="rcli-msg"></div>
+        </div>
+      </div>
+    </div>`);
+}
+async function salvarClienteDeReajuste(idx){
+  const gv=id=>((document.getElementById(id)||{}).value||'').trim();
+  const msg=document.getElementById('rcli-msg');
+  const nome=gv('rcli-nome'), regTipo=gv('rcli-reg');
+  if(!nome){ msg.innerHTML='<div class="sem-acesso" style="margin-top:8px;">Informe o nome.</div>'; return; }
+  if(!regTipo){ msg.innerHTML='<div class="sem-acesso" style="margin-top:8px;">Escolha SP Regula (RGG) ou SIGOR (MTR).</div>'; return; }
+  const cons = gv('rcli-cons')==='— a definir' ? '' : gv('rcli-cons');
+  const campos={ 'CLIENTE':nome, 'CNPJ':gv('rcli-cnpj'), 'TIPO':'Contrato', 'CONSULTOR':cons };
+  msg.innerHTML='<div style="text-align:center;padding:9px;color:var(--cinza-500);">Cadastrando...</div>';
+  const r = await apiPost({ acao:'novoRegistro', token: sessaoToken, dados:{ aba:'Clientes', campos, permitirDuplicado:true } });
+  if(!r.ok){ msg.innerHTML=`<div class="sem-acesso" style="margin-top:8px;">${r.erro||'não consegui cadastrar.'}</div>`; return; }
+  const dadosReg={ cliente:nome, cnpj:campos['CNPJ'], consultor:cons, origem:'Cadastrado a partir de um reajuste' };
+  REG_guardarPendente(regTipo, dadosReg);
+  const rReg = await REG_criarCard(regTipo, dadosReg);
+  if (rReg.ok) window._regPendente = null;
+  cacheClientes=null; if(typeof limparCacheBusca==='function') limparCacheBusca();
+  await carregarClientes();
+  msg.innerHTML = '<div style="background:var(--verde-ok-bg);border-radius:8px;padding:9px;margin-top:8px;color:var(--verde-ok);font-size:12.5px;"><i class="ti ti-circle-check"></i> Cliente cadastrado.</div>' + REG_mensagem(rReg, regTipo, 'rcli-msg');
+  const bloco=document.getElementById('reaj-carteira'); if(bloco) bloco.innerHTML=reajBlocoCarteira(idx);
+  if (rReg.ok) setTimeout(()=>{ const o=document.getElementById('reajcli-overlay'); if(o)o.remove(); }, 1800);
+}
 function fmtData(d) {
   if (!d) return '—';
   return ('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2)+'/'+d.getFullYear();
@@ -4502,6 +4698,7 @@ function detalheReaj(idx) {
             <tr><td>Último reajuste</td><td>${fmtDataLonga(parseDataReaj(r['DATA ÚLTIMO REAJUSTE ']))}</td></tr>
             <tr><td>Próximo reajuste</td><td><b>${fmtDataLonga(prox)}</b></td></tr>
           </table>
+          <div id="reaj-carteira" style="margin-top:14px;">${reajBlocoCarteira(idx)}</div>
           <div id="reaj-acao" style="margin-top:18px;">
             <div class="ficha-botoes" style="flex-wrap:wrap;">
               <button class="ficha-btn-primario" onclick="abrirFormReajuste(${idx})"><i class="ti ti-trending-up"></i> Reajustar</button>
