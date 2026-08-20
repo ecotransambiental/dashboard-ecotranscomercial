@@ -393,10 +393,10 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.14d</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.15</div>
       </div>
     </aside>
-    <!-- VERSÃO DO DASHBOARD: v2026.08.14d — base na 13c (estável) + flag obrigatória SP Regula/MTR no cadastro de cliente, card automático "Cliente novo - irregular" e troca entre as duas páginas. NÃO usa nenhuma ação nova do Apps Script. -->
+    <!-- VERSÃO DO DASHBOARD: v2026.08.15 — base na 13c (estável) + flag obrigatória SP Regula/MTR no cadastro de cliente, card automático "Cliente novo - irregular" e troca entre as duas páginas. NÃO usa nenhuma ação nova do Apps Script. -->
 
     <!-- Coluna nível 2: submódulos -->
     <div class="subcoluna" id="subcoluna">
@@ -490,14 +490,17 @@ const GOOGLE_MAPS_KEY = 'AIzaSyC4oIgrSglCR1TckpKjE7DlSGLLCWSvddM';
 // quais módulos cada PERFIL enxerga. As senhas e a validação real
 // (incluindo horário) ficam no Apps Script / Google Sheets.
 // ============================================================
+// consultor: true = aparece nos campos "Consultor responsável" das telas.
+// Para incluir alguém no sistema, basta uma linha aqui (e a senha na aba Usuarios da planilha).
 const USUARIOS = [
-  { id: 'bruna',    nome: 'Bruna Campos',    role: 'Vendedora',                  perfil: 'vendedor' },
-  { id: 'elaine',   nome: 'Elaine Souza',    role: 'Vendedora',                  perfil: 'vendedor' },
-  { id: 'rogerio',  nome: 'Rogério Sabino',  role: 'Supervisor + Vendedor',      perfil: 'supervisor' },
-  { id: 'roberto',  nome: 'Roberto Fernandes', role: 'Diretor Comercial',        perfil: 'diretor' },
-  { id: 'mafe',     nome: 'Maria Fernanda Conte', role: 'Admin — Analista Comercial', perfil: 'admin' },
-  { id: 'danielly', nome: 'Danielly Santos', role: 'Assistente',                 perfil: 'assistente' },
-  { id: 'andrea',   nome: 'Andrea Fernandes', role: 'Admin — Diretora Adm.',     perfil: 'admin' },
+  { id: 'bruna',    nome: 'Bruna Campos',    role: 'Vendedora',                  perfil: 'vendedor',   consultor: true },
+  { id: 'elaine',   nome: 'Elaine Souza',    role: 'Vendedora',                  perfil: 'vendedor',   consultor: true },
+  { id: 'andrei',   nome: 'Andrei Castilho', role: 'Vendedor',                   perfil: 'vendedor',   consultor: true },
+  { id: 'rogerio',  nome: 'Rogério Sabino',  role: 'Supervisor + Vendedor',      perfil: 'supervisor', consultor: true },
+  { id: 'roberto',  nome: 'Roberto Fernandes', role: 'Diretor Comercial',        perfil: 'diretor',    consultor: true },
+  { id: 'mafe',     nome: 'Maria Fernanda Conte', role: 'Admin — Analista Comercial', perfil: 'admin', consultor: true },
+  { id: 'danielly', nome: 'Danielly Santos', role: 'Assistente',                 perfil: 'assistente', consultor: true },
+  { id: 'andrea',   nome: 'Andrea Fernandes', role: 'Admin — Diretora Adm.',     perfil: 'admin',      consultor: true },
   { id: 'joyce',    nome: 'Joyce Freitas',   role: 'Financeiro',                 perfil: 'financeiro' },
   { id: 'guilherme', nome: 'Guilherme Fernandes', role: 'Admin — Diretoria',     perfil: 'admin' },
   { id: 'leonardo', nome: 'Leonardo Fernandes', role: 'Admin — Diretoria',       perfil: 'admin' },
@@ -571,6 +574,33 @@ const MODULOS = [
   },
 ];
 
+// ============================================================
+// LISTA ÚNICA DE CONSULTORES
+// Antes o nome de cada consultor estava escrito à mão em 8 lugares diferentes
+// (cada select de "Consultor" da tela). Bastava esquecer um para o consultor novo
+// não aparecer naquela tela. Agora sai tudo daqui: para incluir alguém, basta
+// acrescentar em USUARIOS acima e, se ele assina e-mail, em DADOS_CONSULTORES.
+// ============================================================
+function listaConsultores(comADefinir){
+  const nomes = USUARIOS.filter(u=>u.consultor).map(u=>u.nome).filter(Boolean);
+  // 'Maria Fernanda' aparece nos cadastros antigos sem o sobrenome — mantém as duas grafias
+  // pra não perder o vínculo dos clientes já cadastrados no nome curto.
+  if (nomes.includes('Maria Fernanda Conte') && !nomes.includes('Maria Fernanda')) nomes.push('Maria Fernanda');
+  const unicos = [...new Set(nomes)].sort((a,b)=>a.localeCompare(b,'pt'));
+  return comADefinir ? ['— a definir', ...unicos] : unicos;
+}
+// options de <select> já prontas, marcando o consultor atual do registro
+function optionsConsultor(selecionado, comADefinir){
+  const atual = String(selecionado||'').trim();
+  const nomes = listaConsultores(comADefinir);
+  // marca APENAS UM: primeiro tenta o nome exato; só se não achar, tenta pelo primeiro nome.
+  // (a Mafe aparece como "Maria Fernanda" e "Maria Fernanda Conte" nos cadastros antigos —
+  // sem esse cuidado as duas saíam marcadas e o navegador escolhia por conta própria)
+  const semAcento = t => String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase();
+  let marcado = nomes.find(n=>n===atual) || nomes.find(n=>semAcento(n)===semAcento(atual));
+  if (!marcado && atual) marcado = nomes.find(n=>n!=='— a definir' && semAcento(n.split(' ')[0])===semAcento(atual.split(' ')[0]));
+  return nomes.map(n=>`<option ${n===marcado?'selected':''}>${n}</option>`).join('');
+}
 // Quais módulos cada perfil enxerga
 const ACESSO = {
   admin:       ['pendencias','crm','carteira','agenda','regula','financeiro'],   // Mafe, Andrea — tudo
@@ -600,12 +630,12 @@ const SUBMODULOS_BLOQUEADOS = {
 const PERFIL_SO_PROPRIOS = ['vendedor'];
 // Blindagem por ID no CRM (leads, atividades, agenda): só as vendedoras veem apenas os próprios.
 // Danielly e Rogério veem o CRM INTEIRO.
-const IDS_SO_PROPRIOS_CRM = ['bruna', 'elaine'];
+const IDS_SO_PROPRIOS_CRM = ['bruna', 'elaine', 'andrei'];
 // Blindagem por ID na CARTEIRA (clientes, contratos): só as vendedoras + Rogério veem só os próprios.
 // Danielly vê toda a carteira (decisão da diretoria).
-const IDS_SO_PROPRIOS_CARTEIRA = ['bruna', 'elaine', 'rogerio'];
+const IDS_SO_PROPRIOS_CARTEIRA = ['bruna', 'elaine', 'rogerio', 'andrei'];
 // compat: usado em alguns pontos genéricos (mantém só as vendedoras)
-const IDS_SO_PROPRIOS = ['bruna', 'elaine', 'rogerio', 'danielly'];
+const IDS_SO_PROPRIOS = ['bruna', 'elaine', 'rogerio', 'danielly', 'andrei'];
 // E estes SEMPRE veem tudo (gestão), independente de qualquer coisa.
 const IDS_VE_TUDO = ['mafe', 'andrea', 'roberto'];
 // Quem vê a tabela de consulta "quem atende quem" (só cliente + consultor)
@@ -943,7 +973,7 @@ function renderModulos() {
   // Rogério/Danielly mantêm seu acesso normal à Carteira (mas com filtro "só próprios").
   const id = String(usuarioAtual.id||'').toLowerCase();
   let perfilEfetivo = usuarioAtual.perfil;
-  if (['bruna','elaine'].includes(id)) perfilEfetivo = 'vendedor';
+  if (['bruna','elaine','andrei'].includes(id)) perfilEfetivo = 'vendedor';
   const permitidos = ACESSO[perfilEfetivo] || [];
   const nav = document.getElementById('nav-modulos');
   nav.innerHTML = '';
@@ -1485,7 +1515,7 @@ function abrirFormNovoCliente(){
             <div><label style="font-size:13px;color:var(--cinza-700);">Unidade</label>
               <input type="text" id="ncli-unidade" placeholder="ex: Shopping X / Matriz" style="${inp}"></div>
             <div><label style="font-size:13px;color:var(--cinza-700);">Consultor</label>
-              <select id="ncli-consultor" style="${inp}">${['— a definir','Bruna Campos','Elaine Souza','Rogério Sabino','Danielly Santos','Maria Fernanda','Andrea Fernandes','Roberto Fernandes'].map(n=>`<option>${n}</option>`).join('')}</select></div>
+              <select id="ncli-consultor" style="${inp}">${optionsConsultor('', true)}</select></div>
             <div><label style="font-size:13px;color:var(--cinza-700);">Contato</label>
               <input type="text" id="ncli-contato" style="${inp}"></div>
             <div><label style="font-size:13px;color:var(--cinza-700);">Telefone</label>
@@ -1719,7 +1749,7 @@ async function abrirFicha(cnpj, nome) {
             <tr><td><i class="ti ti-target" style="vertical-align:-2px;margin-right:6px;"></i>Mínima de coleta</td><td>${c['MINIMA_COLETA']||c['MINIMA']||c['MIN']||c['MIN_CONTRATUAL']||'—'}</td></tr>
             <tr><td><i class="ti ti-briefcase" style="vertical-align:-2px;margin-right:6px;"></i>Consultor</td><td>
               <select id="ficha-consultor" style="padding:5px 8px;border:1.5px solid var(--cinza-300);border-radius:6px;font-size:13px;font-family:var(--fonte-corpo);">
-                ${['— a definir','Bruna Campos','Elaine Souza','Rogério Sabino','Danielly Santos','Maria Fernanda','Andrea Fernandes','Roberto Fernandes'].map(n=>`<option ${(c['CONSULTOR']||'— a definir')===n||(c['CONSULTOR']&&n!=='— a definir'&&c['CONSULTOR'].includes(n.split(' ')[0]))?'selected':''}>${n}</option>`).join('')}
+                ${optionsConsultor(c['CONSULTOR']||'— a definir', true)}
               </select>
               <button onclick="salvarConsultorFicha('${cnpj.replace(/'/g,'')}')" style="margin-left:6px;padding:5px 10px;border:none;background:var(--verde-medio);color:white;border-radius:6px;cursor:pointer;font-size:12px;"><i class="ti ti-check"></i></button>
             </td></tr>
@@ -4606,7 +4636,7 @@ function criarClienteDeReajuste(idx){
           <div style="margin-bottom:10px;"><label style="font-size:13px;color:var(--cinza-700);">CNPJ</label>
             <input type="text" id="rcli-cnpj" value="${String(r['CNPJ']||'').replace(/"/g,'&quot;')}" style="${inp}"></div>
           <div style="margin-bottom:10px;"><label style="font-size:13px;color:var(--cinza-700);">Consultor</label>
-            <select id="rcli-cons" style="${inp}">${['— a definir','Bruna Campos','Elaine Souza','Rogério Sabino','Danielly Santos','Maria Fernanda','Andrea Fernandes','Roberto Fernandes'].map(n=>`<option>${n}</option>`).join('')}</select></div>
+            <select id="rcli-cons" style="${inp}">${optionsConsultor('', true)}</select></div>
           <div style="background:var(--verde-claro-bg);border-radius:9px;padding:10px;margin-bottom:12px;">
             <label style="font-size:13px;color:var(--verde-escuro);font-weight:600;display:block;margin-bottom:4px;"><i class="ti ti-file-certificate"></i> Regularização obrigatória *</label>
             ${REG_selectHtml('rcli-reg', inp)}
@@ -6404,6 +6434,7 @@ const DADOS_CONSULTORES = {
   "Rogério Sabino": { nome:"Rogério Sabino", cargo:"Consultor Comercial", cel:"", email:"r.sabino@ecotransambiental.com.br" },
   "Elaine Souza": { nome:"Elaine Souza", cargo:"Consultora Comercial", cel:"", email:"elaine.souza@ecotransambiental.com.br" },
   "Bruna Campos": { nome:"Bruna Campos", cargo:"Consultora Comercial", cel:"", email:"bruna.campos@ecotransambiental.com.br" },
+  "Andrei Castilho": { nome:"Andrei Castilho", cargo:"Consultor Comercial", cel:"", email:"andrei.castilho@ecotransambiental.com.br" },
   "Danielly Santos": { nome:"Danielly Ribeiro dos Santos", cargo:"Consultora Comercial", cel:"55 11 98844 8352", email:"danielly.santos@ecotransambiental.com.br" },
   "Maria Fernanda": { nome:"Maria Fernanda", cargo:"Consultora Comercial", cel:"", email:"" }
 };
@@ -7781,7 +7812,7 @@ function abrirFormLead() {
             <div style="grid-column:1/3;"><label style="font-size:13px;color:var(--cinza-700);">CNPJ <span style="color:var(--cinza-400);font-size:11px;">(evita prospectar cliente repetido)</span></label>
               <input type="text" id="nl-cnpj" placeholder="00.000.000/0000-00" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
             <div><label style="font-size:13px;color:var(--cinza-700);">Consultor responsável</label>
-              <select id="nl-consultor" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;">${['Bruna Campos','Elaine Souza','Rogério Sabino','Danielly Santos','Maria Fernanda','Andrea Fernandes','Roberto Fernandes'].map(n=>`<option ${usuarioAtual.nome&&usuarioAtual.nome.includes(n.split(' ')[0])?'selected':''}>${n}</option>`).join('')}</select></div>
+              <select id="nl-consultor" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;">${optionsConsultor(usuarioAtual.nome||'', false)}</select></div>
             <div><label style="font-size:13px;color:var(--cinza-700);">Etapa</label>
               <select id="nl-etapa" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"><option>Em Contato</option><option>Proposta Enviada</option><option value="Indicação/Prospecção">Pendente</option><option>Fechado</option><option>Declinado</option></select></div>
             <div><label style="font-size:13px;color:var(--cinza-700);">Fonte</label>
@@ -8426,7 +8457,7 @@ function podeGerirSolic(){ if(!usuarioAtual) return false; return ['admin','dire
 function _cnpjDoClienteNome(nome){ const alvo=String(nome||'').trim().toUpperCase(); const c=(cacheClientes||[]).find(x=>String(x['CLIENTE']||'').trim().toUpperCase()===alvo); return c?(c['CNPJ']||''):''; }
 // consultor responsável pelo cliente (a solicitação fica sempre no nome dele, pra ele acompanhar o status)
 function _consultorDoClienteNome(nome){ const alvo=String(nome||'').trim().toUpperCase(); const c=(cacheClientes||[]).find(x=>String(x['CLIENTE']||'').trim().toUpperCase()===alvo); return c?(String(c['CONSULTOR']||'').trim()):''; }
-const SOLIC_CONSULTORES = ['Bruna Campos','Elaine Souza','Rogério Sabino','Danielly Santos','Maria Fernanda','Andrea Fernandes','Roberto Fernandes'];
+const SOLIC_CONSULTORES = listaConsultores(false);
 // ao escolher o cliente no form, já seleciona o consultor responsável por ele
 function _solicAutoConsultor(idCliente, idSelect){
   const nome=(document.getElementById(idCliente)||{}).value||'';
@@ -9800,7 +9831,7 @@ async function abrirLead(id, nomeEnc) {
             <label style="font-size:12px;color:var(--cinza-600);display:block;margin-bottom:6px;font-weight:600;">Consultor responsável</label>
             <div style="display:flex;gap:8px;align-items:center;">
               <select id="lead-consultor" style="flex:1;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;font-size:13px;">
-                ${['Bruna Campos','Elaine Souza','Rogério Sabino','Danielly Santos','Maria Fernanda','Andrea Fernandes','Roberto Fernandes'].map(n=>`<option ${(l['CONSULTOR']||'')===n||(l['CONSULTOR']&&l['CONSULTOR'].includes(n.split(' ')[0]))?'selected':''}>${n}</option>`).join('')}
+                ${optionsConsultor(l['CONSULTOR']||'', false)}
               </select>
               <button onclick="salvarConsultorLead('${idLead}')" style="padding:9px 14px;border:none;background:var(--verde-medio);color:white;border-radius:8px;cursor:pointer;font-size:13px;white-space:nowrap;"><i class="ti ti-check"></i> Salvar</button>
             </div>
