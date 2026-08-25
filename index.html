@@ -393,10 +393,10 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.15</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.16</div>
       </div>
     </aside>
-    <!-- VERSÃO DO DASHBOARD: v2026.08.15 — base na 13c (estável) + flag obrigatória SP Regula/MTR no cadastro de cliente, card automático "Cliente novo - irregular" e troca entre as duas páginas. NÃO usa nenhuma ação nova do Apps Script. -->
+    <!-- VERSÃO DO DASHBOARD: v2026.08.16 — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
 
     <!-- Coluna nível 2: submódulos -->
     <div class="subcoluna" id="subcoluna">
@@ -628,9 +628,9 @@ const SUBMODULOS_BLOQUEADOS = {
 
 // Perfis que veem SOMENTE os próprios dados
 const PERFIL_SO_PROPRIOS = ['vendedor'];
-// Blindagem por ID no CRM (leads, atividades, agenda): só as vendedoras veem apenas os próprios.
-// Danielly e Rogério veem o CRM INTEIRO.
-const IDS_SO_PROPRIOS_CRM = ['bruna', 'elaine', 'andrei'];
+// Blindagem por ID no CRM (leads, atividades, agenda): consultores veem apenas os próprios.
+// Só a Danielly vê o CRM INTEIRO (além de admin e diretoria).
+const IDS_SO_PROPRIOS_CRM = ['bruna', 'elaine', 'andrei', 'rogerio'];
 // Blindagem por ID na CARTEIRA (clientes, contratos): só as vendedoras + Rogério veem só os próprios.
 // Danielly vê toda a carteira (decisão da diretoria).
 const IDS_SO_PROPRIOS_CARTEIRA = ['bruna', 'elaine', 'rogerio', 'andrei'];
@@ -674,8 +674,8 @@ function veSomenteProprios() {
   const id = String(usuarioAtual.id||'').toLowerCase();
   if (IDS_VE_TUDO.includes(id)) return false;
   if (IDS_SO_PROPRIOS_CRM.includes(id)) return true;
-  // Danielly/Rogério NÃO entram aqui — veem o CRM inteiro
-  if (id === 'danielly' || id === 'rogerio') return false;
+  // Danielly continua vendo o CRM inteiro; Rogério agora vê apenas os leads dele
+  if (id === 'danielly') return false;
   return PERFIL_SO_PROPRIOS.includes(usuarioAtual.perfil);
 }
 // filtro da CARTEIRA (clientes, contratos): vendedoras + Danielly + Rogério veem só os próprios
@@ -1734,9 +1734,18 @@ async function abrirFicha(cnpj, nome) {
             <div class="ficha-kpi"><div class="lbl">Faturamento</div><div class="val">${fmtMoeda(fat)}</div></div>
             <div class="ficha-kpi"><div class="lbl">Tipo</div><div class="val" style="font-size:16px;">${c['TIPO']||'Contrato'}</div></div>
           </div>
+          ${!cnpjLimpo(c['CNPJ']) ? `<div style="background:var(--vermelho-bg);border:1px solid var(--vermelho-borda);border-radius:10px;padding:11px 13px;margin-bottom:14px;font-size:12.5px;color:var(--vermelho);">
+            <b><i class="ti ti-alert-triangle"></i> Este cliente está sem CNPJ.</b>
+            <div style="margin-top:4px;">O CNPJ é o que liga o cliente aos contratos, serviços, reajustes, coletas e faturamento. Sem ele, o sistema só consegue casar pelo nome — e o que você salvar aqui pode não encontrar a linha certa. Preencha abaixo.</div>
+          </div>` : ''}
           ${blocoRegulatorio(c)}
           ${c['TIPO']==='Contratual - pendente'?`<div style="background:var(--amarelo-bg);border:1px solid var(--amarelo);border-radius:8px;padding:11px;margin-bottom:14px;font-size:13px;color:#8a6d00;"><i class="ti ti-alert-triangle"></i> <b>Contrato pendente.</b> Este cliente foi fechado mas os dados do contrato ainda não foram preenchidos. <button onclick="abrirFormContrato('${(c['CLIENTE']||'').replace(/'/g,'')}','${cnpj.replace(/'/g,'')}')" style="margin-left:6px;padding:4px 10px;border:none;background:var(--verde-medio);color:white;border-radius:6px;cursor:pointer;font-size:12px;">Preencher contrato</button></div>`:''}
           <table class="ficha-tab">
+            <tr><td><i class="ti ti-id" style="vertical-align:-2px;margin-right:6px;"></i>CNPJ</td><td>
+              ${podeEditarConsultorLead() ? `<input type="text" id="ficha-cnpj" value="${String(c['CNPJ']||'').replace(/"/g,'&quot;')}" placeholder="00.000.000/0000-00" style="padding:5px 8px;border:1.5px solid ${cnpjLimpo(c['CNPJ'])?'var(--cinza-300)':'var(--vermelho)'};border-radius:6px;font-size:13px;font-family:var(--fonte-corpo);width:58%;">
+              <button onclick="salvarCnpjFicha('${(c['CLIENTE']||'').replace(/'/g,"\\'")}')" style="margin-left:6px;padding:5px 10px;border:none;background:var(--verde-medio);color:white;border-radius:6px;cursor:pointer;font-size:12px;"><i class="ti ti-check"></i></button>` : (c['CNPJ']||'—')}
+              <div id="ficha-cnpj-msg" style="font-size:11px;margin-top:4px;"></div>
+            </td></tr>
             <tr><td><i class="ti ti-user" style="vertical-align:-2px;margin-right:6px;"></i>Contato</td><td>${c['CONTATO']||'—'} <button onclick="abrirFormContato('${cnpj.replace(/'/g,'')}','${(c['CLIENTE']||'').replace(/'/g,'')}')" style="margin-left:6px;padding:3px 8px;border:1px solid var(--cinza-300);background:white;border-radius:6px;cursor:pointer;font-size:11px;color:var(--verde-escuro);"><i class="ti ti-plus"></i> contato</button></td></tr>
             <tr><td><i class="ti ti-mail" style="vertical-align:-2px;margin-right:6px;"></i>E-mail</td><td>${c['EMAIL']||'—'}</td></tr>
             <tr><td><i class="ti ti-phone" style="vertical-align:-2px;margin-right:6px;"></i>Telefone</td><td>${c['TELEFONE']||'—'}</td></tr>
@@ -1788,10 +1797,10 @@ async function mostrarOrigemLead(cnpj) {
     // se os leads já estão em memória, usa; se não, pede ao servidor só as linhas deste CNPJ.
     let lead = null;
     if (kanbanLeads && kanbanLeads.length) {
-      lead = kanbanLeads.find(l => cnpjLimpo(l['CNPJ'])===alvo);
+      lead = kanbanLeads.find(l => alvo && cnpjLimpo(l['CNPJ'])===alvo);
     } else {
       const rl = await buscarDados('CRM_Leads', false, alvo);
-      lead = (rl && rl.ok ? rl.linhas : []).find(l => cnpjLimpo(l['CNPJ'])===alvo);
+      lead = (rl && rl.ok ? rl.linhas : []).find(l => alvo && cnpjLimpo(l['CNPJ'])===alvo);
     }
     const div = document.getElementById('ficha-origem-lead');
     if (!div || !lead) return;
@@ -1816,8 +1825,8 @@ async function renderAbaAditivos(corpo) {
   const alvo = cnpjLimpo(fichaClienteAtual['CNPJ']);
   // aditivos vêm de duas fontes: colunas ASS./VENC. ADITIVO nos Contratos + aba Aditivos (novos)
   const [rc, ra] = await Promise.all([buscarDados('Contratos'), buscarDados('Aditivos')]);
-  const contratos = (rc.ok?rc.linhas:[]).filter(c => cnpjLimpo(c['CNPJ'])===alvo);
-  const aditNovos = (ra.ok?ra.linhas:[]).filter(a => cnpjLimpo(a['CNPJ'])===alvo);
+  const contratos = (rc.ok?rc.linhas:[]).filter(c => casaFicha(c['CNPJ'], c['CLIENTE']));
+  const aditNovos = (ra.ok?ra.linhas:[]).filter(a => casaFicha(a['CNPJ'], a['CLIENTE']));
   const podeSolicitar = true; // qualquer consultor pode solicitar
   const btns = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
     <button class="ficha-btn-primario" onclick="abrirFormAditivo('${alvo}','${(fichaClienteAtual['CLIENTE']||'').replace(/'/g,'')}',false)"><i class="ti ti-plus"></i> Adicionar aditivo</button>
@@ -2116,10 +2125,9 @@ async function _imprimirFichaClienteInterno(cnpj, win) {
   const [rc, rr, rf, re] = await Promise.all([
     _ler('Contratos'), _ler('Reajustes'), _ler('Faturamento'), _ler('Valores_Equipamento')
   ]);
-  const contratos = (rc.ok?rc.linhas:[]).filter(x=>cnpjLimpo(x['CNPJ'])===alvo);
-  const reajustes = (rr.ok?rr.linhas:[]).filter(x=>cnpjLimpo(x['CNPJ'])===alvo);
-  const fatur = (rf.ok?rf.linhas:[]).filter(x=>cnpjLimpo(x['CNPJ'])===alvo);
-  const equip = (re.ok?re.linhas:[]).filter(x=>cnpjLimpo(x['CNPJ'])===alvo);
+  const contratos = (rc.ok?rc.linhas:[]).filter(x=>casaCli(x['CNPJ'], x['CLIENTE'], c['CNPJ'], c['CLIENTE']));
+  const reajustes = (rr.ok?rr.linhas:[]).filter(x=>casaCli(x['CNPJ'], x['CLIENTE'], c['CNPJ'], c['CLIENTE']));
+  const equip = (re.ok?re.linhas:[]).filter(x=>casaCli(x['CNPJ'], x['CLIENTE'], c['CNPJ'], c['CLIENTE']));
   // MESMAS fontes do card: faturamento (Fin_Faturamento, por nome, todos os meses) e coletas (Fin_Coletas, por CNPJ)
   if (typeof FIN_garantirSheetJS==='function'){ try{ await new Promise(r=>FIN_garantirSheetJS(r)); }catch(e){} }
   if (typeof finCarregarDoSheets==='function'){ try{ await finCarregarDoSheets(['faturamento']); }catch(e){} }
@@ -2401,18 +2409,48 @@ async function salvarEndCepLead(idLead) {
   } catch(e) { alert('Erro de conexão.'); }
 }
 
+// Preenche/corrige o CNPJ de um cliente já cadastrado.
+// A chave da planilha é o próprio CNPJ, então para TROCÁ-LO usamos a coluna ID da linha
+// (quando existe). Se a aba não tiver ID, avisamos com clareza em vez de escrever errado.
+async function salvarCnpjFicha(nomeCliente){
+  const inp = document.getElementById('ficha-cnpj');
+  const msg = document.getElementById('ficha-cnpj-msg');
+  if (!inp) return;
+  const novo = inp.value.trim();
+  const soDig = novo.replace(/\D/g,'');
+  if (soDig && soDig.length !== 14) { msg.innerHTML = '<span style="color:var(--vermelho);">CNPJ precisa ter 14 dígitos.</span>'; return; }
+  const f = fichaClienteAtual || {};
+  const idLinha = f['ID'] || f['Id'] || f['id'] || '';
+  msg.innerHTML = '<span style="color:var(--cinza-500);">Salvando...</span>';
+  const dados = { 'CLIENTE': nomeCliente || f['CLIENTE'] || '', 'CNPJ': novo };
+  if (idLinha) dados['ID'] = idLinha;                 // com ID, dá pra trocar o próprio CNPJ
+  const r = await apiPost({ acao:'salvar', token: sessaoToken, aba:'Clientes', chaveExtra:'CLIENTE', dados });
+  if (r.ok && r.dados && r.dados.ok) {
+    f['CNPJ'] = novo;
+    cacheClientes = null; if (typeof limparCacheBusca==='function') limparCacheBusca();
+    msg.innerHTML = '<span style="color:var(--verde-ok);"><i class="ti ti-circle-check"></i> CNPJ salvo. Reabra a ficha para o resto do sistema enxergar.</span>';
+    return;
+  }
+  const erro = (r.dados && r.dados.erro) || r.erro || '';
+  msg.innerHTML = `<span style="color:var(--vermelho);">Não consegui salvar pela tela.</span>
+    <div style="color:var(--cinza-600);margin-top:3px;">Motivo: ${erro}</div>
+    <div style="color:var(--cinza-600);margin-top:3px;">Preencha o CNPJ direto na planilha, aba <b>Clientes</b>, na linha de <b>${nomeCliente||''}</b> — depois é só recarregar o sistema.</div>`;
+}
 async function salvarEnderecoFicha(cnpj) {
   const inp = document.getElementById('ficha-endereco');
   if (!inp) return;
   const endereco = inp.value.trim();
   inp.disabled = true;
   try {
-    const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({
-      acao:'atualizarEndereco', token: sessaoToken, dados:{ cnpj, endereco }
-    })});
-    const r = await resp.json();
+    // Salva casando CNPJ + NOME. A ação antiga procurava só pelo CNPJ — e, com o cliente
+    // sem CNPJ, ela escrevia na primeira linha de CNPJ vazio que encontrasse (podia ser
+    // outro cliente) ou não achava nada. Com o nome na chave, acerta sempre a linha certa.
+    const nomeCli = (fichaClienteAtual && fichaClienteAtual['CLIENTE']) || '';
+    const rr = await apiPost({ acao:'salvar', token: sessaoToken, aba:'Clientes', chaveExtra:'CLIENTE',
+      dados:{ 'CNPJ': cnpj||'', 'CLIENTE': nomeCli, 'ENDERECO': endereco } });
+    const r = rr.ok ? rr.dados : { ok:false, erro: rr.erro };
     inp.disabled = false;
-    if (!r.ok) { alert('Erro: '+(r.erro||'verifique se o Apps Script foi republicado.')); return; }
+    if (!r.ok) { alert('Não consegui salvar o endereço.\n\n'+(r.erro||'')); return; }
     if (fichaClienteAtual) fichaClienteAtual['ENDERECO'] = endereco;
     cacheClientes = null;
     const av = document.createElement('div');
@@ -2496,6 +2534,27 @@ async function trocarAbaFicha(el, aba) {
 }
 
 function cnpjLimpo(v){ return String(v||'').replace(/\D/g,''); }
+// ============================================================
+// CASAR LINHA COM O CLIENTE ABERTO
+// O sistema usa o CNPJ como chave em tudo. Quando o cliente está SEM CNPJ, comparar
+// "CNPJ vazio == CNPJ vazio" fazia bater com TODAS as linhas sem CNPJ da planilha —
+// foi assim que o Edifício Paramax apareceu com uma dezena de serviços que não eram dele.
+// Regra: com CNPJ válido, casa por CNPJ (ou pelo nome exato). Sem CNPJ, SÓ pelo nome.
+// ============================================================
+function _cliNorm(s){ return String(s||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim(); }
+function casaCli(linhaCnpj, linhaNome, alvoCnpj, alvoNome){
+  const a = String(alvoCnpj||'').replace(/\D/g,'');
+  const c = String(linhaCnpj||'').replace(/\D/g,'');
+  const nomeBate = !!(alvoNome && _cliNorm(linhaNome) === _cliNorm(alvoNome));
+  if (a && a.length >= 11) return (c === a) || nomeBate;
+  return nomeBate;                       // sem CNPJ: só o nome vale
+}
+// atalho para o cliente que está aberto na ficha
+function casaFicha(linhaCnpj, linhaNome){
+  const f = fichaClienteAtual || {};
+  return casaCli(linhaCnpj, linhaNome, f['CNPJ'], f['CLIENTE']);
+}
+
 
 // ============================================================
 // ABA SERVIÇOS (dentro do card do cliente)
@@ -2709,11 +2768,11 @@ async function renderAbaServicos(corpo){
   const alvo=cnpjLimpo(cnpj), nomeN=servNorm(cliente);
   // Serviços salvos + Reajustes (rápido) — defensivo: a aba Servicos_Cliente pode ainda não existir
   let salvos=[], reaj=[];
-  try { const rs=await buscarDados('Servicos_Cliente'); salvos=((rs&&rs.ok)?rs.linhas:[]).filter(s=>cnpjLimpo(s['CNPJ'])===alvo || servNorm(s['CLIENTE'])===nomeN); } catch(e){}
-  try { const rr=await buscarDados('Reajustes'); reaj=dedupReajustes((rr&&rr.ok)?rr.linhas:[]).filter(c=>cnpjLimpo(c['CNPJ'])===alvo || servNorm(c['CLIENTE'])===nomeN); } catch(e){}
+  try { const rs=await buscarDados('Servicos_Cliente'); salvos=((rs&&rs.ok)?rs.linhas:[]).filter(s=>casaCli(s['CNPJ'], s['CLIENTE'], cnpj, cliente)); } catch(e){}
+  try { const rr=await buscarDados('Reajustes'); reaj=dedupReajustes((rr&&rr.ok)?rr.linhas:[]).filter(c=>casaCli(c['CNPJ'], c['CLIENTE'], cnpj, cliente)); } catch(e){}
   // coletas do cliente: usa só o que já está em cache; NÃO trava esperando a base inteira de coletas.
   // Se ainda não carregou, dispara o carregamento em 2º plano e re-renderiza a aba quando terminar.
-  const coletasCli=((typeof FINdados!=='undefined'&&FINdados.coletas)?FINdados.coletas:[]).filter(c=>cnpjLimpo(c.cnpj)===alvo);
+  const coletasCli=((typeof FINdados!=='undefined'&&FINdados.coletas)?FINdados.coletas:[]).filter(c=>alvo && cnpjLimpo(c.cnpj)===alvo);
   const coletasProntas=coletasCli.length>0;
   // busca as coletas SÓ deste cliente (filtro no servidor). Antes baixava a aba inteira
   // em segundo plano — era rápido pra quem abria, e lento pra todo mundo no sistema.
@@ -2942,7 +3001,7 @@ async function renderAbaContratos(corpo) {
   corpo.innerHTML = `<div style="text-align:center;color:var(--cinza-500);padding:20px;">Carregando...</div>`;
   const r = await buscarDados('Contratos');
   const alvo = cnpjLimpo(fichaClienteAtual['CNPJ']);
-  const lista = (r.ok?r.linhas:[]).filter(c => cnpjLimpo(c['CNPJ'])===alvo);
+  const lista = (r.ok?r.linhas:[]).filter(c => casaFicha(c['CNPJ'], c['CLIENTE']));
   const ehGestao = ['admin','diretor'].includes(usuarioAtual && usuarioAtual.perfil);
   const btnAdd = ehGestao
     ? `<button class="ficha-btn-primario" style="margin-bottom:14px;" onclick="abrirFormContrato('${(fichaClienteAtual['CLIENTE']||'').replace(/'/g,'')}','${cnpjLimpo(fichaClienteAtual['CNPJ'])}')"><i class="ti ti-plus"></i> Adicionar contrato</button>`
@@ -3067,7 +3126,7 @@ async function renderAbaReajustes(corpo) {
   // casa por CNPJ OU por nome (linhas coladas do mês podem vir sem CNPJ) e remove duplicatas
   const lista = dedupReajustes((r.ok?r.linhas:[]).filter(c => {
     const nc = String(c['CLIENTE']||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
-    return cnpjLimpo(c['CNPJ'])===alvo || (nomeAlvo && nc===nomeAlvo);
+    return (alvo && alvo.length>=11 && cnpjLimpo(c['CNPJ'])===alvo) || (nomeAlvo && nc===nomeAlvo);
   }));
   const btnAdd = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
     <button class="ficha-btn-primario" onclick="abrirFormReajusteCliente()"><i class="ti ti-plus"></i> Registrar reajuste</button>
@@ -3267,7 +3326,7 @@ async function renderAbaFaturamento(corpo) {
     let minTxt = fichaClienteAtual['MINIMA_COLETA'] || '';
     if (!minTxt) {
       const rct = await buscarDados('Contratos');
-      const meusCtr = (rct.ok?rct.linhas:[]).filter(x=>cnpjLimpo(x['CNPJ'])===alvo);
+      const meusCtr = (rct.ok?rct.linhas:[]).filter(x=>casaFicha(x['CNPJ'], x['CLIENTE']));
       const minimas = meusCtr.map(x=> (x['MINIMA_EQUIP_QTD']||x['MINIMA_EQUIP_TIPO']) ? `${x['MINIMA_EQUIP_QTD']||''} ${x['MINIMA_EQUIP_TIPO']||''}`.trim() : '').filter(Boolean);
       minTxt = [...new Set(minimas)].join(' · ');
     }
@@ -3318,7 +3377,7 @@ async function renderAbaFaturamento(corpo) {
     html += '</table>';
     html += '<div style="font-size:11px;color:var(--cinza-500);margin-top:6px;"><b>Coletado</b> = recolhido de verdade. <b>Faturado</b> = o que entra na nota, já com a mínima do contrato. Em roxo, os meses em que o cliente gerou menos que a mínima.</div>';
   } else {
-  const todasColetas = (rc.ok?rc.linhas:[]).filter(l => cnpjLimpo(l['CNPJ'])===alvo);
+  const todasColetas = (rc.ok?rc.linhas:[]).filter(l => alvo && cnpjLimpo(l['CNPJ'])===alvo);
   if (todasColetas.length) {
     // ordenar por mês
     todasColetas.sort((a,b)=> String(a['MES_REF']||'').localeCompare(String(b['MES_REF']||'')));
@@ -4726,7 +4785,7 @@ function listaReaj(lista) {
 async function imprimirFichaDeReaj(cnpj) {
   const alvo = cnpjLimpo(cnpj);
   await carregarClientes();
-  let cli = (cacheClientes||[]).find(c => cnpjLimpo(c['CNPJ'])===alvo);
+  let cli = (cacheClientes||[]).find(c => alvo && cnpjLimpo(c['CNPJ'])===alvo);
   if (!cli) {
     // se não está na carteira carregada, monta um objeto mínimo com o CNPJ
     cli = { 'CNPJ': cnpj, 'CLIENTE': '', 'TIPO': '' };
@@ -6610,10 +6669,19 @@ async function renderRegula(area, tipo) {
   area.innerHTML = `
     <div class="barra-busca">
       <i class="ti ti-search"></i>
-      <input type="text" id="reg-busca" placeholder="Buscar por cliente, consultor ou responsável..." oninput="filtraRegula('${tipo}')">
+      <input type="text" id="reg-busca" placeholder="Buscar por cliente, CNPJ, consultor ou responsável..." oninput="filtraRegula('${tipo}')">
       <span class="contagem">${dados.filter(d=>!d['CANCELADO']).length} cadastros</span>
     </div>
     <div class="filtros">${tipo==='rgg'?filtrosRGG:filtrosSIGOR}</div>
+    <div class="filtros" style="margin-top:-6px;">
+      <span style="font-size:12.5px;color:var(--cinza-600);align-self:center;"><i class="ti ti-building-community"></i> Grupo:</span>
+      <span class="filtro-chip ${!window._regGrupo?'ativo':''}" onclick="setGrupoReg('${tipo}','')">Todos</span>
+      ${Object.keys(GRUPOS_EMPRESA).map(g=>{
+        const n=dados.filter(x=>!x['CANCELADO'] && FIN_grupoEmpresaDe({cnpj:x['CNPJ']})===g).length;
+        return n?`<span class="filtro-chip ${window._regGrupo===g?'ativo':''}" onclick="setGrupoReg('${tipo}','${g}')">${g} (${n})</span>`:'';
+      }).join('')}
+      ${podeMoverRegula()?`<button class="filtro-chip" style="margin-left:auto;border:1.5px solid var(--verde-medio);color:var(--verde-escuro);font-weight:600;" onclick="abrirImportarRegula('${tipo}')"><i class="ti ti-table-import"></i> Importar da planilha</button>`:''}
+    </div>
     ${tipo==='rgg'?`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0 4px;font-size:12px;color:var(--cinza-600);">
       <i class="ti ti-calendar-event"></i> Vence entre:
       <input type="date" id="reg-de" onchange="filtraRegula('rgg')" style="padding:5px 7px;border:1.5px solid var(--cinza-300);border-radius:7px;font-size:12px;">
@@ -6626,6 +6694,184 @@ async function renderRegula(area, tipo) {
   filtraRegula(tipo);
 }
 
+// ============================================================
+// IMPORTADOR DE CADASTROS SP REGULA / SIGOR
+// Cola a lista que vem da planilha de controle e cria os cadastros de uma vez.
+// Lê pela ANÁTOMIA da linha, não pela posição das colunas: acha o CNPJ, a data e o
+// e-mail por formato. Assim funciona mesmo se a ordem das colunas mudar, e ignora
+// sozinho as linhas de título da planilha.
+// ============================================================
+const REG_RE_CNPJ = /\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/;
+const REG_RE_DATA = /\b(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})\b/;
+const REG_RE_MAIL = /[\w.+-]+@[\w.-]+\.\w+/;
+// Converte a data do jeito que o Google exporta (mês/dia/ano) para dd/mm/aaaa.
+// Se o primeiro número passar de 12, só pode ser dia — aí inverte.
+function regDataBR(txt){
+  const m = REG_RE_DATA.exec(txt||'');
+  if (!m) return { data:'', ambigua:false };
+  let a = parseInt(m[1],10), b = parseInt(m[2],10), ano = m[3];
+  if (ano.length === 2) ano = '20'+ano;
+  let dia, mes;
+  if (a > 12) { dia = a; mes = b; }        // 26/8 -> dia 26
+  else { mes = a; dia = b; }               // 8/26 -> mês 8 (padrão do Google em inglês)
+  const ambigua = (a <= 12 && b <= 12);    // ex: 11/5 pode ser 5/nov ou 11/mai
+  const dd = String(dia).padStart(2,'0'), mm = String(mes).padStart(2,'0');
+  return { data: `${dd}/${mm}/${ano}`, ambigua };
+}
+function regParseLinhas(texto){
+  const linhas = String(texto||'').split(/\r?\n/);
+  const itens = [], ignoradas = [];
+  linhas.forEach(linha=>{
+    if (!linha.trim()) return;
+    const cel = linha.split('\t').map(c=>c.replace(/"/g,'').trim());
+    const junto = cel.join(' ');
+    const mC = REG_RE_CNPJ.exec(junto);
+    if (!mC) { if (/[A-Za-zÀ-ÿ]/.test(junto)) ignoradas.push(linha.trim().slice(0,60)); return; }
+    const cnpj = mC[0];
+    const d = regDataBR(junto);
+    const mM = REG_RE_MAIL.exec(junto);
+    const email = mM ? mM[0] : '';
+    // nome = primeira célula com letras que não seja CNPJ, data nem e-mail
+    let nome = '';
+    for (const c of cel) {
+      if (!c) continue;
+      if (REG_RE_CNPJ.test(c) || REG_RE_MAIL.test(c)) continue;
+      if (/^\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}$/.test(c)) continue;
+      if (/[A-Za-zÀ-ÿ]/.test(c)) { nome = c; break; }
+    }
+    if (!nome) { ignoradas.push(linha.trim().slice(0,60)); return; }
+    // responsável = célula com letras logo antes do e-mail
+    let resp = '';
+    if (email) {
+      const iM = cel.findIndex(c=>c.includes(email));
+      for (let j=iM-1; j>=0; j--) {
+        const c = cel[j];
+        if (c && c!==nome && !REG_RE_CNPJ.test(c) && !/^\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}$/.test(c) && /[A-Za-zÀ-ÿ]/.test(c)) { resp = c; break; }
+      }
+    }
+    itens.push({ nome, cnpj, validade:d.data, ambigua:d.ambigua, responsavel:resp, email });
+  });
+  return { itens, ignoradas };
+}
+function abrirImportarRegula(tipo){
+  const cont = document.getElementById('ficha-container');
+  const inp = 'width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;';
+  cont.innerHTML = `
+    <div class="ficha-overlay" onclick="if(event.target===this)fecharFicha()">
+      <div class="ficha" style="width:640px;max-width:96vw;">
+        <div class="ficha-topo"><button class="fechar" onclick="fecharFicha()"><i class="ti ti-x"></i></button>
+          <div class="nome"><i class="ti ti-table-import"></i> Importar cadastros</div>
+          <div class="cnpj">${tipo==='rgg'?'SP Regula (RGG)':'SIGOR (MTR)'}</div></div>
+        <div class="ficha-corpo">
+          <div style="background:var(--verde-claro-bg);border-radius:8px;padding:10px;font-size:12.5px;color:var(--verde-escuro);margin-bottom:12px;">
+            <i class="ti ti-info-circle"></i> Selecione as linhas na sua planilha de controle e cole aqui. O sistema acha sozinho o <b>nome</b>, a <b>validade</b>, o <b>CNPJ</b>, o <b>responsável</b> e o <b>e-mail</b> — a ordem das colunas não importa, e as linhas de título são ignoradas.
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+            <div><label style="font-size:13px;color:var(--cinza-700);">Consultor responsável (todos)</label>
+              <select id="imp-cons" style="${inp}">${optionsConsultor('', true)}</select></div>
+            <div><label style="font-size:13px;color:var(--cinza-700);">Status inicial</label>
+              <select id="imp-status" style="${inp}">
+                <option value="auto">Automático (Vigente quando tem validade)</option>
+                <option value="${REG_STATUS_NOVO}">${REG_STATUS_NOVO}</option>
+                <option value="Em renovação">Em renovação</option>
+              </select></div>
+          </div>
+          <label style="font-size:13px;color:var(--cinza-700);">Cole as linhas aqui</label>
+          <textarea id="imp-texto" rows="8" placeholder="D086 - DA - MOOCA	8/26/2026	61.486.650/0156-10	Ketelen Weber	ketelen.weber@dasa.com.br" style="${inp}font-family:monospace;font-size:11.5px;"></textarea>
+          <div class="ficha-botoes" style="margin-top:10px;">
+            <button class="ficha-btn-primario" onclick="regPreviaImportar('${tipo}')"><i class="ti ti-eye"></i> Conferir antes de importar</button>
+            <button class="ficha-btn-secundario" onclick="fecharFicha()">Cancelar</button>
+          </div>
+          <div id="imp-res" style="margin-top:12px;"></div>
+        </div>
+      </div>
+    </div>`;
+}
+// mostra o que entendeu ANTES de gravar nada
+function regPreviaImportar(tipo){
+  const txt = (document.getElementById('imp-texto')||{}).value || '';
+  const res = document.getElementById('imp-res');
+  const { itens, ignoradas } = regParseLinhas(txt);
+  if (!itens.length) {
+    res.innerHTML = `<div class="sem-acesso">Não consegui ler nenhuma linha. Confira se cada linha tem o CNPJ no formato 00.000.000/0000-00.</div>`;
+    return;
+  }
+  const jaTem = (tipo==='rgg' ? (cacheRGG||[]) : (cacheSIGOR||[]));
+  const dig = c => String(c||'').replace(/\D/g,'');
+  const nrm = t => String(t||'').toUpperCase().replace(/\s+/g,' ').trim();
+  itens.forEach(it=>{
+    it.duplicado = jaTem.some(x=>!x['CANCELADO'] && dig(x['CNPJ'])===dig(it.cnpj) && nrm(x['CLIENTE'])===nrm(it.nome));
+  });
+  const novos = itens.filter(i=>!i.duplicado);
+  const dups = itens.filter(i=>i.duplicado);
+  const ambig = novos.filter(i=>i.ambigua);
+  window._regImportar = { tipo, itens: novos };
+  res.innerHTML = `
+    <div class="kpi-funil" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:10px;">
+      <div class="kpi-card" style="border-top:3px solid var(--verde-medio);"><div class="kpi-num" style="color:var(--verde-medio);">${novos.length}</div><div class="kpi-lbl">a cadastrar</div></div>
+      <div class="kpi-card" style="border-top:3px solid var(--cinza-400);"><div class="kpi-num" style="color:var(--cinza-600);">${dups.length}</div><div class="kpi-lbl">já existem</div></div>
+      <div class="kpi-card" style="border-top:3px solid var(--laranja);"><div class="kpi-num" style="color:var(--laranja);">${ignoradas.length}</div><div class="kpi-lbl">linhas ignoradas</div></div>
+    </div>
+    ${ambig.length?`<div style="background:var(--amarelo-bg);border:1px solid var(--amarelo-borda);border-radius:8px;padding:10px;font-size:12px;color:#8a6d00;margin-bottom:10px;">
+      <b><i class="ti ti-alert-triangle"></i> ${ambig.length} data(s) que preciso que você confira.</b> A planilha exporta no formato americano (mês/dia). Quando os dois números são 12 ou menos, não há como ter certeza — li como mês/dia:
+      <div style="margin-top:4px;">${ambig.map(i=>`${i.nome}: <b>${i.validade}</b>`).join(' · ')}</div></div>`:''}
+    <div style="max-height:240px;overflow:auto;border:1px solid var(--cinza-200);border-radius:8px;">
+      <table style="width:100%;border-collapse:collapse;font-size:11.5px;">
+        <thead><tr style="background:var(--verde-escuro);color:#fff;position:sticky;top:0;">
+          <th style="text-align:left;padding:6px 8px;">Cliente</th><th style="text-align:left;padding:6px;">CNPJ</th><th style="text-align:left;padding:6px;">Validade</th><th style="text-align:left;padding:6px;">Responsável</th></tr></thead>
+        <tbody>${itens.map(i=>`<tr style="border-top:1px solid var(--cinza-100);${i.duplicado?'opacity:.45;':''}">
+          <td style="padding:5px 8px;">${i.nome}${i.duplicado?' <span style="color:var(--cinza-500);">(já existe)</span>':''}</td>
+          <td style="padding:5px;">${i.cnpj}</td>
+          <td style="padding:5px;">${i.validade||'<span style="color:var(--vermelho);">sem data</span>'}</td>
+          <td style="padding:5px;">${i.responsavel||'—'}</td></tr>`).join('')}</tbody>
+      </table>
+    </div>
+    ${ignoradas.length?`<details style="margin-top:8px;"><summary style="font-size:11.5px;color:var(--cinza-500);cursor:pointer;">Ver as ${ignoradas.length} linhas ignoradas (títulos e linhas sem CNPJ)</summary>
+      <div style="font-size:11px;color:var(--cinza-500);margin-top:5px;">${ignoradas.map(l=>'• '+l).join('<br>')}</div></details>`:''}
+    <div class="ficha-botoes" style="margin-top:12px;">
+      ${novos.length?`<button class="ficha-btn-primario" onclick="regExecutarImportar()"><i class="ti ti-check"></i> Cadastrar ${novos.length} agora</button>`:''}
+      <button class="ficha-btn-secundario" onclick="fecharFicha()">Fechar</button>
+    </div>
+    <div id="imp-prog" style="margin-top:10px;"></div>`;
+}
+async function regExecutarImportar(){
+  const cfg = window._regImportar;
+  const prog = document.getElementById('imp-prog');
+  if (!cfg || !cfg.itens.length) return;
+  const cons = ((document.getElementById('imp-cons')||{}).value||'');
+  const consultor = cons==='— a definir' ? '' : cons;
+  const stSel = (document.getElementById('imp-status')||{}).value || 'auto';
+  const aba = REG_ABAS[cfg.tipo];
+  let ok=0; const falhas=[];
+  for (let i=0;i<cfg.itens.length;i++){
+    const it = cfg.itens[i];
+    prog.innerHTML = `<div style="font-size:12.5px;color:var(--cinza-600);">Cadastrando <b>${i+1} de ${cfg.itens.length}</b>… (${it.nome})
+      <div style="height:7px;background:var(--cinza-100);border-radius:4px;margin-top:5px;overflow:hidden;"><div style="height:100%;width:${Math.round((i/cfg.itens.length)*100)}%;background:var(--verde-medio);"></div></div>
+      <div style="font-size:11px;color:var(--cinza-500);margin-top:4px;">Cada cadastro é uma ida ao servidor — pode deixar a janela aberta.</div></div>`;
+    const campos = {
+      'ID': (cfg.tipo==='mtr'?'SG':'RGG') + Date.now() + '-' + i,
+      'CLIENTE': it.nome, 'CNPJ': it.cnpj,
+      'CONSULTOR': consultor,
+      'RESPONSAVEL_CLIENTE': it.responsavel || '',
+      'CONTATO_EMAIL': it.email || '',
+      'DATA_VALIDADE': it.validade || '',
+      'STATUS': stSel==='auto' ? (it.validade ? 'Vigente' : 'Pendente') : stSel,
+      'ORIGEM': 'Importado da planilha de controle',
+      'DATA_CADASTRO': new Date().toISOString().split('T')[0]
+    };
+    if (cfg.tipo==='mtr') campos['PLATAFORMA'] = 'Sigor';
+    const r = await apiPost({ acao:'novoRegistro', token: sessaoToken, dados:{ aba, campos, permitirDuplicado:true } });
+    if (r.ok) ok++; else falhas.push(it.nome + ' — ' + (r.erro||''));
+  }
+  cacheRGG = null; cacheSIGOR = null;
+  if (typeof limparCacheBusca==='function') limparCacheBusca();
+  prog.innerHTML = `<div style="background:${falhas.length?'var(--amarelo-bg)':'var(--verde-ok-bg)'};border-radius:8px;padding:11px;font-size:13px;color:${falhas.length?'#8a6d00':'var(--verde-ok)'};">
+    <i class="ti ti-circle-check"></i> <b>${ok} cadastro(s) criado(s).</b>
+    ${falhas.length?`<div style="margin-top:6px;font-size:11.5px;"><b>${falhas.length} não entraram:</b><br>${falhas.map(f=>'• '+f).join('<br>')}<br>Pode colar só esses de novo — os que já entraram não duplicam.</div>`:''}
+  </div>`;
+  setTimeout(()=>{ fecharFicha(); renderRegula(document.getElementById('area-conteudo'), cfg.tipo); }, falhas.length?4000:1600);
+}
+function setGrupoReg(tipo, g){ window._regGrupo = g||''; renderRegula(document.getElementById('area-conteudo'), tipo); }
 function setFiltroReg(tipo, f, el) { window._regFiltro=f; document.querySelectorAll('[id^="rgf-"]').forEach(c=>c.classList.remove('ativo')); if(el)el.classList.add('ativo'); filtraRegula(tipo); }
 
 function filtraRegula(tipo) {
@@ -6637,7 +6883,17 @@ function filtraRegula(tipo) {
     const dias = tipo==='rgg' ? diasAteVencer(d['DATA_VALIDADE']) : null;
     return { ...d, _dias: dias, _c: classifVenc(dias), _ef: tipo==='rgg'?rggStatusEfetivo(d):null };
   });
-  if (termo) lista = lista.filter(d => `${d['CLIENTE']||''} ${d['CONSULTOR']||''} ${d['RESPONSAVEL_CLIENTE']||''}`.toLowerCase().includes(termo));
+  if (termo) {
+    const soDig = termo.replace(/\D/g,'');
+    lista = lista.filter(d => {
+      const txt = `${d['CLIENTE']||''} ${d['CONSULTOR']||''} ${d['RESPONSAVEL_CLIENTE']||''} ${d['CNPJ']||''}`.toLowerCase();
+      if (txt.includes(termo)) return true;
+      // busca por CNPJ digitado com ou sem pontuação
+      return !!(soDig && String(d['CNPJ']||'').replace(/\D/g,'').includes(soDig));
+    });
+  }
+  // filtro por grupo empresarial (DASA e afins), pela raiz do CNPJ
+  if (window._regGrupo) lista = lista.filter(d => FIN_grupoEmpresaDe({cnpj:d['CNPJ']}) === window._regGrupo);
 
   // filtro por PERÍODO DE VENCIMENTO (só RGG, que tem DATA_VALIDADE): mostra quem vence entre De e Até
   if (tipo==='rgg') {
@@ -6693,7 +6949,8 @@ function filtraRegula(tipo) {
       const jaEnviado = d['ALERTA_ENVIADO_EM'] ? fmtDataBR(d['ALERTA_ENVIADO_EM']) : null;
       const valProp = d['VALOR_PROPOSTA'] ? fmtMoeda(d['VALOR_PROPOSTA']) : null;
       html += `<div class="reaj-card ${cardCls}" style="cursor:default;">
-        <div class="reaj-topo"><div style="min-width:0;"><div class="reaj-nome" onclick="abrirFicha('${String(d['CNPJ']||'').replace(/'/g,'')}','${String(d['CLIENTE']||'').replace(/'/g,'')}')" style="cursor:pointer;" title="Abrir ficha do cliente">${d['CLIENTE']||'—'}</div><div class="reaj-cnpj">${d['RESPONSAVEL_CLIENTE']||''}${d['CONSULTOR']?' · '+d['CONSULTOR']:''}</div></div>
+        <div class="reaj-topo"><div style="min-width:0;"><div class="reaj-nome" onclick="abrirFicha('${String(d['CNPJ']||'').replace(/'/g,'')}','${String(d['CLIENTE']||'').replace(/'/g,'')}')" style="cursor:pointer;" title="Abrir ficha do cliente">${d['CLIENTE']||'—'}</div><div class="reaj-cnpj">${d['CNPJ']?`<b style="color:var(--cinza-700);">${d['CNPJ']}</b>`:'<span style="color:var(--vermelho);">sem CNPJ</span>'}</div>
+        <div class="reaj-cnpj">${d['RESPONSAVEL_CLIENTE']||''}${d['CONSULTOR']?' · '+d['CONSULTOR']:''}</div></div>
         <span class="reaj-pill ${pillCls}">${pillTxt}</span></div>
         <div class="reaj-linhas"><div><span>Validade</span><b>${ehNovo?'—':fmtDataBR(d['DATA_VALIDADE'])}</b></div><div><span>Consultor</span><b style="font-size:12px;">${d['CONSULTOR']||'—'}</b></div></div>
         ${ehNovo?`<div style="background:var(--vermelho-bg);border-radius:8px;padding:8px 10px;margin-top:8px;font-size:11.5px;color:var(--vermelho);"><i class="ti ti-user-plus"></i> Cliente novo${d['ORIGEM']?' ('+d['ORIGEM']+')':''} — ainda sem cadastro no SP Regula. Atualize o status quando regularizar.</div>`:''}
@@ -6716,7 +6973,8 @@ function filtraRegula(tipo) {
       const OPCOES_SIT = [REG_STATUS_NOVO,'Regular','Regular - Eventual','Irregular','Em análise'];
       const ehNovoSg = String(d['STATUS']||'').toLowerCase().includes('cliente novo');
       html += `<div class="reaj-card ${(irreg||ehNovoSg)?'venc':'ok'}" style="cursor:default;">
-        <div class="reaj-topo"><div style="min-width:0;"><div class="reaj-nome" onclick="abrirFicha('${String(d['CNPJ']||'').replace(/'/g,'')}','${String(d['CLIENTE']||'').replace(/'/g,'')}')" style="cursor:pointer;" title="Abrir ficha do cliente">${d['CLIENTE']||'—'}</div><div class="reaj-cnpj">${d['RESPONSAVEL_CLIENTE']||''}${d['CONSULTOR']?' · '+d['CONSULTOR']:''}</div></div>
+        <div class="reaj-topo"><div style="min-width:0;"><div class="reaj-nome" onclick="abrirFicha('${String(d['CNPJ']||'').replace(/'/g,'')}','${String(d['CLIENTE']||'').replace(/'/g,'')}')" style="cursor:pointer;" title="Abrir ficha do cliente">${d['CLIENTE']||'—'}</div><div class="reaj-cnpj">${d['CNPJ']?`<b style="color:var(--cinza-700);">${d['CNPJ']}</b>`:'<span style="color:var(--vermelho);">sem CNPJ</span>'}</div>
+        <div class="reaj-cnpj">${d['RESPONSAVEL_CLIENTE']||''}${d['CONSULTOR']?' · '+d['CONSULTOR']:''}</div></div>
         <span class="reaj-pill ${irreg?'pill-venc':'pill-ok'}">${d['STATUS']||'—'}</span></div>
         <div class="reaj-linhas"><div><span>Plataforma</span><b style="font-size:13px;">${d['PLATAFORMA']||'Sigor'}</b></div><div><span>Consultor</span><b style="font-size:12px;">${d['CONSULTOR']||'—'}</b></div></div>
         ${ehNovoSg?`<div style="background:var(--vermelho-bg);border-radius:8px;padding:8px 10px;margin-top:8px;font-size:11.5px;color:var(--vermelho);"><i class="ti ti-user-plus"></i> Cliente novo${d['ORIGEM']?' ('+d['ORIGEM']+')':''} — ainda sem emissão de MTR. Atualize a situação quando regularizar.</div>`:''}
@@ -8753,8 +9011,8 @@ async function carregarServicosAditivo(){
   const norm=s=>String(s||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Z0-9]/g,'');
   try{
     const [rs,rr]=await Promise.all([buscarDados('Servicos_Cliente'), buscarDados('Reajustes')]);
-    const servs=(rs.ok?rs.linhas:[]).filter(s=>cnpjLimpo(s['CNPJ'])===alvo);
-    const reaj=(rr.ok?rr.linhas:[]).filter(x=>cnpjLimpo(x['CNPJ'])===alvo);
+    const servs=(rs.ok?rs.linhas:[]).filter(s=>alvo && cnpjLimpo(s['CNPJ'])===alvo);
+    const reaj=(rr.ok?rr.linhas:[]).filter(x=>alvo && cnpjLimpo(x['CNPJ'])===alvo);
     if(!servs.length){ box.innerHTML=_aditServRow({}); alert('Este cliente não tem serviços salvos. Adicione o serviço manualmente (deixei uma linha em branco).'); return; }
     let html='';
     servs.forEach(s=>{
@@ -10019,7 +10277,7 @@ async function excluirCliente(cnpj, cliente) {
   let nContratos = 0;
   try {
     const rc = await buscarDados('Contratos');
-    nContratos = (rc.ok?rc.linhas:[]).filter(x=>cnpjLimpo(x['CNPJ'])===alvo).length;
+    nContratos = (rc.ok?rc.linhas:[]).filter(x=>casaCli(x['CNPJ'], x['CLIENTE'], cnpj, cliente)).length;
   } catch(e) {}
   let aviso = `Excluir o cliente "${cliente}"?\n\nEle vai para a Lixeira de Clientes (recuperável).`;
   if (nContratos > 0) {
