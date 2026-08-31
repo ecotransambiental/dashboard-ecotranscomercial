@@ -393,10 +393,10 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.16</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.17</div>
       </div>
     </aside>
-    <!-- VERSÃO DO DASHBOARD: v2026.08.16 — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
+    <!-- VERSÃO DO DASHBOARD: v2026.08.17 — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
 
     <!-- Coluna nível 2: submódulos -->
     <div class="subcoluna" id="subcoluna">
@@ -1739,7 +1739,7 @@ async function abrirFicha(cnpj, nome) {
             <div style="margin-top:4px;">O CNPJ é o que liga o cliente aos contratos, serviços, reajustes, coletas e faturamento. Sem ele, o sistema só consegue casar pelo nome — e o que você salvar aqui pode não encontrar a linha certa. Preencha abaixo.</div>
           </div>` : ''}
           ${blocoRegulatorio(c)}
-          ${c['TIPO']==='Contratual - pendente'?`<div style="background:var(--amarelo-bg);border:1px solid var(--amarelo);border-radius:8px;padding:11px;margin-bottom:14px;font-size:13px;color:#8a6d00;"><i class="ti ti-alert-triangle"></i> <b>Contrato pendente.</b> Este cliente foi fechado mas os dados do contrato ainda não foram preenchidos. <button onclick="abrirFormContrato('${(c['CLIENTE']||'').replace(/'/g,'')}','${cnpj.replace(/'/g,'')}')" style="margin-left:6px;padding:4px 10px;border:none;background:var(--verde-medio);color:white;border-radius:6px;cursor:pointer;font-size:12px;">Preencher contrato</button></div>`:''}
+          <div id="ficha-aviso-pendente"></div>
           <table class="ficha-tab">
             <tr><td><i class="ti ti-id" style="vertical-align:-2px;margin-right:6px;"></i>CNPJ</td><td>
               ${podeEditarConsultorLead() ? `<input type="text" id="ficha-cnpj" value="${String(c['CNPJ']||'').replace(/"/g,'&quot;')}" placeholder="00.000.000/0000-00" style="padding:5px 8px;border:1.5px solid ${cnpjLimpo(c['CNPJ'])?'var(--cinza-300)':'var(--vermelho)'};border-radius:6px;font-size:13px;font-family:var(--fonte-corpo);width:58%;">
@@ -1784,8 +1784,48 @@ async function abrirFicha(cnpj, nome) {
       </div>
     </div>`;
   mostrarOrigemLead(cnpj);
+  conferirContratoPendente();
 }
 function fecharFicha() { document.getElementById('ficha-container').innerHTML = ''; }
+// O aviso "Contrato pendente" olhava só o campo TIPO do cliente. Se alguém cadastrasse o
+// contrato sem trocar o TIPO, o aviso continuava lá — e clicar nele criava um contrato
+// DUPLICADO (foi o que aconteceu com o Tato Pizza). Agora conferimos se existe contrato
+// de verdade antes de mostrar o aviso, e corrigimos o TIPO sozinhos quando já existe.
+async function conferirContratoPendente(){
+  const div = document.getElementById('ficha-aviso-pendente');
+  const c = fichaClienteAtual || {};
+  if (!div || String(c['TIPO']||'') !== 'Contratual - pendente') return;
+  let contratos = [];
+  try {
+    const alvo = cnpjLimpo(c['CNPJ']);
+    const r = (alvo && alvo.length>=11) ? await buscarDados('Contratos', false, c['CNPJ']) : await buscarDados('Contratos');
+    contratos = ((r&&r.ok)?r.linhas:[]).filter(x=>casaCli(x['CNPJ'], x['CLIENTE'], c['CNPJ'], c['CLIENTE']));
+  } catch(e) { return; }
+  if (contratos.length) {
+    // já tem contrato: o TIPO é que estava desatualizado
+    div.innerHTML = `<div style="background:var(--verde-claro-bg);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12.5px;color:var(--verde-escuro);">
+      <i class="ti ti-circle-check"></i> Este cliente já tem <b>${contratos.length} contrato(s)</b> cadastrado(s) — o cadastro é que ainda estava marcado como "pendente".
+      <button onclick="corrigirTipoParaContrato()" style="margin-left:6px;padding:4px 10px;border:none;background:var(--verde-medio);color:white;border-radius:6px;cursor:pointer;font-size:12px;">Marcar como Contrato</button></div>`;
+    return;
+  }
+  div.innerHTML = `<div style="background:var(--amarelo-bg);border:1px solid var(--amarelo);border-radius:8px;padding:11px;margin-bottom:14px;font-size:13px;color:#8a6d00;">
+    <i class="ti ti-alert-triangle"></i> <b>Contrato pendente.</b> Este cliente foi fechado mas os dados do contrato ainda não foram preenchidos.
+    <button onclick="abrirFormContrato('${String(c['CLIENTE']||'').replace(/'/g,"\\'")}','${cnpjLimpo(c['CNPJ'])}')" style="margin-left:6px;padding:4px 10px;border:none;background:var(--verde-medio);color:white;border-radius:6px;cursor:pointer;font-size:12px;">Preencher contrato</button></div>`;
+}
+async function corrigirTipoParaContrato(){
+  const c = fichaClienteAtual || {};
+  const div = document.getElementById('ficha-aviso-pendente');
+  if (div) div.innerHTML = '<div style="font-size:12.5px;color:var(--cinza-500);padding:8px 0;">Corrigindo o cadastro...</div>';
+  const r = await apiPost({ acao:'mudarTipoCliente', token: sessaoToken, dados:{ cnpj: c['CNPJ'], tipo:'Contrato' } });
+  if (r.ok && r.dados && r.dados.ok) {
+    c['TIPO'] = 'Contrato';
+    cacheClientes = null; if (typeof limparCacheBusca==='function') limparCacheBusca();
+    if (div) div.innerHTML = '<div style="background:var(--verde-ok-bg);border-radius:8px;padding:9px 11px;margin-bottom:14px;font-size:12.5px;color:var(--verde-ok);"><i class="ti ti-circle-check"></i> Cadastro atualizado para <b>Contrato</b>.</div>';
+  } else {
+    if (div) div.innerHTML = `<div class="sem-acesso" style="margin-bottom:14px;">Não consegui atualizar o cadastro: ${(r.dados&&r.dados.erro)||r.erro||''}</div>`;
+  }
+}
+
 
 // busca o lead que originou este cliente (por CNPJ) e mostra data de chegada, fechamento, fonte
 async function mostrarOrigemLead(cnpj) {
@@ -2418,23 +2458,33 @@ async function salvarCnpjFicha(nomeCliente){
   if (!inp) return;
   const novo = inp.value.trim();
   const soDig = novo.replace(/\D/g,'');
-  if (soDig && soDig.length !== 14) { msg.innerHTML = '<span style="color:var(--vermelho);">CNPJ precisa ter 14 dígitos.</span>'; return; }
+  if (soDig.length !== 14) { msg.innerHTML = '<span style="color:var(--vermelho);">CNPJ precisa ter 14 dígitos.</span>'; return; }
   const f = fichaClienteAtual || {};
-  const idLinha = f['ID'] || f['Id'] || f['id'] || '';
-  msg.innerHTML = '<span style="color:var(--cinza-500);">Salvando...</span>';
-  const dados = { 'CLIENTE': nomeCliente || f['CLIENTE'] || '', 'CNPJ': novo };
-  if (idLinha) dados['ID'] = idLinha;                 // com ID, dá pra trocar o próprio CNPJ
-  const r = await apiPost({ acao:'salvar', token: sessaoToken, aba:'Clientes', chaveExtra:'CLIENTE', dados });
-  if (r.ok && r.dados && r.dados.ok) {
+  const nome = nomeCliente || f['CLIENTE'] || '';
+  msg.innerHTML = '<span style="color:var(--cinza-500);"><i class="ti ti-loader"></i> Salvando e ligando o que estava solto...</span>';
+  const r = await apiPost({ acao:'atualizarCnpjCliente', token: sessaoToken,
+    dados:{ cliente: nome, cnpjAntigo: f['CNPJ']||'', cnpjNovo: novo } });
+  const d = r.ok ? r.dados : null;
+  if (d && d.ok) {
     f['CNPJ'] = novo;
-    cacheClientes = null; if (typeof limparCacheBusca==='function') limparCacheBusca();
-    msg.innerHTML = '<span style="color:var(--verde-ok);"><i class="ti ti-circle-check"></i> CNPJ salvo. Reabra a ficha para o resto do sistema enxergar.</span>';
+    cacheClientes = null; cacheContratos = null; cacheReajustes = null; cacheRGG = null; cacheSIGOR = null;
+    if (typeof limparCacheBusca==='function') limparCacheBusca();
+    msg.innerHTML = `<span style="color:var(--verde-ok);"><i class="ti ti-circle-check"></i> CNPJ salvo.</span>`
+      + (d.propagadas ? `<div style="color:var(--verde-ok);margin-top:3px;">E mais: <b>${d.propagadas} registro(s)</b> que estavam soltos foram ligados a este cliente${d.detalhe?` (${d.detalhe})`:''}.</div>` : '')
+      + `<div style="color:var(--cinza-600);margin-top:3px;">Reabra a ficha para ver tudo no lugar.</div>`;
     return;
   }
-  const erro = (r.dados && r.dados.erro) || r.erro || '';
-  msg.innerHTML = `<span style="color:var(--vermelho);">Não consegui salvar pela tela.</span>
-    <div style="color:var(--cinza-600);margin-top:3px;">Motivo: ${erro}</div>
-    <div style="color:var(--cinza-600);margin-top:3px;">Preencha o CNPJ direto na planilha, aba <b>Clientes</b>, na linha de <b>${nomeCliente||''}</b> — depois é só recarregar o sistema.</div>`;
+  const erro = (d && d.erro) || r.erro || '';
+  // Se a função ainda não existe no Apps Script publicado, explica o caminho manual
+  // em vez de deixar a pessoa sem saída. O sistema não quebra por causa disso.
+  const faltaPublicar = /desconhecid|não reconhec|nao reconhec/i.test(erro);
+  msg.innerHTML = faltaPublicar
+    ? `<span style="color:var(--laranja);"><i class="ti ti-alert-triangle"></i> Falta republicar o Apps Script.</span>
+       <div style="color:var(--cinza-600);margin-top:3px;">Implantar → Gerenciar implantações → lápis → Versão: <b>Nova versão</b> → Implantar. Depois tente aqui de novo.</div>
+       <div style="color:var(--cinza-600);margin-top:3px;">Se preferir resolver agora: preencha o CNPJ direto na planilha, aba <b>Clientes</b>, na linha de <b>${nome}</b>.</div>`
+    : `<span style="color:var(--vermelho);">Não consegui salvar.</span>
+       <div style="color:var(--cinza-600);margin-top:3px;"><b>Mensagem exata do servidor:</b> ${erro||'(veio vazia)'}</div>
+       <div style="color:var(--cinza-500);margin-top:3px;font-size:10.5px;">Se não fizer sentido, me mande esta frase — é ela que diz onde travou.</div>`;
 }
 async function salvarEnderecoFicha(cnpj) {
   const inp = document.getElementById('ficha-endereco');
@@ -2768,8 +2818,25 @@ async function renderAbaServicos(corpo){
   const alvo=cnpjLimpo(cnpj), nomeN=servNorm(cliente);
   // Serviços salvos + Reajustes (rápido) — defensivo: a aba Servicos_Cliente pode ainda não existir
   let salvos=[], reaj=[];
-  try { const rs=await buscarDados('Servicos_Cliente'); salvos=((rs&&rs.ok)?rs.linhas:[]).filter(s=>casaCli(s['CNPJ'], s['CLIENTE'], cnpj, cliente)); } catch(e){}
-  try { const rr=await buscarDados('Reajustes'); reaj=dedupReajustes((rr&&rr.ok)?rr.linhas:[]).filter(c=>casaCli(c['CNPJ'], c['CLIENTE'], cnpj, cliente)); } catch(e){}
+  // Com CNPJ, pede o filtro AO SERVIDOR e faz as duas leituras JUNTAS.
+  // Antes eram duas leituras das abas inteiras, uma esperando a outra — em cliente com
+  // muitos reajustes isso segurava a tela (e todo mundo atrás na fila do servidor).
+  const _lerServ = (aba) => (alvo && alvo.length>=11
+      ? buscarDados(aba, false, cnpj)
+      : buscarDados(aba)).then(r=>r).catch(()=>({ok:false, linhas:[]}));
+  try {
+    const [rs, rr] = await Promise.all([_lerServ('Servicos_Cliente'), _lerServ('Reajustes')]);
+    salvos = ((rs&&rs.ok)?rs.linhas:[]).filter(s=>casaCli(s['CNPJ'], s['CLIENTE'], cnpj, cliente));
+    reaj = dedupReajustes((rr&&rr.ok)?rr.linhas:[]).filter(c=>casaCli(c['CNPJ'], c['CLIENTE'], cnpj, cliente));
+    // o filtro do servidor é por CNPJ; se não voltou nada, pode haver linha antiga só com o nome
+    if (alvo && alvo.length>=11 && !salvos.length && !reaj.length) {
+      const [rs2, rr2] = await Promise.all([
+        buscarDados('Servicos_Cliente').catch(()=>({ok:false,linhas:[]})),
+        buscarDados('Reajustes').catch(()=>({ok:false,linhas:[]}))]);
+      salvos = ((rs2&&rs2.ok)?rs2.linhas:[]).filter(s=>casaCli(s['CNPJ'], s['CLIENTE'], cnpj, cliente));
+      reaj = dedupReajustes((rr2&&rr2.ok)?rr2.linhas:[]).filter(c=>casaCli(c['CNPJ'], c['CLIENTE'], cnpj, cliente));
+    }
+  } catch(e){}
   // coletas do cliente: usa só o que já está em cache; NÃO trava esperando a base inteira de coletas.
   // Se ainda não carregou, dispara o carregamento em 2º plano e re-renderiza a aba quando terminar.
   const coletasCli=((typeof FINdados!=='undefined'&&FINdados.coletas)?FINdados.coletas:[]).filter(c=>alvo && cnpjLimpo(c.cnpj)===alvo);
@@ -3008,6 +3075,15 @@ async function renderAbaContratos(corpo) {
     : `<button class="ficha-btn-primario" style="margin-bottom:14px;" onclick="abrirSolicitarContratoNovo('${(fichaClienteAtual['CLIENTE']||'').replace(/'/g,"\\'")}')"><i class="ti ti-send"></i> Solicitar contrato</button>`;
   if (!lista.length) { corpo.innerHTML = btnAdd + `<div style="text-align:center;color:var(--cinza-500);padding:24px;font-size:13px;">Nenhum contrato para este cliente.</div>`; return; }
   let html = btnAdd;
+  // avisa quando o mesmo número aparece mais de uma vez (contrato criado em duplicidade)
+  const cont = {};
+  lista.forEach(c=>{ const k=String(c['Nº CTO']||'').trim(); if(k) cont[k]=(cont[k]||0)+1; });
+  const repetidos = Object.keys(cont).filter(k=>cont[k]>1);
+  if (repetidos.length) {
+    html += `<div style="background:var(--amarelo-bg);border:1px solid var(--amarelo-borda);border-radius:8px;padding:11px;margin-bottom:12px;font-size:12.5px;color:#8a6d00;">
+      <b><i class="ti ti-copy"></i> Contrato repetido:</b> o número ${repetidos.join(', ')} aparece mais de uma vez.
+      <div style="margin-top:3px;">Abra o repetido em <b>editar</b> e use <b>Excluir contrato</b> para remover a cópia. Os dois têm os mesmos dados — apagar um não perde nada.</div></div>`;
+  }
   lista.forEach(c => {
     // vencimento EFETIVO: se tem aditivo com nova data, ela substitui a do contrato (regra pedida pela Mafe)
     const vencEfet = c['VENC. ADITIVO'] || c['VIGENCIA_ATUALIZADA'] || c['VENC.'];
@@ -8400,6 +8476,31 @@ async function salvarContrato() {
   };
   const num = document.getElementById('nc-num').value;
   if (num) campos['Nº CTO'] = num;
+  // TRAVA DE DUPLICIDADE: confere se este cliente já tem contrato (com o mesmo número,
+  // ou qualquer um). Foi assim que o Tato Pizza ficou com o 656/2026 em dobro.
+  try {
+    const alvoC = cnpjLimpo(campos['CNPJ']);
+    const rj = (alvoC && alvoC.length>=11) ? await buscarDados('Contratos', true, campos['CNPJ']) : await buscarDados('Contratos', true);
+    const existentes = ((rj&&rj.ok)?rj.linhas:[]).filter(x=>casaCli(x['CNPJ'], x['CLIENTE'], campos['CNPJ'], cliente));
+    const mesmoNum = num ? existentes.filter(x=>String(x['Nº CTO']||'').trim()===String(num).trim()) : [];
+    if (mesmoNum.length && !window._ncForcar) {
+      document.getElementById('nc-msg').innerHTML = `<div style="background:var(--amarelo-bg);border:1px solid var(--amarelo-borda);border-radius:8px;padding:12px;margin-top:10px;color:#8a6d00;font-size:12.5px;">
+        <b><i class="ti ti-alert-triangle"></i> Este cliente já tem o contrato ${num}.</b>
+        <div style="margin-top:3px;">Se você quer só corrigir os dados, feche isto e use <b>editar</b> no contrato existente — criar de novo deixa dois iguais na lista.</div>
+        <div style="margin-top:9px;display:flex;gap:8px;flex-wrap:wrap;">
+          <button onclick="fecharFicha();abrirFicha('${cnpjLimpo(campos['CNPJ'])}','${String(cliente).replace(/'/g,"\\'")}')" style="padding:7px 12px;border:none;background:var(--verde-medio);color:white;border-radius:7px;cursor:pointer;font-size:12px;">Abrir o contrato que já existe</button>
+          <button onclick="window._ncForcar=true;salvarContrato()" style="padding:7px 12px;border:1px solid #8a6d00;background:white;color:#8a6d00;border-radius:7px;cursor:pointer;font-size:12px;">É outro contrato, criar mesmo assim</button>
+        </div></div>`;
+      return;
+    }
+    if (existentes.length && !num && !window._ncForcar) {
+      document.getElementById('nc-msg').innerHTML = `<div style="background:var(--amarelo-bg);border:1px solid var(--amarelo-borda);border-radius:8px;padding:12px;margin-top:10px;color:#8a6d00;font-size:12.5px;">
+        <b><i class="ti ti-alert-triangle"></i> Este cliente já tem ${existentes.length} contrato(s) cadastrado(s):</b> ${existentes.map(x=>x['Nº CTO']||'(sem número)').join(', ')}.
+        <div style="margin-top:9px;"><button onclick="window._ncForcar=true;salvarContrato()" style="padding:7px 12px;border:1px solid #8a6d00;background:white;color:#8a6d00;border-radius:7px;cursor:pointer;font-size:12px;">É um contrato novo, criar mesmo assim</button></div></div>`;
+      return;
+    }
+  } catch(e) {}
+  window._ncForcar = false;
   // serviços informados no contrato (vão virar 1 linha de reajuste cada)
   const servicos = servEditorRows('nc-serv-ed');
   document.getElementById('nc-msg').innerHTML = '<div style="text-align:center;padding:10px;color:var(--cinza-500);">Criando...</div>';
@@ -8409,6 +8510,14 @@ async function salvarContrato() {
     const r = await resp.json();
     if (!r.ok) { document.getElementById('nc-msg').innerHTML=`<div class="sem-acesso">${r.erro}</div>`; return; }
     cacheContratos = null;
+    // o cliente deixa de ser "Contratual - pendente" assim que o contrato existe
+    try {
+      const cli0 = (cacheClientes||[]).find(x=>casaCli(x['CNPJ'], x['CLIENTE'], campos['CNPJ'], cliente));
+      if (cli0 && String(cli0['TIPO']||'')==='Contratual - pendente') {
+        await apiPost({ acao:'mudarTipoCliente', token: sessaoToken, dados:{ cnpj: campos['CNPJ'], tipo:'Contrato' } });
+        cli0['TIPO']='Contrato'; cacheClientes=null;
+      }
+    } catch(e) {}
     // serviços do contrato -> aba Serviços + Reajuste (base = assinatura)
     let nServ = 0;
     if (servicos.length) {
