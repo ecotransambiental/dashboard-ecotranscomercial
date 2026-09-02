@@ -393,10 +393,10 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.18b</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.19</div>
       </div>
     </aside>
-    <!-- VERSÃO DO DASHBOARD: v2026.08.18b — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
+    <!-- VERSÃO DO DASHBOARD: v2026.08.19 — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
 
     <!-- Coluna nível 2: submódulos -->
     <div class="subcoluna" id="subcoluna">
@@ -449,7 +449,12 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbw-nMudRjf8DkkzdJi9mLFx
 (function(){
   const _fetchOriginal = window.fetch.bind(window);
   const espera = ms => new Promise(r=>setTimeout(r, ms));
-  let _fila = Promise.resolve();          // corrente de pedidos: cada um espera o anterior
+  // DOIS pedidos por vez. Com um só, cada tela esperava todas as anteriores e tudo ficou
+  // arrastado; com muitos, o Google devolve página de erro. Dois é o meio: metade da espera
+  // e ainda longe do limite de execuções simultâneas.
+  const SLOTS = 2;
+  const _canais = new Array(SLOTS).fill(null).map(()=>Promise.resolve());
+  let _prox = 0;
   let _naFila = 0;
   window._apiNaFila = () => _naFila;
 
@@ -496,11 +501,12 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbw-nMudRjf8DkkzdJi9mLFx
     let ehLeitura = false;
     try { ehLeitura = !!(opts && opts.body && String(opts.body).indexOf('"acao":"dados"') >= 0); } catch(e){}
     _naFila++;
-    const tarefa = _fila.then(
+    const canal = _prox; _prox = (_prox + 1) % SLOTS;   // alterna entre os dois canais
+    const tarefa = _canais[canal].then(
       () => _enviar(url, opts, ehLeitura),
       () => _enviar(url, opts, ehLeitura)      // falha do anterior não derruba a fila
     );
-    _fila = tarefa.then(()=>{}, ()=>{});       // a corrente segue independente do resultado
+    _canais[canal] = tarefa.then(()=>{}, ()=>{});
     return tarefa.finally(()=>{ _naFila--; });
   };
 })();
@@ -866,7 +872,40 @@ const _cacheBusca = {};
 // (ver enviarAcao abaixo), e (2) o cache expira em 90s como rede de segurança.
 // Assim ganhamos velocidade sem o risco de mostrar dado velho após salvar.
 const _cacheDados = {};
-const _CACHE_TTL = 300000; // 5 minutos (a invalidação por ação cuida do que ficou velho)
+const _CACHE_TTL = 1800000; // 30 minutos. Quem invalida de verdade é a lista por ação:
+                            // salvar algo joga fora só as abas que aquela ação mexeu.
+// O cache agora fica GRAVADO no navegador. Trocar de tela, voltar, ou até fechar e reabrir
+// o sistema deixa de custar leitura nova — era isso que fazia tudo parecer devagar mesmo
+// quando os dados não tinham mudado. O botão "Recarregar dados" limpa quando você quiser.
+const _CACHE_LS = 'ecotrans_cache_leitura';
+(function(){
+  try {
+    const bruto = localStorage.getItem(_CACHE_LS);
+    if (!bruto) return;
+    const obj = JSON.parse(bruto);
+    const agora = Date.now();
+    Object.keys(obj||{}).forEach(k=>{ if (obj[k] && (agora - obj[k].t) < _CACHE_TTL) _cacheDados[k] = obj[k]; });
+  } catch(e){}
+})();
+let _cacheGravarTimer = null;
+function _cacheGravar(){
+  // grava com atraso: se várias telas carregarem juntas, salva uma vez só no fim
+  if (_cacheGravarTimer) clearTimeout(_cacheGravarTimer);
+  _cacheGravarTimer = setTimeout(()=>{
+    try {
+      // Guarda só as abas de tamanho normal. As grandes (coletas, títulos) não cabem no
+      // espaço do navegador e derrubariam o cache inteiro — elas continuam em memória.
+      const enxuto = {};
+      Object.keys(_cacheDados).forEach(k=>{
+        const e = _cacheDados[k];
+        const n = (e && e.dados && Array.isArray(e.dados.linhas)) ? e.dados.linhas.length : 0;
+        if (n <= 1500) enxuto[k] = e;
+      });
+      localStorage.setItem(_CACHE_LS, JSON.stringify(enxuto));
+    }
+    catch(e){ try { localStorage.removeItem(_CACHE_LS); } catch(e2){} }   // estourou o espaço: descarta
+  }, 1500);
+}
 // Contador de pedidos em andamento + relógio na tela. Serve pra distinguir
 // "está lento" de "travou" — a diferença mais importante pra quem está usando.
 window._reqAtivas = 0;
@@ -887,6 +926,12 @@ function _reqMostrar(){
     + (naFila>1 ? ` <span style="opacity:.85;">(${naFila} na fila)</span>` : '')
     + (seg>=25 ? ' <span style="opacity:.8;">(hoje está devagar, aguarde)</span>' : '');
 }
+// devolve o que já está em cache, sem ir ao servidor. Usado pelo sininho.
+function dadosEmCache(aba, filtroCnpj){
+  const chave = filtroCnpj ? (aba + '::' + String(filtroCnpj).replace(/\D/g,'')) : aba;
+  const c = _cacheDados[chave];
+  return (c && (Date.now() - c.t < _CACHE_TTL)) ? c.dados : null;
+}
 async function buscarDados(aba, forcar, filtroCnpj) {
   const agora = Date.now();
   // chave de cache inclui o CNPJ quando filtrado (não mistura filtrado com aba inteira)
@@ -905,12 +950,13 @@ async function buscarDados(aba, forcar, filtroCnpj) {
     });
     const dados = await resp.json();
     _cacheDados[chave] = { t: agora, dados: dados };
+    _cacheGravar();
     return dados;
   } finally {
     window._reqAtivas--; _reqMostrar();
   }
 }
-function limparCacheBusca(){ for (const k in _cacheDados) delete _cacheDados[k]; }
+function limparCacheBusca(){ for (const k in _cacheDados) delete _cacheDados[k]; try{ localStorage.removeItem(_CACHE_LS); }catch(e){} }
 
 // Interceptador global: qualquer POST para a API com ação de escrita limpa o cache
 // automaticamente. Assim, todas as ~30 operações de salvar/editar/excluir já existentes
@@ -959,6 +1005,7 @@ function limparCacheDaAcao(acao){
   const abas = CACHE_ABAS_POR_ACAO[acao];
   if (!abas) { limparCacheBusca(); return; }        // não sei o que mexeu: limpa tudo
   abas.forEach(aba=>{ for (const k in _cacheDados) { if (k===aba || k.indexOf(aba+'::')===0) delete _cacheDados[k]; } });
+  _cacheGravar();
 }
 (function(){
   const _fetchOriginal = window.fetch;
@@ -992,7 +1039,7 @@ function iniciarApp() {
   // O sininho lê várias abas. Como o servidor atende um pedido por vez, se ele disparar
   // junto com a primeira tela, os dois disputam a fila e tudo parece travado.
   // Por isso ele espera a tela inicial acabar de carregar (ou 8s, o que vier primeiro).
-  const _iniciarSino = () => { if (window._sinoIniciado) return; window._sinoIniciado = true; atualizarSino(); };
+  const _iniciarSino = () => { if (window._sinoIniciado) return; window._sinoIniciado = true; atualizarSino(false); };
   const _esperaFila = setInterval(()=>{ if ((window._reqAtivas||0) === 0) { clearInterval(_esperaFila); _iniciarSino(); } }, 1200);
   setTimeout(()=>{ clearInterval(_esperaFila); _iniciarSino(); }, 8000);
 }
@@ -5482,8 +5529,15 @@ Ecotrans Ambiental`);
 }
 
 // ---- Sininho de avisos (Roberto, Andrea, admin) ----
-async function atualizarSino() {
+// O sininho lia até 5 abas (Aditivos, Solicitacoes_Contrato, Precificacao, CRM_Leads e
+// Atividades_Cliente) logo depois do login — justo quando a pessoa quer usar o sistema.
+// Agora ele NÃO busca nada sozinho: usa só o que já está em cache. O número completo é
+// calculado quando você clica no sino. Um badge não vale segurar o trabalho de ninguém.
+let _sinoJaBuscou = false;
+async function atualizarSino(forcarBusca) {
   if (!usuarioAtual) return;
+  const _semRede = !forcarBusca && !_sinoJaBuscou;
+  if (forcarBusca) _sinoJaBuscou = true;
   const id = String(usuarioAtual.id||'').toLowerCase();
   // inadimplência: diretor/admin. Solicitações de aditivo/contrato: admin (Mafe/Andrea) e assistente (Danielly)
   const veInad = ['diretor','admin'].includes(usuarioAtual.perfil);
@@ -5501,16 +5555,18 @@ async function atualizarSino() {
     window._avisosSolic = [];
     window._avisosPreco = [];
     window._avisosFU = [];
-    if (veInad) { const lista = await carregarInad(); total += new Set(lista.map(n=>String(n['CNPJ']||n['CLIENTE']||'').replace(/\D/g,'')||String(n['CLIENTE']||''))).size; }
+    if (veInad && !_semRede) { const lista = await carregarInad(); total += new Set(lista.map(n=>String(n['CNPJ']||n['CLIENTE']||'').replace(/\D/g,'')||String(n['CLIENTE']||''))).size; }
     if (veSolicitacoes) {
-      const [ra, rc] = await Promise.all([buscarDados('Aditivos'), buscarDados('Solicitacoes_Contrato')]);
+      const [ra, rc] = _semRede
+        ? [dadosEmCache('Aditivos')||{ok:false,linhas:[]}, dadosEmCache('Solicitacoes_Contrato')||{ok:false,linhas:[]}]
+        : await Promise.all([buscarDados('Aditivos'), buscarDados('Solicitacoes_Contrato')]);
       const adit = (ra.ok?ra.linhas:[]).filter(x=>String(x['STATUS']||'').toLowerCase()==='solicitado').map(x=>({tipo:'Aditivo', cliente:x['CLIENTE'], por:x['SOLICITADO_POR'], data:x['DATA']}));
       const ctr = (rc.ok?rc.linhas:[]).filter(x=>String(x['STATUS']||'').toLowerCase()==='solicitado').map(x=>({tipo:'Contrato', cliente:x['CLIENTE'], por:x['SOLICITADO_POR'], data:x['DATA']}));
       window._avisosSolic = adit.concat(ctr);
       total += window._avisosSolic.length;
     }
     if (vePedidosPreco || vePrecificados) {
-      const rp = await buscarDados('Precificacao');
+      const rp = _semRede ? (dadosEmCache('Precificacao')||{ok:false,linhas:[]}) : await buscarDados('Precificacao');
       const linhas = rp.ok ? rp.linhas : [];
       if (vePedidosPreco) {
         const pend = linhas.filter(x=>String(x['STATUS']||'').toLowerCase()==='aguardando preço' || String(x['STATUS']||'').toLowerCase()==='aguardando preco')
@@ -5528,7 +5584,7 @@ async function atualizarSino() {
     const badge = document.getElementById('sino-badge');
     if (veFollowUps) {
       // follow-ups com data nos próximos 7 dias — de LEADS (campo FOLLOWUP) e de CARTEIRA (atividades tipo Follow-up)
-      if (!kanbanLeads) await carregarLeads();
+      if (!kanbanLeads && !_semRede) await carregarLeads();
       const hoje = new Date(new Date().toDateString());
       const fim = new Date(hoje); fim.setDate(fim.getDate()+7);
       const fusLead = (kanbanLeads||[]).filter(l=>{ const d=parseDataReaj(l['FOLLOWUP']); return d && d>=hoje && d<=fim; })
@@ -5536,7 +5592,7 @@ async function atualizarSino() {
       // follow-ups de carteira: atividades agendadas do tipo Follow-up
       let fusCart = [];
       try {
-        const ra = await buscarDados('Atividades_Cliente');
+        const ra = _semRede ? (dadosEmCache('Atividades_Cliente')||{ok:false,linhas:[]}) : await buscarDados('Atividades_Cliente');
         fusCart = (ra.ok?ra.linhas:[]).filter(a=>String(a['TIPO']||'')==='Follow-up' && a['DATA_AGENDADA'])
           .filter(a=>{ const d=parseDataReaj(a['DATA_AGENDADA']); return d && d>=hoje && d<=fim; })
           .map(a=>({id:'fuc-'+(a['CNPJ']||'')+'-'+(a['DATA_AGENDADA']||''), cnpj:a['CNPJ'], cliente:a['CLIENTE'], data:a['DATA_AGENDADA'], consultor:a['REGISTRADO_POR']||'', origem:'Carteira'}));
@@ -5589,7 +5645,13 @@ async function abrirAvisoDestino(tipo, cliente, idLead) {
   else selecionarModulo('crm');
 }
 
-function abrirAvisos() {
+async function abrirAvisos() {
+  // agora é aqui que os avisos são realmente buscados — e uma vez por sessão
+  if (!_sinoJaBuscou) {
+    const cont0 = document.getElementById('ficha-container');
+    cont0.innerHTML = `<div class="ficha-overlay"><div class="ficha" style="width:440px;"><div class="ficha-corpo"><div style="text-align:center;padding:30px;color:var(--cinza-500);"><i class="ti ti-loader"></i> Buscando seus avisos...</div></div></div></div>`;
+    try { await atualizarSino(true); } catch(e){}
+  }
   const inad = cacheInad || [];
   const solic = window._avisosSolic || [];
   const cont = document.getElementById('ficha-container');
