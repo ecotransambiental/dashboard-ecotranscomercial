@@ -393,10 +393,10 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.17</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.18</div>
       </div>
     </aside>
-    <!-- VERSÃO DO DASHBOARD: v2026.08.17 — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
+    <!-- VERSÃO DO DASHBOARD: v2026.08.18 — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
 
     <!-- Coluna nível 2: submódulos -->
     <div class="subcoluna" id="subcoluna">
@@ -432,24 +432,30 @@
 const API_URL = 'https://script.google.com/macros/s/AKfycbw-nMudRjf8DkkzdJi9mLFxbV6ydkMtDJFITzKJZIG81xBdkKrnkLHlrlnsatZmMNSi/exec';
 
 // ============================================================
-// RESILIÊNCIA DE CONEXÃO (evita o "Erro de conexão")
-// O Apps Script às vezes demora ou devolve erro momentâneo quando a planilha está grande.
-// Aqui embrulhamos o fetch: toda chamada à API ganha TIMEOUT maior e até 3 TENTATIVAS
-// automáticas (com espera crescente). Assim uma falha passageira não vira erro na tela.
+// RESILIÊNCIA DE CONEXÃO — fila + tradução da página de erro do Google
+//
+// O Web App do Apps Script roda TUDO como um único usuário (a conta que publicou), e o
+// Google limita quantas execuções simultâneas esse usuário pode ter. Quando estoura, ele
+// não responde "ocupado": devolve uma PÁGINA HTML de erro. O sistema tentava ler aquilo
+// como dados e dava "Unexpected token '<'".
+//
+// Piorei isso sem querer ao mandar leituras em paralelo (Promise.all) em várias telas:
+// com 10 pessoas usando, viravam dezenas de chamadas ao mesmo tempo.
+//
+// Solução: uma FILA no navegador. O código das telas continua pedindo tudo junto, mas
+// aqui embaixo sai UM PEDIDO POR VEZ. Não perde velocidade (o servidor atende um por vez
+// de qualquer jeito) e elimina a causa do erro.
 // ============================================================
 (function(){
   const _fetchOriginal = window.fetch.bind(window);
   const espera = ms => new Promise(r=>setTimeout(r, ms));
-  window.fetch = async function(url, opts){
-    const ehAPI = (typeof url === 'string') && url.indexOf('script.google.com') >= 0;
-    if (!ehAPI) return _fetchOriginal(url, opts);
-    // LEITURA x ESCRITA: ler dados costuma ser rapido — se demorar demais, e melhor desistir
-    // logo e avisar (senao a tela fica "carregando" por minutos). Ja salvar pode demorar mesmo,
-    // entao damos mais tempo e mais tentativas: perder um salvamento e pior que esperar.
-    let ehLeitura = false;
-    try { ehLeitura = !!(opts && opts.body && String(opts.body).indexOf('"acao":"dados"') >= 0); } catch(e){}
-    const TENTATIVAS = ehLeitura ? 2 : 2;
-    const TIMEOUT_MS = ehLeitura ? 25000 : 75000;   // leitura: 25s | escrita: 75s
+  let _fila = Promise.resolve();          // corrente de pedidos: cada um espera o anterior
+  let _naFila = 0;
+  window._apiNaFila = () => _naFila;
+
+  async function _enviar(url, opts, ehLeitura){
+    const TENTATIVAS = 3;
+    const TIMEOUT_MS = ehLeitura ? 25000 : 75000;
     let ultimoErro;
     for (let i = 0; i < TENTATIVAS; i++) {
       const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
@@ -457,22 +463,45 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbw-nMudRjf8DkkzdJi9mLFx
       try {
         const resp = await _fetchOriginal(url, ctrl ? {...(opts||{}), signal: ctrl.signal} : opts);
         if (t) clearTimeout(t);
-        // 5xx = o servidor recusou; a operação não aconteceu, então repetir é seguro
-        if (resp.status >= 500 && i < TENTATIVAS-1) { await espera(1200*(i+1)); continue; }
-        return resp;
+        if (resp.status >= 500 && i < TENTATIVAS-1) { await espera(1500*(i+1)); continue; }
+        // Lê o corpo aqui pra poder reconhecer a página de erro do Google.
+        const texto = await resp.text();
+        const ehHtml = /^\s*</.test(texto);
+        if (ehHtml) {
+          // "servidor ocupado": esperar e repetir resolve na maioria das vezes.
+          // Numa ESCRITA não repetimos — o pedido pode ter sido processado.
+          if (ehLeitura && i < TENTATIVAS-1) { await espera(2500*(i+1)); continue; }
+          throw new Error(ehLeitura
+            ? 'O servidor está sobrecarregado e devolveu uma página de erro. Tente de novo em alguns segundos.'
+            : 'O servidor devolveu uma página de erro. O registro PODE ter sido salvo — atualize a tela e confira antes de lançar de novo.');
+        }
+        return new Response(texto, { status: resp.status, headers:{'Content-Type':'application/json'} });
       } catch(e) {
         if (t) clearTimeout(t);
         ultimoErro = e;
-        // ESTOUROU O TEMPO numa ESCRITA: não repetimos. O pedido pode ter chegado e
-        // estar sendo processado — repetir criaria registro duplicado. Melhor avisar a pessoa.
         const abortou = e && (e.name==='AbortError' || String(e.message||'').toLowerCase().includes('abort'));
         if (!ehLeitura && abortou) {
           throw new Error('O servidor demorou mais de 75 segundos para confirmar. O registro PODE ter sido salvo — atualize a tela e confira antes de lançar de novo.');
         }
-        if (i < TENTATIVAS-1) { await espera(1200*(i+1)); continue; }
+        if (/página de erro/i.test(String(e.message||''))) throw e;   // já é a mensagem final
+        if (i < TENTATIVAS-1) { await espera(1500*(i+1)); continue; }
       }
     }
     throw ultimoErro || new Error('Falha de conexão com o servidor.');
+  }
+
+  window.fetch = function(url, opts){
+    const ehAPI = (typeof url === 'string') && url.indexOf('script.google.com') >= 0;
+    if (!ehAPI) return _fetchOriginal(url, opts);
+    let ehLeitura = false;
+    try { ehLeitura = !!(opts && opts.body && String(opts.body).indexOf('"acao":"dados"') >= 0); } catch(e){}
+    _naFila++;
+    const tarefa = _fila.then(
+      () => _enviar(url, opts, ehLeitura),
+      () => _enviar(url, opts, ehLeitura)      // falha do anterior não derruba a fila
+    );
+    _fila = tarefa.then(()=>{}, ()=>{});       // a corrente segue independente do resultado
+    return tarefa.finally(()=>{ _naFila--; });
   };
 })();
 
@@ -853,8 +882,10 @@ function _reqMostrar(){
     window._reqTimer = setInterval(_reqMostrar, 1000);
   }
   const seg = Math.round((Date.now()-window._reqInicio)/1000);
+  const naFila = (typeof window._apiNaFila==='function') ? window._apiNaFila() : 0;
   el.innerHTML = `<i class="ti ti-loader"></i> Buscando dados no servidor… ${seg}s`
-    + (seg>=20 ? ' <span style="opacity:.8;">(hoje está devagar, aguarde)</span>' : '');
+    + (naFila>1 ? ` <span style="opacity:.85;">(${naFila} na fila)</span>` : '')
+    + (seg>=25 ? ' <span style="opacity:.8;">(hoje está devagar, aguarde)</span>' : '');
 }
 async function buscarDados(aba, forcar, filtroCnpj) {
   const agora = Date.now();
@@ -1036,21 +1067,41 @@ function selecionarSub(subId, subNome, btnEl) {
 // aconteceu e um botão pra tentar de novo. Ficar girando sem fim era o pior dos mundos:
 // a pessoa não sabia se era lento ou se tinha quebrado.
 // ============================================================
-function _telaErro(area, nome, e){
+// "Unexpected token '<'" quer dizer que veio HTML no lugar dos dados: é a PÁGINA DE ERRO
+// do Google, não lentidão. Traduzimos, porque a mensagem técnica não ajuda ninguém.
+function _erroLegivel(msg){
+  const m = String(msg||'');
+  if (/Unexpected token '<'|Unexpected token <|DOCTYPE|is not valid JSON/i.test(m)) {
+    return { titulo:'O Google recusou o pedido',
+      texto:'O servidor devolveu uma página de erro em vez dos dados. Costuma ser <b>limite diário de uso do Apps Script</b> (o Google corta depois de certo tempo de processamento por dia) ou a publicação do script fora do ar.',
+      dica:'<b>Teste de 10 segundos:</b> abra a URL do Apps Script direto no navegador. Se aparecer "Ecotrans API online.", o script está no ar e foi só um tropeço. Se aparecer página de erro do Google, é publicação ou limite diário — no caso do limite, só normaliza no dia seguinte.' };
+  }
+  if (/demorou|abort|timeout/i.test(m)) {
+    return { titulo:'O servidor demorou demais', texto:'A resposta não chegou no tempo esperado. Costuma funcionar na segunda tentativa.', dica:'' };
+  }
+  return { titulo:'Não consegui carregar', texto:'O servidor não respondeu a tempo. Costuma ser passageiro.', dica:'' };
+}
+function _telaErro(area, nome, e, subQuandoPediu){
+  // Se a pessoa já trocou de tela, NÃO sobrescreve o que ela está vendo agora.
+  // (era isso que fazia o erro da Visão Geral aparecer dentro da tela de Clientes)
+  if (subQuandoPediu && typeof subAtual !== 'undefined' && subAtual !== subQuandoPediu) return;
   const msg = String((e && e.message) || e || 'erro desconhecido');
+  const t = _erroLegivel(msg);
   area.innerHTML = `<div class="placeholder" style="border-color:var(--vermelho-borda);">
     <i class="ti ti-plug-connected-x" style="color:var(--vermelho);"></i>
-    <h2>Não consegui carregar ${nome||'esta tela'}</h2>
-    <p>O servidor não respondeu a tempo. Costuma ser passageiro — normalmente funciona na segunda tentativa.</p>
-    <p style="font-size:11px;color:var(--cinza-400);margin-top:6px;">Detalhe técnico: ${msg}</p>
+    <h2>${t.titulo} — ${nome||'esta tela'}</h2>
+    <p>${t.texto}</p>
+    ${t.dica?`<p style="font-size:12px;color:var(--cinza-700);margin-top:10px;background:var(--amarelo-bg);border:1px solid var(--amarelo-borda);border-radius:8px;padding:10px 12px;text-align:left;">${t.dica}</p>`:''}
+    <p style="font-size:11px;color:var(--cinza-400);margin-top:8px;">Detalhe técnico: ${msg}</p>
     <button class="ficha-btn-primario" style="margin-top:14px;padding:10px 18px;border:none;border-radius:8px;cursor:pointer;font-size:13px;" onclick="renderConteudo(subAtual, subNomeAtual)"><i class="ti ti-refresh"></i> Tentar de novo</button>
   </div>`;
 }
 function _tela(fn, area, nome, arg2){
+  const subPedido = (typeof subAtual !== 'undefined') ? subAtual : null;
   try {
     const p = (arg2!==undefined) ? fn(area, arg2) : fn(area);
-    if (p && typeof p.catch === 'function') p.catch(e=>_telaErro(area, nome, e));
-  } catch(e) { _telaErro(area, nome, e); }
+    if (p && typeof p.catch === 'function') p.catch(e=>_telaErro(area, nome, e, subPedido));
+  } catch(e) { _telaErro(area, nome, e, subPedido); }
 }
 // ---- Conteúdo: telas-chave já leem dados reais; resto é placeholder ----
 async function renderConteudo(subId, subNome) {
@@ -6421,8 +6472,12 @@ function filtraCanc() {
 // ============================================================
 async function renderVisaoCarteira(area) {
   area.innerHTML = `<div class="placeholder"><i class="ti ti-loader"></i><h2>Carregando visão geral...</h2></div>`;
-  await carregarClientes();
-  const rf = await buscarDados('Faturamento');
+  // as três leituras vão JUNTAS, em vez de uma esperando a outra
+  const [, rf, rcCanc] = await Promise.all([
+    carregarClientes(),
+    buscarDados('Faturamento').catch(()=>({ok:false,linhas:[],colunas:[]})),
+    buscarDados('Cancelados').catch(()=>({ok:false,linhas:[]}))
+  ]);
   const fatLinhas = rf.ok ? rf.linhas : [];
   const cols = rf.ok ? rf.colunas : [];
   const meses = cols.filter(c => { const s=String(c).trim(); return s!=='CNPJ'&&s!=='CLIENTE'&&!s.toUpperCase().startsWith('COLETAS')&&!s.toUpperCase().startsWith('COB'); });
@@ -6441,8 +6496,7 @@ async function renderVisaoCarteira(area) {
   const eventuais = cacheClientes.filter(c=>c['TIPO']==='Eventual').length;
 
   // cancelamentos: só de 2026
-  const rc = await buscarDados('Cancelados');
-  const totalCanc = rc.ok ? rc.linhas.filter(c=>{ const d=parseDataReaj(c['DATA DE CANCELAMENTO']); return d && d.getFullYear()===2026; }).length : 0;
+  const totalCanc = rcCanc.ok ? rcCanc.linhas.filter(c=>{ const d=parseDataReaj(c['DATA DE CANCELAMENTO']); return d && d.getFullYear()===2026; }).length : 0;
 
   let varFat = '';
   if (fatTotalAnt) { const p=((fatTotal-fatTotalAnt)/fatTotalAnt*100); varFat = `<span class="${p>=0?'fat-var-pos':'fat-var-neg'}">${p>=0?'+':''}${p.toFixed(1)}% vs ${rotuloMes(mesAnt)}</span>`; }
