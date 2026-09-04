@@ -393,10 +393,10 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.19</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.19b</div>
       </div>
     </aside>
-    <!-- VERSÃO DO DASHBOARD: v2026.08.19 — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
+    <!-- VERSÃO DO DASHBOARD: v2026.08.19b — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
 
     <!-- Coluna nível 2: submódulos -->
     <div class="subcoluna" id="subcoluna">
@@ -6781,8 +6781,29 @@ function rggStatusEfetivo(d) {
 
 // ---- carregar dados ----
 async function carregarSP() {
-  if (!cacheRGG) { const r = await buscarDados('Clientes_RGG'); cacheRGG = r.ok?r.linhas:[]; }
-  if (!cacheSIGOR) { const r = await buscarDados('SIGOR'); cacheSIGOR = r.ok?r.linhas:[]; }
+  const faltam = [];
+  if (!cacheRGG) faltam.push(buscarDados('Clientes_RGG').then(r=>{ cacheRGG = r.ok?r.linhas:[]; }).catch(()=>{ cacheRGG=[]; }));
+  if (!cacheSIGOR) faltam.push(buscarDados('SIGOR').then(r=>{ cacheSIGOR = r.ok?r.linhas:[]; }).catch(()=>{ cacheSIGOR=[]; }));
+  // A aba Cancelados entra junto: a marca CANCELADO só existe para quem foi cancelado
+  // DEPOIS que criamos isso. Quem foi cancelado antes nunca recebeu a marca e ficava
+  // aparecendo como ativo pra sempre. Conferindo contra os Cancelados, pega o histórico todo.
+  if (!cacheCanc) faltam.push(buscarDados('Cancelados').then(r=>{ cacheCanc = r.ok?r.linhas:[]; }).catch(()=>{ cacheCanc=[]; }));
+  if (faltam.length) await Promise.all(faltam);
+  _regMontarCancelados();
+}
+// índices de quem está cancelado, por CNPJ e por nome
+function _regMontarCancelados(){
+  const nrm = t => String(t||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
+  window._regCancCnpj = new Set((cacheCanc||[]).map(c=>String(c['CNPJ']||'').replace(/\D/g,'')).filter(x=>x&&x.length>=11));
+  window._regCancNome = new Set((cacheCanc||[]).map(c=>nrm(c['CLIENTE'])).filter(Boolean));
+}
+// um cadastro está cancelado se tem a marca OU se o cliente está na aba Cancelados
+function regEstaCancelado(d){
+  if (d && d['CANCELADO']) return true;
+  const nrm = t => String(t||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
+  const cj = String((d&&d['CNPJ'])||'').replace(/\D/g,'');
+  if (cj && cj.length>=11 && window._regCancCnpj && window._regCancCnpj.has(cj)) return true;
+  return !!(window._regCancNome && window._regCancNome.has(nrm(d && d['CLIENTE'])));
 }
 
 // ============================================================
@@ -6793,8 +6814,8 @@ async function renderRegulaVisao(area) {
   await carregarSP();
   if (!cacheRenov) { const r = await buscarDados('Historico_Renovacoes_SP'); cacheRenov = r.ok?r.linhas:[]; }
 
-  const rggInfo = cacheRGG.filter(d=>!d['CANCELADO']).map(d => ({...d, _dias: diasAteVencer(d['DATA_VALIDADE']), _ef: rggStatusEfetivo(d)}));
-  const sigorAtivo = cacheSIGOR.filter(d=>!d['CANCELADO']);   // clientes cancelados não contam
+  const rggInfo = cacheRGG.filter(d=>!regEstaCancelado(d)).map(d => ({...d, _dias: diasAteVencer(d['DATA_VALIDADE']), _ef: rggStatusEfetivo(d)}));
+  const sigorAtivo = cacheSIGOR.filter(d=>!regEstaCancelado(d));   // clientes cancelados não contam
   const total = rggInfo.length;
   const vencidos = rggInfo.filter(d=>d._ef==='vencido').length;
   const v30 = rggInfo.filter(d=>d._dias!=null && d._dias>=0 && d._dias<=30).length;
@@ -6892,27 +6913,29 @@ async function renderRegula(area, tipo) {
     <span class="filtro-chip" id="rgf-novo" onclick="setFiltroReg('${tipo}','novo',this)" style="border-color:var(--vermelho);color:var(--vermelho);">Clientes novos</span>
     <span class="filtro-chip" id="rgf-pend" onclick="setFiltroReg('${tipo}','pendente',this)">Sem cadastro</span>
     <span class="filtro-chip" id="rgf-renov" onclick="setFiltroReg('${tipo}','renov',this)">Em renovação</span>
-    <span class="filtro-chip" id="rgf-prop" onclick="setFiltroReg('${tipo}','proposta',this)">Proposta solicitada</span>`;
+    <span class="filtro-chip" id="rgf-prop" onclick="setFiltroReg('${tipo}','proposta',this)">Proposta solicitada</span>
+    <span class="filtro-chip" id="rgf-canc" onclick="setFiltroReg('${tipo}','cancelado',this)" style="border-color:var(--cinza-400);color:var(--cinza-600);">Cancelados</span>`;
   const filtrosSIGOR = `
     <span class="filtro-chip ativo" id="rgf-todos" onclick="setFiltroReg('${tipo}','todos',this)">Todos</span>
     <span class="filtro-chip" id="rgf-novosg" onclick="setFiltroReg('${tipo}','novo',this)" style="border-color:var(--vermelho);color:var(--vermelho);">Clientes novos</span>
     <span class="filtro-chip" id="rgf-irreg" onclick="setFiltroReg('${tipo}','irregular',this)">Irregulares</span>
     <span class="filtro-chip" id="rgf-reg" onclick="setFiltroReg('${tipo}','regular',this)">Regulares</span>
     <span class="filtro-chip" id="rgf-event" onclick="setFiltroReg('${tipo}','eventual',this)">Eventuais</span>
-    <span class="filtro-chip" id="rgf-anal" onclick="setFiltroReg('${tipo}','analise',this)">Análise pendente</span>`;
+    <span class="filtro-chip" id="rgf-anal" onclick="setFiltroReg('${tipo}','analise',this)">Análise pendente</span>
+    <span class="filtro-chip" id="rgf-canc" onclick="setFiltroReg('${tipo}','cancelado',this)" style="border-color:var(--cinza-400);color:var(--cinza-600);">Cancelados</span>`;
 
   area.innerHTML = `
     <div class="barra-busca">
       <i class="ti ti-search"></i>
       <input type="text" id="reg-busca" placeholder="Buscar por cliente, CNPJ, consultor ou responsável..." oninput="filtraRegula('${tipo}')">
-      <span class="contagem">${dados.filter(d=>!d['CANCELADO']).length} cadastros</span>
+      <span class="contagem">${dados.filter(d=>!regEstaCancelado(d)).length} cadastros${dados.filter(d=>regEstaCancelado(d)).length?` · ${dados.filter(d=>regEstaCancelado(d)).length} cancelados fora`:''}</span>
     </div>
     <div class="filtros">${tipo==='rgg'?filtrosRGG:filtrosSIGOR}</div>
     <div class="filtros" style="margin-top:-6px;">
       <span style="font-size:12.5px;color:var(--cinza-600);align-self:center;"><i class="ti ti-building-community"></i> Grupo:</span>
       <span class="filtro-chip ${!window._regGrupo?'ativo':''}" onclick="setGrupoReg('${tipo}','')">Todos</span>
       ${Object.keys(GRUPOS_EMPRESA).map(g=>{
-        const n=dados.filter(x=>!x['CANCELADO'] && FIN_grupoEmpresaDe({cnpj:x['CNPJ']})===g).length;
+        const n=dados.filter(x=>!regEstaCancelado(x) && FIN_grupoEmpresaDe({cnpj:x['CNPJ']})===g).length;
         return n?`<span class="filtro-chip ${window._regGrupo===g?'ativo':''}" onclick="setGrupoReg('${tipo}','${g}')">${g} (${n})</span>`:'';
       }).join('')}
       ${podeMoverRegula()?`<button class="filtro-chip" style="margin-left:auto;border:1.5px solid var(--verde-medio);color:var(--verde-escuro);font-weight:600;" onclick="abrirImportarRegula('${tipo}')"><i class="ti ti-table-import"></i> Importar da planilha</button>`:''}
@@ -7035,7 +7058,7 @@ function regPreviaImportar(tipo){
   const dig = c => String(c||'').replace(/\D/g,'');
   const nrm = t => String(t||'').toUpperCase().replace(/\s+/g,' ').trim();
   itens.forEach(it=>{
-    it.duplicado = jaTem.some(x=>!x['CANCELADO'] && dig(x['CNPJ'])===dig(it.cnpj) && nrm(x['CLIENTE'])===nrm(it.nome));
+    it.duplicado = jaTem.some(x=>!regEstaCancelado(x) && dig(x['CNPJ'])===dig(it.cnpj) && nrm(x['CLIENTE'])===nrm(it.nome));
   });
   const novos = itens.filter(i=>!i.duplicado);
   const dups = itens.filter(i=>i.duplicado);
@@ -7114,7 +7137,8 @@ function filtraRegula(tipo) {
   const termo = ((document.getElementById('reg-busca')||{}).value||'').toLowerCase();
   const f = window._regFiltro||'todos';
 
-  let lista = dados.filter(d => !d['CANCELADO']).map(d => {   // clientes cancelados saem do SP Regula/SIGOR
+  const verCancelados = (window._regFiltro === 'cancelado');
+  let lista = dados.filter(d => verCancelados ? regEstaCancelado(d) : !regEstaCancelado(d)).map(d => {   // clientes cancelados saem do SP Regula/SIGOR
     const dias = tipo==='rgg' ? diasAteVencer(d['DATA_VALIDADE']) : null;
     return { ...d, _dias: dias, _c: classifVenc(dias), _ef: tipo==='rgg'?rggStatusEfetivo(d):null };
   });
@@ -7169,7 +7193,10 @@ function filtraRegula(tipo) {
 
   const res = document.getElementById('reg-resultado');
   if (!lista.length) { res.innerHTML = '<div class="sem-acesso">Nenhum cadastro encontrado.</div>'; return; }
-  let html = '<div class="grid-cards">';
+  const avisoCanc = verCancelados
+    ? `<div style="background:var(--cinza-100);border-radius:9px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:var(--cinza-700);">
+        <i class="ti ti-circle-x"></i> Mostrando <b>${lista.length} cadastro(s) de clientes cancelados</b>. Eles não entram nos números nem recebem alerta — ficam aqui só para consulta.</div>` : '';
+  let html = avisoCanc + '<div class="grid-cards">';
   lista.slice(0,200).forEach(d => {
     if (tipo==='rgg') {
       const ef = d._ef;
