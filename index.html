@@ -393,10 +393,10 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.19b</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.20</div>
       </div>
     </aside>
-    <!-- VERSÃO DO DASHBOARD: v2026.08.19b — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
+    <!-- VERSÃO DO DASHBOARD: v2026.08.20 — desempenho: canal exclusivo pra salvar, cache deixou de ser apagado inteiro a cada salvamento, CRM atualiza a linha na memória em vez de rebuscar a aba. ANTERIOR: v2026.08.19b — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
 
     <!-- Coluna nível 2: submódulos -->
     <div class="subcoluna" id="subcoluna">
@@ -457,6 +457,11 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbw-nMudRjf8DkkzdJi9mLFx
   let _prox = 0;
   let _naFila = 0;
   window._apiNaFila = () => _naFila;
+  // CANAL EXCLUSIVO PARA GRAVAR. As leituras (funil, clientes, faturamento) sao grandes e
+  // demoradas; quando um "salvar" caia na mesma fila, ficava esperando a leitura terminar e
+  // dava a impressao de travamento (e as vezes estourava o tempo e virava erro de conexao).
+  // Salvar e curto: agora tem uma via propria e nunca espera leitura nenhuma.
+  let _canalEscrita = Promise.resolve();
 
   async function _enviar(url, opts, ehLeitura){
     const TENTATIVAS = 3;
@@ -499,15 +504,37 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbw-nMudRjf8DkkzdJi9mLFx
     const ehAPI = (typeof url === 'string') && url.indexOf('script.google.com') >= 0;
     if (!ehAPI) return _fetchOriginal(url, opts);
     let ehLeitura = false;
-    try { ehLeitura = !!(opts && opts.body && String(opts.body).indexOf('"acao":"dados"') >= 0); } catch(e){}
+    // 'dados' e 'dadosFicha' só LEEM. Tratar dadosFicha como escrita fazia a impressão da
+    // ficha limpar o cache inteiro — e a tela seguinte rebuscava tudo do zero.
+    try {
+      const b = (opts && opts.body) ? String(opts.body) : '';
+      ehLeitura = b.indexOf('"acao":"dados"') >= 0 || b.indexOf('"acao":"dadosFicha"') >= 0;
+    } catch(e){}
+    // Lê o corpo uma vez só: serve pra saber se é leitura e, se for gravação, pra atualizar
+    // o cache DEPOIS que o servidor confirmar (ver _depoisDeGravar).
+    let corpoEscrita = null;
+    if (!ehLeitura) {
+      try {
+        const c = JSON.parse(opts.body);
+        const SO_LEEM = { login:1, dados:1, dadosFicha:1 };
+        if (c && c.acao && !SO_LEEM[c.acao]) corpoEscrita = c;
+      } catch(e) {}
+    }
     _naFila++;
-    const canal = _prox; _prox = (_prox + 1) % SLOTS;   // alterna entre os dois canais
-    const tarefa = _canais[canal].then(
+    let cadeia, guardar;
+    if (ehLeitura) {
+      const canal = _prox; _prox = (_prox + 1) % SLOTS;   // leituras alternam entre os dois canais
+      cadeia = _canais[canal]; guardar = t => { _canais[canal] = t; };
+    } else {
+      cadeia = _canalEscrita; guardar = t => { _canalEscrita = t; };   // gravar tem via própria
+    }
+    const tarefa = cadeia.then(
       () => _enviar(url, opts, ehLeitura),
       () => _enviar(url, opts, ehLeitura)      // falha do anterior não derruba a fila
     );
-    _canais[canal] = tarefa.then(()=>{}, ()=>{});
-    return tarefa.finally(()=>{ _naFila--; });
+    guardar(tarefa.then(()=>{}, ()=>{}));
+    const comCache = tarefa.then(resp => _depoisDeGravar(corpoEscrita, resp));
+    return comCache.finally(()=>{ _naFila--; });
   };
 })();
 
@@ -1000,27 +1027,93 @@ const CACHE_ABAS_POR_ACAO = {
   aplicarReajusteDireto:     ['Reajustes','Historico_Reajustes'],
   reajustar:                 ['Reajustes','Historico_Reajustes'],
   limparDuplicatasReajustes: ['Reajustes'],
+  cancelarCliente:           ['Clientes','Cancelados','Clientes_RGG','SIGOR','Contratos'],
+  excluirCliente:            ['Clientes','Contratos','Servicos_Cliente','Reajustes','Clientes_RGG','SIGOR','Solicitacoes'],
 };
-function limparCacheDaAcao(acao){
-  const abas = CACHE_ABAS_POR_ACAO[acao];
+// Sai do cache só a aba que mudou. Quando a ação não está na lista acima, o próprio pedido
+// costuma dizer em qual aba ele mexeu (novoRegistro, excluirLinha, salvar, salvarFinanceiro
+// mandam 'aba'). Só se nem isso existir é que limpamos tudo.
+function limparCacheDaAcao(corpo){
+  const acao = (typeof corpo === 'string') ? corpo : (corpo && corpo.acao);
+  let abas = CACHE_ABAS_POR_ACAO[acao];
+  if (!abas && corpo && typeof corpo === 'object') {
+    const aba = corpo.aba || (corpo.dados && corpo.dados.aba);
+    if (aba) abas = [aba];
+  }
   if (!abas) { limparCacheBusca(); return; }        // não sei o que mexeu: limpa tudo
   abas.forEach(aba=>{ for (const k in _cacheDados) { if (k===aba || k.indexOf(aba+'::')===0) delete _cacheDados[k]; } });
   _cacheGravar();
 }
-(function(){
-  const _fetchOriginal = window.fetch;
-  window.fetch = function(url, opts){
-    try {
-      if (opts && opts.body && typeof opts.body === 'string' && String(url).indexOf('script.google.com') !== -1) {
-        const corpo = JSON.parse(opts.body);
-        if (corpo && corpo.acao && corpo.acao !== 'dados' && corpo.acao !== 'login') {
-          limparCacheDaAcao(corpo.acao);
-        }
+
+// ============================================================
+// DEPOIS DE GRAVAR: atualizar a cópia local em vez de rebuscar a aba inteira
+// ------------------------------------------------------------
+// Antes, qualquer "salvar" jogava fora o cache da aba. No CRM isso era brutal: mudar uma
+// tratativa, arrastar um card ou trocar um campo obrigava a baixar TODOS os leads de novo
+// no clique seguinte. Como a tela já sabe exatamente o que mudou (é ela quem mandou), dá
+// pra aplicar a mesma alteração nas linhas que já estão na memória — zero pedidos ao Google.
+// Só fazemos isso quando o servidor confirma (ok:true). Se ele falhar, ou se for uma ação
+// que não sabemos reproduzir, caímos no comportamento antigo (descartar a aba).
+// ============================================================
+function _linhasLeadNaMemoria(){
+  const arrs = [];
+  for (const k in _cacheDados) {
+    if (k === 'CRM_Leads' || k.indexOf('CRM_Leads::') === 0) {
+      const d = _cacheDados[k] && _cacheDados[k].dados;
+      if (d && d.linhas && d.linhas.length) arrs.push(d.linhas);
+    }
+  }
+  try { if (typeof kanbanLeads !== 'undefined' && kanbanLeads && kanbanLeads.length) arrs.push(kanbanLeads); } catch(e){}
+  return arrs;
+}
+function _soDigitos(v){ return String(v==null?'':v).replace(/\D/g,''); }
+// Traduz o pedido em "que campos do lead mudaram". Devolve null quando não sabemos.
+function _mudancaDoLead(acao, d){
+  if (!d) return null;
+  const porId   = id   => (l => String(l['ID_LEAD']) === String(id));
+  const porNome = nome => (l => String(l['CLIENTE']) === String(nome));
+  if (acao === 'atualizarLeadCampos')    return d.idLead && d.campos ? { quem: porId(d.idLead), campos: d.campos } : null;
+  if (acao === 'atualizarConsultorLead') return d.idLead ? { quem: porId(d.idLead), campos: { 'CONSULTOR': d.consultor } } : null;
+  if (acao === 'atualizarValorLead')     return d.cliente ? { quem: porNome(d.cliente), campos: { 'VALOR_R$': d.valor } } : null;
+  if (acao === 'moverLead')              return d.idLead ? { quem: porId(d.idLead), campos: { 'ETAPA': d.novaEtapa } } : null;
+  if (acao === 'registrarAtividade') {
+    const cj = _soDigitos(d.cnpj);
+    const quem = l => (d.cliente && String(l['CLIENTE']) === String(d.cliente))
+                   || (cj.length >= 11 && _soDigitos(l['CNPJ']) === cj);
+    return { quem: quem, campos: { 'ULTIMA_ATIVIDADE': new Date().toISOString().slice(0,10) }, opcional: true };
+  }
+  return null;
+}
+function _depoisDeGravar(corpo, resp){
+  if (!corpo) return resp;
+  return (async () => {
+    let ok = false;
+    try { const j = await resp.clone().json(); ok = !!(j && j.ok); } catch(e) { ok = false; }
+    if (!ok) { limparCacheDaAcao(corpo); return resp; }   // falhou ou não deu pra ler: modo seguro
+    const m = _mudancaDoLead(corpo.acao, corpo.dados);
+    if (m && m.campos) {
+      let achou = false;
+      _linhasLeadNaMemoria().forEach(arr => arr.forEach(l => {
+        if (m.quem(l)) { for (const c in m.campos) l[c] = m.campos[c]; achou = true; }
+      }));
+      // achou e corrigiu na mão: o cache continua válido, não precisa rebuscar nada.
+      if (achou || m.opcional) {
+        // as OUTRAS abas que a ação mexeu (Historico_Etapas, Atividades_Cliente...) saem do
+        // cache normalmente; só CRM_Leads é que foi corrigida na mão e pode ficar.
+        (CACHE_ABAS_POR_ACAO[corpo.acao] || []).forEach(aba => {
+          if (aba === 'CRM_Leads') return;
+          for (const k in _cacheDados) { if (k===aba || k.indexOf(aba+'::')===0) delete _cacheDados[k]; }
+        });
+        _cacheGravar();
+        return resp;
       }
-    } catch(e) { /* se não der pra ler o corpo, ignora */ }
-    return _fetchOriginal.apply(this, arguments);
-  };
-})();
+    }
+    limparCacheDaAcao(corpo);
+    return resp;
+  })();
+}
+// (O antigo interceptador que limpava o cache ANTES de enviar saiu daqui: quem cuida disso
+//  agora é _depoisDeGravar, chamado pela fila só quando o servidor confirma o salvamento.)
 
 // ---- Iniciar app após login ----
 function iniciarApp() {
@@ -1650,7 +1743,7 @@ async function salvarNovoCliente(){
     const resp=await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'novoRegistro',token:sessaoToken,dados:{aba:'Clientes',campos,permitirDuplicado:true}})});
     const r=await resp.json();
     if(!r.ok){ document.getElementById('ncli-msg').innerHTML=`<div class="sem-acesso" style="margin-top:10px;">${r.erro||'Erro. Republique o Apps Script.'}</div>`; return; }
-    cacheClientes=null; if(typeof limparCacheBusca==='function') limparCacheBusca();
+    cacheClientes=null;
     // abre o card de regularização (SP Regula ou MTR) como "Cliente novo - irregular"
     const dadosReg={ cliente:nome, cnpj:campos['CNPJ'], consultor:consultor, contato:campos['CONTATO'], email:campos['EMAIL'], origem:'Cadastro na carteira' };
     REG_guardarPendente(regTipo, dadosReg);
@@ -1700,7 +1793,7 @@ async function REG_criarCard(tipo, dados){
   };
   if (tipo==='mtr') campos['PLATAFORMA'] = 'Sigor';
   const r = await apiPost({ acao:'novoRegistro', token: sessaoToken, dados:{ aba, campos, permitirDuplicado:true } });
-  if (r.ok) { cacheRGG = null; cacheSIGOR = null; if (typeof limparCacheBusca==='function') limparCacheBusca(); }
+  if (r.ok) { cacheRGG = null; cacheSIGOR = null;  }
   return r;
 }
 // guarda o que falta criar, pra dar pra tentar de novo sem redigitar nada
@@ -1758,7 +1851,6 @@ async function moverEntreRegula(origem, id){
     alert('O cliente foi criado em '+REG_rotulo(destino)+', mas não consegui removê-lo de '+REG_rotulo(origem)+'.\n\n'+(r2.erro||'')+'\n\nEle vai aparecer nas duas listas até isso ser resolvido.');
   }
   cacheRGG = null; cacheSIGOR = null;
-  if (typeof limparCacheBusca==='function') limparCacheBusca();
   renderRegula(document.getElementById('area-conteudo'), origem);
   const ok = document.createElement('div');
   ok.textContent = 'Movido para ' + REG_rotulo(destino) + '!';
@@ -1917,7 +2009,7 @@ async function corrigirTipoParaContrato(){
   const r = await apiPost({ acao:'mudarTipoCliente', token: sessaoToken, dados:{ cnpj: c['CNPJ'], tipo:'Contrato' } });
   if (r.ok && r.dados && r.dados.ok) {
     c['TIPO'] = 'Contrato';
-    cacheClientes = null; if (typeof limparCacheBusca==='function') limparCacheBusca();
+    cacheClientes = null;
     if (div) div.innerHTML = '<div style="background:var(--verde-ok-bg);border-radius:8px;padding:9px 11px;margin-bottom:14px;font-size:12.5px;color:var(--verde-ok);"><i class="ti ti-circle-check"></i> Cadastro atualizado para <b>Contrato</b>.</div>';
   } else {
     if (div) div.innerHTML = `<div class="sem-acesso" style="margin-bottom:14px;">Não consegui atualizar o cadastro: ${(r.dados&&r.dados.erro)||r.erro||''}</div>`;
@@ -2518,7 +2610,6 @@ async function salvarStatusEntrada(idLead) {
     if (!r.ok) { alert('Erro: '+(r.erro||'verifique se o Apps Script foi republicado.')); return; }
     const lead = (kanbanLeads||[]).find(l=>String(l['ID_LEAD'])===String(idLead));
     if (lead) lead['STATUS_ENTRADA'] = v;
-    if (typeof limparCacheBusca==='function') limparCacheBusca();
     fecharFicha();
     aplicarKanban();
     const av = document.createElement('div');
@@ -2539,7 +2630,6 @@ async function salvarNomeLead(idLead) {
     if (!r.ok) { alert('Erro: '+(r.erro||'verifique se o Apps Script foi republicado.')); return; }
     const lead = (kanbanLeads||[]).find(l=>String(l['ID_LEAD'])===String(idLead));
     if (lead) lead['CLIENTE'] = nome;
-    if (typeof limparCacheBusca==='function') limparCacheBusca();
     fecharFicha();
     aplicarKanban();
     const av = document.createElement('div');
@@ -2561,7 +2651,6 @@ async function salvarFonteLead(idLead) {
     if (!r.ok) { alert('Erro: '+(r.erro||'verifique se o Apps Script foi republicado.')); return; }
     const lead = (kanbanLeads||[]).find(l=>String(l['ID_LEAD'])===String(idLead));
     if (lead) lead['FONTE'] = fonte;
-    if (typeof limparCacheBusca==='function') limparCacheBusca();
     fecharFicha();
     aplicarKanban();
     const av = document.createElement('div');
@@ -2609,7 +2698,6 @@ async function salvarCnpjFicha(nomeCliente){
   if (d && d.ok) {
     f['CNPJ'] = novo;
     cacheClientes = null; cacheContratos = null; cacheReajustes = null; cacheRGG = null; cacheSIGOR = null;
-    if (typeof limparCacheBusca==='function') limparCacheBusca();
     msg.innerHTML = `<span style="color:var(--verde-ok);"><i class="ti ti-circle-check"></i> CNPJ salvo.</span>`
       + (d.propagadas ? `<div style="color:var(--verde-ok);margin-top:3px;">E mais: <b>${d.propagadas} registro(s)</b> que estavam soltos foram ligados a este cliente${d.detalhe?` (${d.detalhe})`:''}.</div>` : '')
       + `<div style="color:var(--cinza-600);margin-top:3px;">Reabra a ficha para ver tudo no lugar.</div>`;
@@ -4520,7 +4608,6 @@ async function salvarClienteDeLead(cnpjLead, tipo, permitirDuplicado) {
       return;
     }
     cacheClientes = null;
-    if (typeof limparCacheBusca==='function') limparCacheBusca();
     // ABRE O CARD DE REGULARIZAÇÃO (SP Regula ou MTR) — antes de qualquer outro passo,
     // pra não depender de a pessoa terminar o contrato/solicitação para o card existir.
     const _regT = window._regTipoLead || regTipo;
@@ -4568,7 +4655,6 @@ async function reenviarSolicDeLead(){
   const r = await apiPost({ acao:'criarSolicitacao', token: sessaoToken, dados: d });
   if (r.ok) {
     window._solicPendenteLead = null;
-    if (typeof limparCacheBusca==='function') limparCacheBusca();
     if (msg) msg.innerHTML = '<div style="background:var(--verde-ok-bg);border-radius:8px;padding:10px;margin-top:10px;color:var(--verde-ok);font-size:13px;"><i class="ti ti-circle-check"></i> Cliente criado e <b>solicitação de contrato enviada pra Mafe</b> (aba Solicitações).</div>' + (window._regAvisoHtml||'');
     if (typeof atualizarSino==='function') atualizarSino();
     setTimeout(fecharFicha, 2200);
@@ -4941,7 +5027,7 @@ async function salvarClienteDeReajuste(idx){
   REG_guardarPendente(regTipo, dadosReg);
   const rReg = await REG_criarCard(regTipo, dadosReg);
   if (rReg.ok) window._regPendente = null;
-  cacheClientes=null; if(typeof limparCacheBusca==='function') limparCacheBusca();
+  cacheClientes=null;
   await carregarClientes();
   msg.innerHTML = '<div style="background:var(--verde-ok-bg);border-radius:8px;padding:9px;margin-top:8px;color:var(--verde-ok);font-size:12.5px;"><i class="ti ti-circle-check"></i> Cliente cadastrado.</div>' + REG_mensagem(rReg, regTipo, 'rcli-msg');
   const bloco=document.getElementById('reaj-carteira'); if(bloco) bloco.innerHTML=reajBlocoCarteira(idx);
@@ -7122,7 +7208,6 @@ async function regExecutarImportar(){
     if (r.ok) ok++; else falhas.push(it.nome + ' — ' + (r.erro||''));
   }
   cacheRGG = null; cacheSIGOR = null;
-  if (typeof limparCacheBusca==='function') limparCacheBusca();
   prog.innerHTML = `<div style="background:${falhas.length?'var(--amarelo-bg)':'var(--verde-ok-bg)'};border-radius:8px;padding:11px;font-size:13px;color:${falhas.length?'#8a6d00':'var(--verde-ok)'};">
     <i class="ti ti-circle-check"></i> <b>${ok} cadastro(s) criado(s).</b>
     ${falhas.length?`<div style="margin-top:6px;font-size:11.5px;"><b>${falhas.length} não entraram:</b><br>${falhas.map(f=>'• '+f).join('<br>')}<br>Pode colar só esses de novo — os que já entraram não duplicam.</div>`:''}
@@ -7665,7 +7750,6 @@ async function excluirPedidoPreco(id, cliente) {
     })});
     const r = await resp.json();
     if (!r.ok) { alert('Erro: '+(r.erro||'verifique se o Apps Script foi republicado.')); return; }
-    if (typeof limparCacheBusca==='function') limparCacheBusca();
     renderPrecificacao(document.getElementById('area-conteudo'));
     atualizarSino();
   } catch(e) { alert('Erro de conexão.'); }
@@ -7805,7 +7889,6 @@ async function roteirizarLead(idLead) {
       CLIENTE_PROX: maisProx.c['CLIENTE'], DIST_KM: distKm, TEMPO_ROTA: tempo, DATA_ROTEIRIZACAO: new Date().toISOString().slice(0,10)
     } } })});
     lead['CLIENTE_PROX']=maisProx.c['CLIENTE']; lead['DIST_KM']=distKm; lead['TEMPO_ROTA']=tempo;
-    if (typeof limparCacheBusca==='function') limparCacheBusca();
     setMsg('', 'var(--cinza-500)');
     renderRoteirizacao(document.getElementById('area-conteudo'));
   } catch(e) { setMsg('Erro: '+(e.message||'verifique a chave do Google.'), 'var(--vermelho)'); }
@@ -7865,7 +7948,6 @@ async function geocodificarClientes() {
     await new Promise(r=>setTimeout(r, 120)); // respira entre chamadas
   }
   if (prog) prog.textContent = `Pronto! ${ok} geocodificados${falhou?', '+falhou+' falharam (endereço incompleto)':''}.`;
-  if (typeof limparCacheBusca==='function') limparCacheBusca();
 }
 
 async function renderPrecificacao(area) {
@@ -8048,7 +8130,6 @@ async function enviarSolicitacaoPreco() {
     })});
     const r = await resp.json();
     if (!r.ok) { document.getElementById('pr-msg').innerHTML=`<div class="sem-acesso">${r.erro}</div>`; return; }
-    if (typeof limparCacheBusca==='function') limparCacheBusca();
     document.getElementById('pr-msg').innerHTML = '<div style="background:var(--verde-ok-bg);border-radius:8px;padding:10px;margin-top:10px;color:var(--verde-ok);font-size:13px;"><i class="ti ti-circle-check"></i> Enviado! O Roberto verá na aba Precificação.</div>';
     setTimeout(()=>{ fecharFicha(); renderPrecificacao(document.getElementById('area-conteudo')); }, 1800);
   } catch(e) { document.getElementById('pr-msg').innerHTML='<div class="sem-acesso">Erro de conexão.</div>'; }
@@ -9181,7 +9262,8 @@ async function _solicRecarregarClientes(idDatalist, idAviso){
   const av = document.getElementById(idAviso);
   if (av) av.innerHTML = '<span style="color:var(--cinza-500);"><i class="ti ti-loader"></i> Buscando clientes...</span>';
   cacheClientes = null; window._solicPromClientes = null;
-  if (typeof limparCacheBusca==='function') limparCacheBusca();
+  // só a aba Clientes: antes isso apagava o cache inteiro e a próxima tela rebuscava tudo
+  for (const k in _cacheDados) { if (k==='Clientes' || k.indexOf('Clientes::')===0) delete _cacheDados[k]; }
   try { await carregarClientes(); } catch(e){}
   const dl = document.getElementById(idDatalist);
   if (dl) dl.innerHTML = _solicClientDatalistOptions();
