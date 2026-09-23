@@ -393,7 +393,7 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.20</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.21</div>
       </div>
     </aside>
     <!-- VERSÃO DO DASHBOARD: v2026.08.20 — desempenho: canal exclusivo pra salvar, cache deixou de ser apagado inteiro a cada salvamento, CRM atualiza a linha na memória em vez de rebuscar a aba. ANTERIOR: v2026.08.19b — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
@@ -2588,7 +2588,7 @@ async function confirmarFollowUp(idLead, cliente, cnpj) {
       acao:'registrarAtividade', token: sessaoToken,
       dados:{ cnpj: cnpj||'', cliente, tipo:'Follow-up', titulo:'Follow-up agendado', descricao: obs, dataAgendada: data, registradoPor: usuarioAtual.nome }
     })});
-    if (temLead) { const lead = (kanbanLeads||[]).find(l=>String(l['ID_LEAD'])===String(idLead)); if (lead) lead['FOLLOWUP'] = fmtDataBR(data); }
+    if (temLead) { const lead = achaLead(idLead); if (lead) lead['FOLLOWUP'] = fmtDataBR(data); }
     const ov = document.getElementById('modal-fu-overlay'); if (ov) ov.remove();
     fecharFicha();
     if (temLead && typeof aplicarKanban==='function') aplicarKanban();
@@ -2608,7 +2608,7 @@ async function salvarStatusEntrada(idLead) {
     })});
     const r = await resp.json();
     if (!r.ok) { alert('Erro: '+(r.erro||'verifique se o Apps Script foi republicado.')); return; }
-    const lead = (kanbanLeads||[]).find(l=>String(l['ID_LEAD'])===String(idLead));
+    const lead = achaLead(idLead);
     if (lead) lead['STATUS_ENTRADA'] = v;
     fecharFicha();
     aplicarKanban();
@@ -2628,7 +2628,7 @@ async function salvarNomeLead(idLead) {
     })});
     const r = await resp.json();
     if (!r.ok) { alert('Erro: '+(r.erro||'verifique se o Apps Script foi republicado.')); return; }
-    const lead = (kanbanLeads||[]).find(l=>String(l['ID_LEAD'])===String(idLead));
+    const lead = achaLead(idLead);
     if (lead) lead['CLIENTE'] = nome;
     fecharFicha();
     aplicarKanban();
@@ -2649,7 +2649,7 @@ async function salvarFonteLead(idLead) {
     })});
     const r = await resp.json();
     if (!r.ok) { alert('Erro: '+(r.erro||'verifique se o Apps Script foi republicado.')); return; }
-    const lead = (kanbanLeads||[]).find(l=>String(l['ID_LEAD'])===String(idLead));
+    const lead = achaLead(idLead);
     if (lead) lead['FONTE'] = fonte;
     fecharFicha();
     aplicarKanban();
@@ -2669,7 +2669,7 @@ async function salvarEndCepLead(idLead) {
     })});
     const r = await resp.json();
     if (!r.ok) { alert('Erro: '+(r.erro||'verifique se o Apps Script foi republicado.')); return; }
-    const lead = (kanbanLeads||[]).find(l=>String(l['ID_LEAD'])===String(idLead));
+    const lead = achaLead(idLead);
     if (lead) { lead['ENDERECO']=end; lead['CEP']=cep; }
     if (typeof mostrarClientesProximos === 'function') mostrarClientesProximos(cep, idLead);
     const av = document.createElement('div');
@@ -3986,6 +3986,62 @@ let _kanbanExpandido = {}; // etapa -> true quando o usuário clicou "ver todos"
 function expandirColunaKanban(nomeEtapa){ _kanbanExpandido[nomeEtapa] = true; aplicarKanban(); }
 // função central: carrega os leads SEMPRE aplicando o filtro de dono (vendedor só vê os seus).
 // usar esta função em TODOS os lugares evita o bug de cache contaminado sem filtro.
+// ============================================================
+// ACHAR UM LEAD — NUNCA por ID vazio
+// ------------------------------------------------------------
+// Lead lançado direto na planilha fica sem ID_LEAD. Como o código procurava com
+// String(x['ID_LEAD']) === String(idLead), um ID vazio casava com o PRIMEIRO lead de ID
+// em branco — por isso a impressão abria o questionário de outro lead, e um "salvar"
+// podia gravar por cima do lead errado. Agora ID vazio nunca casa: usamos o lead que está
+// aberto na tela, ou o nome do cliente.
+// ============================================================
+// Relê a aba CRM_Leads e diz se o lead realmente entrou — e se este usuário consegue vê-lo.
+// gravou: true / false / null (não deu pra conferir)
+async function _conferirLeadCriado(cliente, cnpj) {
+  try {
+    const r = await buscarDados('CRM_Leads', true);
+    if (!r || !r.ok || !r.linhas) return { gravou: null };
+    const norm = v => String(v||'').trim().toUpperCase();
+    const cj = String(cnpj||'').replace(/\D/g,'');
+    const achado = r.linhas.find(l => (norm(l['CLIENTE']) && norm(l['CLIENTE']) === norm(cliente))
+                                   || (cj.length >= 11 && String(l['CNPJ']||'').replace(/\D/g,'') === cj));
+    if (!achado) return { gravou: false };
+    const visivel = !veSomenteProprios() || ehMeuRegistro(achado['CONSULTOR']);
+    return { gravou: true, visivel: visivel, consultor: achado['CONSULTOR']||'' };
+  } catch(e) { return { gravou: null }; }
+}
+
+let leadAbertoAtual = null;
+function achaLead(id, nome) {
+  const s = String(id == null ? '' : id).trim();
+  if (s) {
+    const porId = (kanbanLeads||[]).find(x => String(x['ID_LEAD']) === s);
+    if (porId) return porId;
+  }
+  const alvo = String(nome||'').trim().toUpperCase();
+  if (alvo) {
+    const porNome = (kanbanLeads||[]).find(x => String(x['CLIENTE']||'').trim().toUpperCase() === alvo);
+    if (porNome) return porNome;
+  }
+  if (!s && leadAbertoAtual) return leadAbertoAtual;   // ficha aberta manda mais que ID em branco
+  return null;
+}
+
+// Um lead sem ID_LEAD não pode ser salvo: o servidor procura a linha pelo ID e, em branco,
+// acertaria a linha errada. Então, ao abrir um lead assim, geramos e gravamos um código.
+// Usa a ação 'salvar' que já existe no Apps Script (casa por CNPJ + CLIENTE).
+async function garantirIdLead(l) {
+  if (!l || String(l['ID_LEAD']||'').trim()) return true;
+  const novo = 'L' + Date.now();
+  try {
+    const r = await apiPost({ acao:'salvar', aba:'CRM_Leads', token: sessaoToken, chaveExtra:'CLIENTE',
+      dados:{ 'CNPJ': l['CNPJ']||'', 'CLIENTE': l['CLIENTE']||'', 'ID_LEAD': novo } });
+    const d = r.ok ? r.dados : null;
+    if (d && d.ok) { l['ID_LEAD'] = novo; return true; }
+  } catch(e) {}
+  return false;
+}
+
 async function carregarLeads(forcar) {
   if (kanbanLeads && !forcar) return kanbanLeads;
   const r = await buscarDados('CRM_Leads');
@@ -4248,7 +4304,7 @@ function podeArquivarLead() {
 
 // modal que exige o motivo da perda ao declinar um lead (motivos da planilha de Propostas e Chamados)
 function abrirModalMotivoPerda(idLead) {
-  const lead = kanbanLeads.find(l => String(l['ID_LEAD'])===String(idLead));
+  const lead = achaLead(idLead);
   const nome = lead ? (lead['CLIENTE']||'') : '';
   const cont = document.getElementById('ficha-container');
   cont.insertAdjacentHTML('beforeend', `
@@ -4291,7 +4347,7 @@ async function confirmarDeclinio(idLead) {
   if (ehCobertura && !quemAtende) { document.getElementById('mp-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Informe quem atende o cliente hoje.</div>'; return; }
   // motivo padronizado fica limpo (pra consolidar certo); a observação vai separada
   const motivo = motivoSel;
-  const lead = kanbanLeads.find(l => String(l['ID_LEAD'])===String(idLead));
+  const lead = achaLead(idLead);
   const overlay = document.getElementById('modal-motivo-overlay');
   if (overlay) overlay.remove();
   if (ehCobertura) {
@@ -4318,7 +4374,7 @@ async function confirmarDeclinio(idLead) {
 // muda a etapa de um lead (usado pelo arrastar E pelo seletor no card). Grava no Sheets.
 // Se "Proposta Solicitada", abre precificação. Se "Declinado", exige o motivo da perda primeiro.
 async function mudarEtapaLead(idLead, novaEtapa, motivoPerda, dadosProposta) {
-  const lead = kanbanLeads.find(l => String(l['ID_LEAD'])===String(idLead));
+  const lead = achaLead(idLead);
   if (!lead) return;
   const etapaAntiga = lead['ETAPA'];
   const colAntiga = etapaDeGlobal(lead);
@@ -4405,7 +4461,7 @@ async function mudarEtapaLead(idLead, novaEtapa, motivoPerda, dadosProposta) {
 
 // modal de cobertura: pede quem atende o cliente hoje (quando arrasta direto pra Cobertura)
 function abrirModalCobertura(idLead) {
-  const lead = kanbanLeads.find(l => String(l['ID_LEAD'])===String(idLead));
+  const lead = achaLead(idLead);
   const nome = lead ? (lead['CLIENTE']||'') : '';
   const cont = document.getElementById('ficha-container');
   cont.insertAdjacentHTML('beforeend', `
@@ -4438,7 +4494,7 @@ async function confirmarCobertura(idLead) {
 
 // modal de fechamento: data de início das coletas + data de assinatura de contrato
 function abrirModalFechamento(idLead) {
-  const lead = kanbanLeads.find(l => String(l['ID_LEAD'])===String(idLead));
+  const lead = achaLead(idLead);
   const nome = lead ? (lead['CLIENTE']||'') : '';
   const cont = document.getElementById('ficha-container');
   cont.insertAdjacentHTML('beforeend', `
@@ -4685,7 +4741,7 @@ function getPropostasLead(l){
 
 // modal que pede nº da proposta, tipo, data de envio e valor (usado ao mover p/ "Proposta Enviada" E para adicionar outra proposta)
 function abrirModalProposta(idLead) {
-  const lead = kanbanLeads.find(l => String(l['ID_LEAD'])===String(idLead));
+  const lead = achaLead(idLead);
   const nome = lead ? (lead['CLIENTE']||'') : '';
   const qtd = getPropostasLead(lead).length;
   const hoje = new Date().toISOString().split('T')[0];
@@ -4731,7 +4787,7 @@ async function confirmarProposta(idLead) {
   let valor = document.getElementById('pp-valor').value;
   if (servicos.length && totalServ>0) { valor = totalServ; document.getElementById('pp-valor').value = totalServ; }
   if (!numero || !data || !valor) { document.getElementById('pp-msg').innerHTML='<div class="sem-acesso" style="margin-top:10px;">Preencha tipo, número, data e valor (ou os serviços).</div>'; return; }
-  const lead = (kanbanLeads||[]).find(x=>String(x['ID_LEAD'])===String(idLead));
+  const lead = achaLead(idLead);
   // ADICIONA à lista de propostas (não sobrescreve as anteriores)
   const props = getPropostasLead(lead);
   props.push({ tipo, numero, data, valor:String(valor), servicos });
@@ -5715,7 +5771,7 @@ async function abrirAvisoDestino(tipo, cliente, idLead) {
   fecharFicha();
   await carregarLeads();
   let lead = null;
-  if (idLead) lead = (kanbanLeads||[]).find(l=>String(l['ID_LEAD'])===String(idLead));
+  if (idLead) lead = achaLead(idLead);
   if (!lead && cliente) lead = (kanbanLeads||[]).find(l=>String(l['CLIENTE'])===String(cliente));
   if (tipo==='Preço pedido') {
     // Roberto: abrir a tela de precificação e o lead
@@ -7845,7 +7901,7 @@ function distLinhaReta(lat1, lng1, lat2, lng2) {
 async function roteirizarLead(idLead) {
   const msg = document.getElementById('rot-msg-'+idLead);
   const setMsg = (t,cor) => { if(msg){ msg.textContent=t; msg.style.color=cor||'var(--cinza-500)'; } };
-  const lead = (kanbanLeads||[]).find(l=>String(l['ID_LEAD'])===String(idLead));
+  const lead = achaLead(idLead);
   if (!lead) return;
   setMsg('Localizando o lead...', 'var(--cinza-500)');
   try {
@@ -8333,7 +8389,7 @@ function gerarRelatorioFunil(paraPdf) {
 
 // imprime o "Questionário - Proposta de Serviço" (modelo F-1.00 COMERCIAL) preenchido com os dados do lead
 function imprimirQuestionarioLead(idLead){
-  const l=(kanbanLeads||[]).find(x=>String(x['ID_LEAD'])===String(idLead));
+  const l=achaLead(idLead);
   if(!l){ alert('Lead não encontrado. Recarregue e tente de novo.'); return; }
   const win = (function(){ try{ return window.open('','_blank'); }catch(e){ return null; } })();
   if(win){ try{ win.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Gerando…</title></head><body style="font-family:Arial;padding:40px;color:#2d5a3d;">Gerando o questionário…</body></html>'); }catch(e){} }
@@ -8571,7 +8627,23 @@ async function salvarLead() {
     }
     const etapaEscolhida = campos['ETAPA'];
     kanbanLeads = null; // forçar recarga
-    document.getElementById('nl-msg').innerHTML = '<div style="background:var(--verde-ok-bg);border-radius:8px;padding:10px;margin-top:10px;color:var(--verde-ok);font-size:13px;"><i class="ti ti-circle-check"></i> Lead criado!</div>';
+    // CONFERE DE VERDADE. Antes a tela dizia "Lead criado!" só porque o servidor respondeu ok.
+    // Se a linha não entrasse — ou entrasse com um consultor que este usuário não enxerga —
+    // o lead sumia e ninguém ficava sabendo do que tinha acontecido.
+    document.getElementById('nl-msg').innerHTML = '<div style="text-align:center;padding:10px;color:var(--cinza-500);">Conferindo na planilha...</div>';
+    const conf = await _conferirLeadCriado(cliente, cnpj);
+    if (conf.gravou === false) {
+      document.getElementById('nl-msg').innerHTML = `<div class="sem-acesso" style="margin-top:10px;line-height:1.5;">O servidor respondeu <b>ok</b>, mas o lead <b>não apareceu</b> na planilha ao conferir.<br><span style="font-size:11.5px;">Nada foi perdido: o formulário continua preenchido. Clique abaixo para tentar de novo.</span><div style="margin-top:8px;"><button onclick="salvarLead()" style="padding:7px 12px;border:none;background:var(--verde-medio);color:white;border-radius:7px;cursor:pointer;font-size:12px;"><i class="ti ti-refresh"></i> Tentar de novo</button></div></div>`;
+      return;
+    }
+    let extra = '';
+    if (conf.gravou === true && conf.visivel === false) {
+      extra = `<div style="background:var(--amarelo-bg);border-radius:8px;padding:10px;margin-top:8px;color:#8a6d00;font-size:12.5px;line-height:1.5;"><i class="ti ti-eye-off"></i> O lead foi criado, mas ficou no nome de <b>${conf.consultor||'outro consultor'}</b> — e você só enxerga os seus. Por isso ele não vai aparecer no seu funil. Se era pra ser seu, peça para trocar o consultor.</div>`;
+    } else if (conf.gravou === null) {
+      extra = `<div style="background:var(--amarelo-bg);border-radius:8px;padding:10px;margin-top:8px;color:#8a6d00;font-size:12.5px;"><i class="ti ti-alert-triangle"></i> Não consegui conferir na planilha (conexão). Confira no funil antes de lançar de novo.</div>`;
+    }
+    document.getElementById('nl-msg').innerHTML = '<div style="background:var(--verde-ok-bg);border-radius:8px;padding:10px;margin-top:10px;color:var(--verde-ok);font-size:13px;"><i class="ti ti-circle-check"></i> Lead criado' + (conf.gravou===true?' e confirmado na planilha':'') + '!</div>' + extra;
+    if (extra) return;   // deixa o aviso na tela em vez de fechar sozinho
     // se foi criado já como Declinado, abre o modal de motivo de perda
     if (etapaEscolhida === 'Declinado') {
       await carregarLeads(true);
@@ -10336,7 +10408,7 @@ async function salvarPropostaCobertura(idLead){
     const r=await resp.json();
     if(!r.ok){ alert('Não salvou: '+(r.erro||'verifique se o Apps Script foi republicado.')); return; }
     // recarrega os leads DO SERVIDOR pra refletir exatamente o que ficou gravado
-    const it=(kanbanLeads||[]).find(x=>String(x['ID_LEAD'])===String(idLead)); if(it) Object.assign(it, campos);
+    const it=achaLead(idLead); if(it) Object.assign(it, campos);
     kanbanLeads=null; if(typeof carregarLeads==='function'){ try{ await carregarLeads(); }catch(e){} }
     const av=document.createElement('div'); av.textContent='Proposta de cobertura salva!'; av.style.cssText='position:fixed;bottom:20px;right:20px;background:#6B5B95;color:white;padding:10px 18px;border-radius:8px;font-size:13px;z-index:9999;'; document.body.appendChild(av); setTimeout(()=>av.remove(),2000);
     abrirLead(idLead);
@@ -10349,7 +10421,7 @@ async function removerPropostaCobertura(idLead){
     const resp=await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'atualizarLeadCampos',token:sessaoToken,dados:{idLead:String(idLead),campos}})});
     const r=await resp.json();
     if(!r.ok){ alert('Erro: '+(r.erro||'republique o Apps Script.')); return; }
-    const it=(kanbanLeads||[]).find(x=>String(x['ID_LEAD'])===String(idLead)); if(it) Object.assign(it, campos);
+    const it=achaLead(idLead); if(it) Object.assign(it, campos);
     kanbanLeads=null; if(typeof carregarLeads==='function'){ try{ await carregarLeads(); }catch(e){} }
     abrirLead(idLead);
   }catch(e){ alert('Erro de conexão.'); }
@@ -10360,19 +10432,17 @@ async function abrirLead(id, nomeEnc) {
   let nomeFallback = '';
   try { nomeFallback = nomeEnc ? decodeURIComponent(nomeEnc) : ''; } catch(e){ nomeFallback = nomeEnc || ''; }
   const temId = String(id||'').trim() !== '';
-  // só casa por ID quando o ID não é vazio (senão abriria um lead qualquer de ID em branco)
-  let l = temId ? (kanbanLeads||[]).find(x => String(x['ID_LEAD'])===String(id)) : null;
+  let l = achaLead(temId ? id : '', nomeFallback || (temId ? '' : String(id||'')));
   // não achou no cache (lead recém-criado, cache antigo etc.) -> recarrega do servidor e tenta de novo
   if (!l && (temId || nomeFallback)) {
     try { await carregarLeads(true); } catch(e){}
-    if (temId) l = (kanbanLeads||[]).find(x => String(x['ID_LEAD'])===String(id));
+    l = achaLead(temId ? id : '', nomeFallback || (temId ? '' : String(id||'')));
   }
-  if (!l) {
-    // último recurso: casa pelo NOME (leads sem ID_LEAD gravado na planilha)
-    const alvo = (nomeFallback || (temId?'':String(id||''))).trim().toUpperCase();
-    if (alvo) l = (kanbanLeads||[]).find(x => String(x['CLIENTE']||'').trim().toUpperCase()===alvo);
-    if (!l) { alert('Não consegui abrir este lead. Atualize a página (Ctrl+Shift+R) e, se persistir, me avise.'); return; }
-  }
+  if (!l) { alert('Não consegui abrir este lead. Atualize a página (Ctrl+Shift+R) e, se persistir, me avise.'); return; }
+  leadAbertoAtual = l;   // referência segura para os botões desta ficha
+  // lead lançado direto na planilha vem sem código: gera um antes de deixar editar/imprimir
+  let semCodigo = false;
+  if (!String(l['ID_LEAD']||'').trim()) { semCodigo = !(await garantirIdLead(l)); }
   const cont = document.getElementById('ficha-container');
   const linha = (rotulo, valor) => valor ? `<tr><td style="padding:7px 0;color:var(--cinza-600);white-space:nowrap;padding-right:14px;">${rotulo}</td><td style="padding:7px 0;color:var(--cinza-900);">${valor}</td></tr>` : '';
   // etapas possíveis para o seletor (inclui Prospecção)
@@ -10394,6 +10464,7 @@ async function abrirLead(id, nomeEnc) {
           </div>
         </div>
         <div class="ficha-corpo">
+          ${semCodigo ? `<div style="background:var(--amarelo-bg);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#8a6d00;line-height:1.5;"><i class="ti ti-alert-triangle"></i> Este lead foi lançado <b>direto na planilha</b> e está sem código (coluna ID_LEAD vazia). Tentei gerar um agora e não consegui — por segurança, <b>salvar pode gravar na linha errada</b>. Preencha qualquer código na coluna ID_LEAD da planilha (ex.: L1) e recarregue a página.</div>` : ''}
           <div style="margin-bottom:12px;">
             <button onclick="imprimirQuestionarioLead('${idLead}')" style="width:100%;padding:10px;border:1.5px solid var(--verde-medio);background:var(--verde-claro-bg);color:var(--verde-escuro);border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;"><i class="ti ti-printer"></i> Imprimir questionário (proposta de serviço)</button>
           </div>
@@ -10518,7 +10589,7 @@ async function salvarServicosPropostaLead(idLead){
     const resp=await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'atualizarLeadCampos',token:sessaoToken,dados:{idLead:String(idLead),campos}})});
     const r=await resp.json();
     if(!r.ok){ alert('Não salvou: '+(r.erro||'republique o Apps Script.')); return; }
-    const it=(kanbanLeads||[]).find(x=>String(x['ID_LEAD'])===String(idLead)); if(it) it['SERVICOS_PROPOSTA']=campos.SERVICOS_PROPOSTA;
+    const it=achaLead(idLead); if(it) it['SERVICOS_PROPOSTA']=campos.SERVICOS_PROPOSTA;
     const av=document.createElement('div'); av.textContent='Serviços da proposta salvos!'; av.style.cssText='position:fixed;bottom:20px;right:20px;background:var(--verde-escuro);color:white;padding:10px 18px;border-radius:8px;font-size:13px;z-index:9999;'; document.body.appendChild(av); setTimeout(()=>av.remove(),2000);
   }catch(e){ alert('Erro de conexão.'); }
 }
@@ -10606,7 +10677,7 @@ async function salvarConsultorLead(idLead) {
     const r = await resp.json();
     sel.disabled = false;
     if (!r.ok) { alert('Erro: '+(r.erro||'verifique se o Apps Script foi republicado.')); return; }
-    const lead = (kanbanLeads||[]).find(l => String(l['ID_LEAD'])===String(idLead));
+    const lead = achaLead(idLead);
     if (lead) lead['CONSULTOR'] = consultor;
     aplicarKanban();
     const av = document.createElement('div');
