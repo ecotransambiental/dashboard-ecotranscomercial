@@ -393,7 +393,7 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.22</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.23</div>
       </div>
     </aside>
     <!-- VERSÃO DO DASHBOARD: v2026.08.20 — desempenho: canal exclusivo pra salvar, cache deixou de ser apagado inteiro a cada salvamento, CRM atualiza a linha na memória em vez de rebuscar a aba. ANTERIOR: v2026.08.19b — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
@@ -8375,8 +8375,8 @@ async function abrirRelatorioFunil() {
               <select id="rf-situacao" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"><option value="">Todas</option>${situacoes.map(s=>`<option value="${s}">${s==='Indica\u00e7\u00e3o/Prospec\u00e7\u00e3o'?'Pendente':s}</option>`).join('')}</select></div>
             <div><label style="font-size:13px;color:var(--cinza-700);">Contar a data por</label>
               <select id="rf-base" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;">
-                <option value="entrada">Entrada no sistema</option>
                 <option value="contato">Data de contato</option>
+                <option value="entrada">Entrada no sistema</option>
               </select></div>
             <div><label style="font-size:13px;color:var(--cinza-700);">De</label>
               <input type="date" id="rf-de" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
@@ -8387,7 +8387,7 @@ async function abrirRelatorioFunil() {
           </div>
           <div class="ficha-botoes" style="margin-bottom:12px;">
             <button class="ficha-btn-primario" onclick="gerarRelatorioFunil(false)"><i class="ti ti-search"></i> Gerar</button>
-            <button class="ficha-btn-secundario" onclick="gerarRelatorioFunil(true)"><i class="ti ti-printer"></i> Imprimir / PDF</button>
+            <button class="ficha-btn-secundario" onclick="gerarRelatorioFunil(true)"><i class="ti ti-printer"></i> Imprimir a aba aberta</button>
           </div>
           <div id="rf-resultado"></div>
         </div>
@@ -8407,7 +8407,7 @@ function _rfFiltros() {
   const g = id => (document.getElementById(id)||{}).value || '';
   const de = g('rf-de'), ate = g('rf-ate');
   return {
-    cons: g('rf-consultor'), sit: g('rf-situacao'), base: g('rf-base') || 'entrada',
+    cons: g('rf-consultor'), sit: g('rf-situacao'), base: g('rf-base') || 'contato',
     de: de, ate: ate,
     dDe: de ? new Date(de+'T00:00:00') : null,
     dAte: ate ? new Date(ate+'T23:59:59') : null
@@ -8495,12 +8495,14 @@ function _rfSecaoProspeccoes(f) {
   }
   const blocos = nomes.map(c => {
     const linhas = grupos[c].map(x => `<tr><td style="${_TD}">${_dataHoraBR(x.e.data, x.e.origem==='codigo')}${_rotOrigemEntrada(x.e.origem)}</td><td style="${_TD}">${x.l['CLIENTE']||'\u2014'}</td><td style="${_TD}">${rotEtapa(x.l['ETAPA'])}</td><td style="${_TD}">${x.l['RESPONSAVEL']||'\u2014'}</td><td style="${_TD}">${x.l['TELEFONE']||'\u2014'}</td></tr>`);
-    return `<div style="margin-top:14px;"><div style="font-size:13px;font-weight:600;color:var(--verde-escuro);border-left:3px solid var(--verde-medio);padding-left:8px;">${c} \u2014 ${grupos[c].length} prospec\u00e7\u00e3o${grupos[c].length>1?'\u00f5es':''}</div>${_rfTabela(['Entrada','Cliente','Situa\u00e7\u00e3o atual','Contato','Telefone'], linhas, '')}</div>`;
+    return `<div style="margin-top:14px;"><div style="font-size:13px;font-weight:600;color:var(--verde-escuro);border-left:3px solid var(--verde-medio);padding-left:8px;">${c} \u2014 ${grupos[c].length} ${grupos[c].length>1?'prospec\u00e7\u00f5es':'prospec\u00e7\u00e3o'}</div>${_rfTabela(['Entrada','Cliente','Situa\u00e7\u00e3o atual','Contato','Telefone'], linhas, '')}</div>`;
   }).join('');
   return { n: ent.length, html: blocos };
 }
 
+let _rfAbaAtual = 'leads';   // qual aba est\u00e1 na tela \u2014 o PDF imprime s\u00f3 essa
 function rfAba(qual) {
+  _rfAbaAtual = qual;
   ['leads','entradas','prospec'].forEach(k => {
     const pane = document.getElementById('rf-pane-'+k), bt = document.getElementById('rf-bt-'+k);
     if (pane) pane.style.display = (k===qual) ? 'block' : 'none';
@@ -8520,17 +8522,23 @@ function gerarRelatorioFunil(paraPdf) {
   const cabTexto = `Consultor: ${cons} \u00b7 Situa\u00e7\u00e3o: ${f.sit?rotEtapa(f.sit):'Todas'} \u00b7 Per\u00edodo: ${periodo}`;
 
   if (paraPdf) {
+    // IMPRIME S\u00d3 A ABA QUE EST\u00c1 NA TELA. Antes o PDF trazia as tr\u00eas se\u00e7\u00f5es juntas e, num
+    // filtro fechado (um consultor, um dia), as tr\u00eas mostravam exatamente os mesmos leads \u2014
+    // parecia relat\u00f3rio repetido. Para ter as tr\u00eas, \u00e9 s\u00f3 imprimir uma aba de cada vez.
+    const secoes = {
+      leads:    { t: 'Leads',                      s: S1, sub: 'Situa\u00e7\u00e3o dos leads no funil, filtrados por ' + porData + '.' },
+      entradas: { t: 'Entradas no per\u00edodo',        s: S2, sub: 'Leads que entraram no sistema nessas datas, com o consultor que ficou respons\u00e1vel.' },
+      prospec:  { t: 'Prospec\u00e7\u00f5es por consultor', s: S3, sub: 'Somente leads de fonte Prospec\u00e7\u00e3o, agrupados por consultor.' }
+    };
+    const sec = secoes[_rfAbaAtual] || secoes.leads;
     const win = window.open('', '_blank');
-    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Relat\u00f3rio do Funil \u2014 Ecotrans</title>
-      <style>body{font-family:Arial,sans-serif;padding:30px;color:#222;} h1{color:#2d5a3d;font-size:18px;margin:0 0 4px;} h2{color:#2d5a3d;font-size:15px;margin:26px 0 2px;border-bottom:2px solid #8bc34a;padding-bottom:4px;} table{width:100%;border-collapse:collapse;margin-top:8px;} th,td{text-align:left;} .sub{font-size:12.5px;color:#555;}</style></head><body>
-      <h1>Relat\u00f3rio do Funil \u2014 Ecotrans Ambiental</h1>
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${sec.t} \u2014 Ecotrans</title>
+      <style>body{font-family:Arial,sans-serif;padding:30px;color:#222;} h1{color:#2d5a3d;font-size:18px;margin:0 0 4px;} h2{color:#2d5a3d;font-size:15px;margin:20px 0 2px;border-bottom:2px solid #8bc34a;padding-bottom:4px;} table{width:100%;border-collapse:collapse;margin-top:8px;} th,td{text-align:left;} .sub{font-size:12.5px;color:#555;}</style></head><body>
+      <h1>${sec.t} \u2014 Ecotrans Ambiental</h1>
       <div class="sub">${cabTexto}</div>
-      <div class="sub">Gerado em ${new Date().toLocaleString('pt-BR')}</div>
-      <h2>1. Leads (${S1.n}) \u2014 filtrados por ${porData}</h2>${S1.html}
-      <h2>2. Entradas no per\u00edodo (${S2.n})</h2>
-      <div class="sub">Leads que entraram no sistema nessas datas, com o consultor que ficou respons\u00e1vel.</div>${S2.html}
-      <h2>3. Prospec\u00e7\u00f5es por consultor (${S3.n})</h2>
-      <div class="sub">Somente leads de fonte Prospec\u00e7\u00e3o, agrupados por consultor.</div>${S3.html}
+      <div class="sub">Total: ${sec.s.n} \u00b7 Gerado em ${new Date().toLocaleString('pt-BR')}</div>
+      <h2>${sec.t} (${sec.s.n})</h2>
+      <div class="sub">${sec.sub}</div>${sec.s.html}
       </body></html>`);
     win.document.close();
     setTimeout(()=>win.print(), 400);
