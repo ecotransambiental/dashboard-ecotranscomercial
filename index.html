@@ -393,7 +393,7 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.21</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.22</div>
       </div>
     </aside>
     <!-- VERSÃO DO DASHBOARD: v2026.08.20 — desempenho: canal exclusivo pra salvar, cache deixou de ser apagado inteiro a cada salvamento, CRM atualiza a linha na memória em vez de rebuscar a aba. ANTERIOR: v2026.08.19b — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
@@ -4032,7 +4032,10 @@ function achaLead(id, nome) {
 // Usa a ação 'salvar' que já existe no Apps Script (casa por CNPJ + CLIENTE).
 async function garantirIdLead(l) {
   if (!l || String(l['ID_LEAD']||'').trim()) return true;
-  const novo = 'L' + Date.now();
+  // prefixo LP = "lan\u00e7ado na planilha". O relat\u00f3rio usa o c\u00f3digo 'L'+milissegundos para
+  // saber quando o lead entrou; se este c\u00f3digo come\u00e7asse com L, o lead contaria como se
+  // tivesse entrado hoje \u2014 e ele na verdade j\u00e1 estava na planilha antes.
+  const novo = 'LP' + Date.now();
   try {
     const r = await apiPost({ acao:'salvar', aba:'CRM_Leads', token: sessaoToken, chaveExtra:'CLIENTE',
       dados:{ 'CNPJ': l['CNPJ']||'', 'CLIENTE': l['CLIENTE']||'', 'ID_LEAD': novo } });
@@ -8308,26 +8311,79 @@ async function enviarRespostaPreco(id) {
 // NOVO LEAD
 // ============================================================
 // ===== RELATÓRIO DO FUNIL (filtro consultor + data + situação; tela + PDF) =====
+// ============================================================
+// DATA DE ENTRADA DO LEAD — vale para o histórico inteiro
+// ------------------------------------------------------------
+// Nunca existiu uma coluna dizendo quando o lead foi cadastrado. Mas o código que o sistema
+// gera é 'L' + o instante da criação em milissegundos (ex.: L1788204268850). Ou seja: o dia
+// e a hora de entrada estavam guardados no próprio código o tempo todo — só faltava ler.
+// Por isso o relatório funciona para os leads antigos, não só para os novos.
+// Ordem de preferência: coluna própria (se um dia existir) > código do lead > data de contato.
+// Leads lançados direto na planilha recebem código 'LP...' (ver garantirIdLead) justamente
+// para não serem contados como se tivessem entrado no dia em que o código foi gerado.
+// ============================================================
+const _COLS_ENTRADA = ['DATA_CADASTRO','DATA_ENTRADA','DATA_CRIACAO','CRIADO_EM'];
+function dataEntradaLead(l) {
+  if (!l) return null;
+  for (let i = 0; i < _COLS_ENTRADA.length; i++) {
+    const v = l[_COLS_ENTRADA[i]];
+    if (v) { const d = parseDataReaj(v); if (d && !isNaN(d)) return { data: d, origem: 'coluna' }; }
+  }
+  const m = /^L(\d{13})$/.exec(String(l['ID_LEAD']||'').trim());
+  if (m) {
+    const d = new Date(Number(m[1]));
+    const ano = d.getFullYear();
+    if (!isNaN(d) && ano >= 2020 && ano <= new Date().getFullYear() + 1) return { data: d, origem: 'codigo' };
+  }
+  const dc = parseDataReaj(l['DATA_CONTATO']);
+  if (dc) return { data: dc, origem: 'contato' };
+  return null;
+}
+function _rotOrigemEntrada(o) {
+  if (o === 'coluna')  return '';
+  if (o === 'codigo')  return '';
+  if (o === 'contato') return ' <span title="Este lead n\u00e3o tem c\u00f3digo do sistema; usei a data de contato digitada no formul\u00e1rio." style="color:#8a6d00;font-size:10px;">aprox.</span>';
+  return '';
+}
+function _ehProspeccao(l) {
+  return String(l && l['FONTE'] || '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().indexOf('prospec') !== -1;
+}
+function _dataHoraBR(d, comHora) {
+  if (!d || isNaN(d)) return '\u2014';
+  const dd = String(d.getDate()).padStart(2,'0'), mm = String(d.getMonth()+1).padStart(2,'0');
+  const base = dd + '/' + mm + '/' + d.getFullYear();
+  if (!comHora) return base;
+  const hh = String(d.getHours()).padStart(2,'0'), mi = String(d.getMinutes()).padStart(2,'0');
+  return base + ' ' + hh + ':' + mi;
+}
+
 async function abrirRelatorioFunil() {
   await carregarLeads();
   const consultores = [...new Set((kanbanLeads||[]).map(l=>l['CONSULTOR']).filter(Boolean))].sort();
-  const situacoes = ['Indicação/Prospecção','Em Contato','Proposta Solicitada','Proposta Enviada','Fechado','Declinado','Cobertura'];
+  const situacoes = ['Indica\u00e7\u00e3o/Prospec\u00e7\u00e3o','Em Contato','Proposta Solicitada','Proposta Enviada','Fechado','Declinado','Cobertura'];
   const cont = document.getElementById('ficha-container');
   cont.innerHTML = `
     <div class="ficha-overlay" onclick="if(event.target===this)fecharFicha()">
-      <div class="ficha" style="width:680px;max-width:95vw;">
+      <div class="ficha" style="width:860px;max-width:96vw;">
         <div class="ficha-topo"><button class="fechar" onclick="fecharFicha()"><i class="ti ti-x"></i></button>
-          <div class="nome"><i class="ti ti-file-text"></i> Relatório do funil</div><div class="cnpj">Filtre por consultor, período e situação</div></div>
+          <div class="nome"><i class="ti ti-file-text"></i> Relat\u00f3rio do funil</div><div class="cnpj">Filtre por consultor, per\u00edodo e situa\u00e7\u00e3o</div></div>
         <div class="ficha-corpo">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px;">
             <div><label style="font-size:13px;color:var(--cinza-700);">Consultor</label>
               <select id="rf-consultor" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"><option value="">Todos</option>${consultores.map(c=>`<option>${c}</option>`).join('')}</select></div>
-            <div><label style="font-size:13px;color:var(--cinza-700);">Situação</label>
-              <select id="rf-situacao" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"><option value="">Todas</option>${situacoes.map(s=>`<option value="${s}">${s==='Indicação/Prospecção'?'Pendente':s}</option>`).join('')}</select></div>
+            <div><label style="font-size:13px;color:var(--cinza-700);">Situa\u00e7\u00e3o</label>
+              <select id="rf-situacao" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"><option value="">Todas</option>${situacoes.map(s=>`<option value="${s}">${s==='Indica\u00e7\u00e3o/Prospec\u00e7\u00e3o'?'Pendente':s}</option>`).join('')}</select></div>
+            <div><label style="font-size:13px;color:var(--cinza-700);">Contar a data por</label>
+              <select id="rf-base" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;">
+                <option value="entrada">Entrada no sistema</option>
+                <option value="contato">Data de contato</option>
+              </select></div>
             <div><label style="font-size:13px;color:var(--cinza-700);">De</label>
               <input type="date" id="rf-de" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
-            <div><label style="font-size:13px;color:var(--cinza-700);">Até</label>
+            <div><label style="font-size:13px;color:var(--cinza-700);">At\u00e9</label>
               <input type="date" id="rf-ate" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
+            <div style="display:flex;align-items:flex-end;">
+              <button onclick="rfHoje()" style="width:100%;padding:9px;border:1.5px solid var(--verde-medio);background:white;color:var(--verde-escuro);border-radius:8px;cursor:pointer;font-size:12.5px;"><i class="ti ti-calendar"></i> Hoje</button></div>
           </div>
           <div class="ficha-botoes" style="margin-bottom:12px;">
             <button class="ficha-btn-primario" onclick="gerarRelatorioFunil(false)"><i class="ti ti-search"></i> Gerar</button>
@@ -8339,52 +8395,164 @@ async function abrirRelatorioFunil() {
     </div>`;
 }
 
-function filtrarLeadsRelatorio() {
-  const cons = document.getElementById('rf-consultor').value;
-  const sit = document.getElementById('rf-situacao').value;
-  const de = document.getElementById('rf-de').value;
-  const ate = document.getElementById('rf-ate').value;
-  const dDe = de ? new Date(de+'T00:00:00') : null;
-  const dAte = ate ? new Date(ate+'T23:59:59') : null;
+function rfHoje() {
+  const h = new Date();
+  const iso = h.getFullYear() + '-' + String(h.getMonth()+1).padStart(2,'0') + '-' + String(h.getDate()).padStart(2,'0');
+  const a = document.getElementById('rf-de'), b = document.getElementById('rf-ate');
+  if (a) a.value = iso; if (b) b.value = iso;
+  gerarRelatorioFunil(false);
+}
+
+function _rfFiltros() {
+  const g = id => (document.getElementById(id)||{}).value || '';
+  const de = g('rf-de'), ate = g('rf-ate');
+  return {
+    cons: g('rf-consultor'), sit: g('rf-situacao'), base: g('rf-base') || 'entrada',
+    de: de, ate: ate,
+    dDe: de ? new Date(de+'T00:00:00') : null,
+    dAte: ate ? new Date(ate+'T23:59:59') : null
+  };
+}
+// aplica consultor + situa\u00e7\u00e3o (os filtros que valem para todas as abas do relat\u00f3rio)
+function _rfBase(f) {
   let lista = (kanbanLeads||[]).slice();
-  if (cons) lista = lista.filter(l => l['CONSULTOR']===cons);
-  if (sit) lista = lista.filter(l => (l['ETAPA']||'')===sit);
-  if (dDe || dAte) lista = lista.filter(l => { const d = parseDataReaj(l['DATA_CONTATO']); if(!d) return false; if(dDe&&d<dDe) return false; if(dAte&&d>dAte) return false; return true; });
-  // ordena por situação e cliente
+  if (f.cons) lista = lista.filter(l => l['CONSULTOR'] === f.cons);
+  if (f.sit)  lista = lista.filter(l => (l['ETAPA']||'') === f.sit);
+  return lista;
+}
+// leads cuja ENTRADA caiu no per\u00edodo (independente da data de contato digitada)
+function _rfEntradas(f) {
+  const lista = _rfBase(f).map(l => { const e = dataEntradaLead(l); return e ? { l: l, e: e } : null; }).filter(Boolean);
+  const dentro = lista.filter(x => {
+    if (f.dDe && x.e.data < f.dDe) return false;
+    if (f.dAte && x.e.data > f.dAte) return false;
+    return true;
+  });
+  dentro.sort((a,b) => b.e.data - a.e.data);
+  return dentro;
+}
+
+function filtrarLeadsRelatorio() {
+  const f = _rfFiltros();
+  let lista = _rfBase(f);
+  if (f.dDe || f.dAte) {
+    lista = lista.filter(l => {
+      const d = (f.base === 'entrada') ? ((dataEntradaLead(l)||{}).data || null) : parseDataReaj(l['DATA_CONTATO']);
+      if (!d) return false;
+      if (f.dDe && d < f.dDe) return false;
+      if (f.dAte && d > f.dAte) return false;
+      return true;
+    });
+  }
   lista.sort((a,b)=> String(a['ETAPA']||'').localeCompare(String(b['ETAPA']||'')) || String(a['CLIENTE']||'').localeCompare(String(b['CLIENTE']||'')));
   return lista;
 }
 
-function rotEtapa(e){ return e==='Indicação/Prospecção' ? 'Pendente' : (e||'—'); }
+function rotEtapa(e){ return e==='Indica\u00e7\u00e3o/Prospec\u00e7\u00e3o' ? 'Pendente' : (e||'\u2014'); }
+
+const _TD = 'padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;';
+const _TH = 'padding:7px 10px;text-align:left;font-size:11px;color:#2d5a3d;';
+function _rfTabela(cols, linhas, vazio) {
+  const cab = `<tr style="background:#f0f7ec;">${cols.map(c=>`<th style="${_TH}">${c}</th>`).join('')}</tr>`;
+  const corpo = linhas.length ? linhas.join('')
+    : `<tr><td colspan="${cols.length}" style="padding:18px;text-align:center;color:#999;font-size:12.5px;">${vazio}</td></tr>`;
+  return `<table style="width:100%;border-collapse:collapse;border:1px solid #eee;margin-top:8px;">${cab}${corpo}</table>`;
+}
+
+// ---- ABA 1: os leads (vis\u00e3o de sempre) ----
+function _rfSecaoLeads(f) {
+  const lista = filtrarLeadsRelatorio();
+  const linhas = lista.map(l => {
+    const e = dataEntradaLead(l);
+    return `<tr><td style="${_TD}">${l['CLIENTE']||'\u2014'}</td><td style="${_TD}">${rotEtapa(l['ETAPA'])}</td><td style="${_TD}">${l['CONSULTOR']||'\u2014'}</td><td style="${_TD}">${l['FONTE']||'\u2014'}</td><td style="${_TD}">${l['N_PROPOSTA']||'\u2014'}</td><td style="${_TD}">${e?_dataHoraBR(e.data,false)+_rotOrigemEntrada(e.origem):'\u2014'}</td><td style="${_TD}">${fmtDataBR(l['DATA_CONTATO'])||'\u2014'}</td><td style="${_TD}">${l['VALOR_R$']?fmtMoeda(l['VALOR_R$']):'\u2014'}</td></tr>`;
+  });
+  return { n: lista.length, html: _rfTabela(
+    ['Cliente','Situa\u00e7\u00e3o','Consultor','Fonte','N\u00ba proposta','Entrada','Data contato','Valor'],
+    linhas, 'Nenhum lead encontrado com esses filtros.') };
+}
+
+// ---- ABA 2: o que entrou no per\u00edodo (por data de entrada) ----
+function _rfSecaoEntradas(f) {
+  const ent = _rfEntradas(f);
+  const linhas = ent.map(x => `<tr><td style="${_TD}">${_dataHoraBR(x.e.data, x.e.origem==='codigo')}${_rotOrigemEntrada(x.e.origem)}</td><td style="${_TD}">${x.l['CLIENTE']||'\u2014'}</td><td style="${_TD}">${x.l['CONSULTOR']||'\u2014'}</td><td style="${_TD}">${x.l['FONTE']||'\u2014'}</td><td style="${_TD}">${rotEtapa(x.l['ETAPA'])}</td><td style="${_TD}">${x.l['CNPJ']||'\u2014'}</td></tr>`);
+  // quantos por consultor, para bater o total rapidinho
+  const porCons = {};
+  ent.forEach(x => { const c = x.l['CONSULTOR']||'(sem consultor)'; porCons[c] = (porCons[c]||0)+1; });
+  const resumo = Object.keys(porCons).sort().map(c => `<span style="display:inline-block;background:var(--verde-claro-bg);color:var(--verde-escuro);border-radius:20px;padding:3px 11px;font-size:12px;margin:0 6px 6px 0;">${c}: <b>${porCons[c]}</b></span>`).join('');
+  return { n: ent.length, html: (resumo?`<div style="margin:8px 0 2px;">${resumo}</div>`:'') + _rfTabela(
+    ['Entrada','Cliente','Consultor','Fonte','Situa\u00e7\u00e3o atual','CNPJ'],
+    linhas, 'Nenhum lead entrou no sistema nesse per\u00edodo.') };
+}
+
+// ---- ABA 3: s\u00f3 as prospec\u00e7\u00f5es, agrupadas por consultor ----
+function _rfSecaoProspeccoes(f) {
+  const ent = _rfEntradas(f).filter(x => _ehProspeccao(x.l));
+  const grupos = {};
+  ent.forEach(x => { const c = x.l['CONSULTOR']||'(sem consultor)'; (grupos[c] = grupos[c] || []).push(x); });
+  const nomes = Object.keys(grupos).sort((a,b) => grupos[b].length - grupos[a].length || a.localeCompare(b));
+  if (!ent.length) {
+    return { n: 0, html: `<div style="padding:18px;text-align:center;color:#999;font-size:12.5px;border:1px solid #eee;margin-top:8px;">Nenhuma prospec\u00e7\u00e3o cadastrada nesse per\u00edodo.</div>` };
+  }
+  const blocos = nomes.map(c => {
+    const linhas = grupos[c].map(x => `<tr><td style="${_TD}">${_dataHoraBR(x.e.data, x.e.origem==='codigo')}${_rotOrigemEntrada(x.e.origem)}</td><td style="${_TD}">${x.l['CLIENTE']||'\u2014'}</td><td style="${_TD}">${rotEtapa(x.l['ETAPA'])}</td><td style="${_TD}">${x.l['RESPONSAVEL']||'\u2014'}</td><td style="${_TD}">${x.l['TELEFONE']||'\u2014'}</td></tr>`);
+    return `<div style="margin-top:14px;"><div style="font-size:13px;font-weight:600;color:var(--verde-escuro);border-left:3px solid var(--verde-medio);padding-left:8px;">${c} \u2014 ${grupos[c].length} prospec\u00e7\u00e3o${grupos[c].length>1?'\u00f5es':''}</div>${_rfTabela(['Entrada','Cliente','Situa\u00e7\u00e3o atual','Contato','Telefone'], linhas, '')}</div>`;
+  }).join('');
+  return { n: ent.length, html: blocos };
+}
+
+function rfAba(qual) {
+  ['leads','entradas','prospec'].forEach(k => {
+    const pane = document.getElementById('rf-pane-'+k), bt = document.getElementById('rf-bt-'+k);
+    if (pane) pane.style.display = (k===qual) ? 'block' : 'none';
+    if (bt) {
+      bt.style.background = (k===qual) ? 'var(--verde-medio)' : 'white';
+      bt.style.color      = (k===qual) ? 'white' : 'var(--verde-escuro)';
+    }
+  });
+}
 
 function gerarRelatorioFunil(paraPdf) {
-  const lista = filtrarLeadsRelatorio();
-  const cons = document.getElementById('rf-consultor').value || 'Todos';
-  const sit = document.getElementById('rf-situacao').value;
-  const de = document.getElementById('rf-de').value, ate = document.getElementById('rf-ate').value;
-  const periodo = (de||ate) ? `${de?fmtDataBR(de):'início'} a ${ate?fmtDataBR(ate):'hoje'}` : 'todo o período';
-  const linhasHtml = lista.length
-    ? lista.map(l=>`<tr><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${l['CLIENTE']||'—'}</td><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${rotEtapa(l['ETAPA'])}</td><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${l['CONSULTOR']||'—'}</td><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${l['FONTE']||'—'}</td><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${l['N_PROPOSTA']||'—'}</td><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${fmtDataBR(l['DATA_CONTATO'])}</td><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${l['VALOR_R$']?fmtMoeda(l['VALOR_R$']):'—'}</td></tr>`).join('')
-    : '<tr><td colspan="7" style="padding:18px;text-align:center;color:#999;">Nenhum lead encontrado com esses filtros.</td></tr>';
-  const cabecalho = `<tr style="background:#f0f7ec;"><th style="padding:7px 10px;text-align:left;font-size:11px;color:#2d5a3d;">Cliente</th><th style="padding:7px 10px;text-align:left;font-size:11px;color:#2d5a3d;">Situação</th><th style="padding:7px 10px;text-align:left;font-size:11px;color:#2d5a3d;">Consultor</th><th style="padding:7px 10px;text-align:left;font-size:11px;color:#2d5a3d;">Fonte</th><th style="padding:7px 10px;text-align:left;font-size:11px;color:#2d5a3d;">Nº proposta</th><th style="padding:7px 10px;text-align:left;font-size:11px;color:#2d5a3d;">Data contato</th><th style="padding:7px 10px;text-align:left;font-size:11px;color:#2d5a3d;">Valor</th></tr>`;
-  const conteudo = `
-    <div style="margin-bottom:10px;font-size:13px;color:var(--cinza-600);"><b>${lista.length}</b> leads · Consultor: ${cons} · Situação: ${sit?rotEtapa(sit):'Todas'} · Período: ${periodo}</div>
-    <table style="width:100%;border-collapse:collapse;border:1px solid #eee;">${cabecalho}${linhasHtml}</table>`;
+  const f = _rfFiltros();
+  const cons = f.cons || 'Todos';
+  const periodo = (f.de||f.ate) ? `${f.de?fmtDataBR(f.de):'in\u00edcio'} a ${f.ate?fmtDataBR(f.ate):'hoje'}` : 'todo o per\u00edodo';
+  const porData = (f.base === 'entrada') ? 'entrada no sistema' : 'data de contato';
+  const S1 = _rfSecaoLeads(f), S2 = _rfSecaoEntradas(f), S3 = _rfSecaoProspeccoes(f);
+  const cabTexto = `Consultor: ${cons} \u00b7 Situa\u00e7\u00e3o: ${f.sit?rotEtapa(f.sit):'Todas'} \u00b7 Per\u00edodo: ${periodo}`;
 
   if (paraPdf) {
     const win = window.open('', '_blank');
-    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Relatório do Funil — Ecotrans</title>
-      <style>body{font-family:Arial,sans-serif;padding:30px;color:#222;} h1{color:#2d5a3d;font-size:18px;} table{width:100%;border-collapse:collapse;margin-top:10px;} th,td{text-align:left;}</style></head><body>
-      <h1>Relatório do Funil — Ecotrans Ambiental</h1>
-      <div style="font-size:13px;color:#555;margin-bottom:4px;">Consultor: ${cons} · Situação: ${sit?rotEtapa(sit):'Todas'} · Período: ${periodo}</div>
-      <div style="font-size:13px;color:#555;">Total: ${lista.length} leads · Gerado em ${new Date().toLocaleString('pt-BR')}</div>
-      <table style="border-collapse:collapse;border:1px solid #eee;">${cabecalho}${linhasHtml}</table>
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Relat\u00f3rio do Funil \u2014 Ecotrans</title>
+      <style>body{font-family:Arial,sans-serif;padding:30px;color:#222;} h1{color:#2d5a3d;font-size:18px;margin:0 0 4px;} h2{color:#2d5a3d;font-size:15px;margin:26px 0 2px;border-bottom:2px solid #8bc34a;padding-bottom:4px;} table{width:100%;border-collapse:collapse;margin-top:8px;} th,td{text-align:left;} .sub{font-size:12.5px;color:#555;}</style></head><body>
+      <h1>Relat\u00f3rio do Funil \u2014 Ecotrans Ambiental</h1>
+      <div class="sub">${cabTexto}</div>
+      <div class="sub">Gerado em ${new Date().toLocaleString('pt-BR')}</div>
+      <h2>1. Leads (${S1.n}) \u2014 filtrados por ${porData}</h2>${S1.html}
+      <h2>2. Entradas no per\u00edodo (${S2.n})</h2>
+      <div class="sub">Leads que entraram no sistema nessas datas, com o consultor que ficou respons\u00e1vel.</div>${S2.html}
+      <h2>3. Prospec\u00e7\u00f5es por consultor (${S3.n})</h2>
+      <div class="sub">Somente leads de fonte Prospec\u00e7\u00e3o, agrupados por consultor.</div>${S3.html}
       </body></html>`);
     win.document.close();
     setTimeout(()=>win.print(), 400);
-  } else {
-    document.getElementById('rf-resultado').innerHTML = conteudo;
+    return;
   }
+
+  const btEstilo = 'padding:8px 14px;border:1.5px solid var(--verde-medio);border-radius:8px;cursor:pointer;font-size:12.5px;font-weight:600;';
+  document.getElementById('rf-resultado').innerHTML = `
+    <div style="font-size:12.5px;color:var(--cinza-600);margin-bottom:10px;">${cabTexto}</div>
+    <div style="display:flex;gap:7px;margin-bottom:6px;flex-wrap:wrap;">
+      <button id="rf-bt-leads"   style="${btEstilo}" onclick="rfAba('leads')">Leads (${S1.n})</button>
+      <button id="rf-bt-entradas" style="${btEstilo}" onclick="rfAba('entradas')">Entradas no per\u00edodo (${S2.n})</button>
+      <button id="rf-bt-prospec" style="${btEstilo}" onclick="rfAba('prospec')">Prospec\u00e7\u00f5es por consultor (${S3.n})</button>
+    </div>
+    <div id="rf-pane-leads">${S1.html}</div>
+    <div id="rf-pane-entradas" style="display:none;">
+      <div style="font-size:12px;color:var(--cinza-600);margin-top:8px;">Leads que <b>entraram no sistema</b> nessas datas \u2014 inclusive os que a Danielly cadastrou e depois passou para o consultor: aqui aparece quem ficou respons\u00e1vel no fim.</div>
+      ${S2.html}</div>
+    <div id="rf-pane-prospec" style="display:none;">
+      <div style="font-size:12px;color:var(--cinza-600);margin-top:8px;">Somente leads de fonte <b>Prospec\u00e7\u00e3o</b>, agrupados por consultor.</div>
+      ${S3.html}</div>`;
+  rfAba('leads');
 }
 
 // imprime o "Questionário - Proposta de Serviço" (modelo F-1.00 COMERCIAL) preenchido com os dados do lead
