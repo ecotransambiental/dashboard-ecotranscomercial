@@ -393,7 +393,7 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.23</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.24</div>
       </div>
     </aside>
     <!-- VERSÃO DO DASHBOARD: v2026.08.20 — desempenho: canal exclusivo pra salvar, cache deixou de ser apagado inteiro a cada salvamento, CRM atualiza a linha na memória em vez de rebuscar a aba. ANTERIOR: v2026.08.19b — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
@@ -1644,7 +1644,7 @@ function cardsClientes(lista) {
     if (fatMeses) { const ms = Object.keys(fatMeses); const ult = ms[ms.length-1]; fatLabel = 'Faturamento '+ult; fatVal = fatMeses[ult]; }
     else if (cacheFaturamento && cacheFaturamento[cnpj]!=null) { fatVal = cacheFaturamento[cnpj]; }
     const unidade = c['UNIDADE'] || '';
-    html += `<div class="card-cli ativo-status" onclick="abrirFicha('${cnpj.replace(/'/g,'')}','${String(c['CLIENTE']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')">
+    html += `<div class="card-cli ativo-status" onclick="abrirFicha('${cnpj.replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${String(c['CLIENTE']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')">
       <div class="card-cli-topo">
         <div class="card-cli-avatar">${iniciais(c['CLIENTE'])}</div>
         <div style="min-width:0;">
@@ -1671,7 +1671,7 @@ function listaClientes(lista) {
   lista.slice(0, 300).forEach(c => {
     const cnpj = String(c['CNPJ']||'');
     const nome = String(c['CLIENTE']||'').replace(/'/g,"\\'");
-    html += `<div class="lista-cli-item" onclick="abrirFicha('${cnpj.replace(/'/g,'')}','${nome}')">
+    html += `<div class="lista-cli-item" onclick="abrirFicha('${cnpj.replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${nome}')">
       <div><b style="color:var(--cinza-900);">${c['CLIENTE']||'—'}</b><br><span style="color:var(--cinza-500);font-size:12px;">${cnpj||'sem CNPJ'}</span></div>
       <span style="color:var(--cinza-600);">${c['CONSULTOR']||'—'}</span>
       <span style="color:var(--verde-escuro);font-weight:600;">${fmtMoeda(cacheFaturamento ? cacheFaturamento[cnpj] : '')}</span>
@@ -1936,12 +1936,12 @@ async function abrirFicha(cnpj, nome) {
               <button onclick="salvarCnpjFicha('${(c['CLIENTE']||'').replace(/'/g,"\\'")}')" style="margin-left:6px;padding:5px 10px;border:none;background:var(--verde-medio);color:white;border-radius:6px;cursor:pointer;font-size:12px;"><i class="ti ti-check"></i></button>` : (c['CNPJ']||'—')}
               <div id="ficha-cnpj-msg" style="font-size:11px;margin-top:4px;"></div>
             </td></tr>
-            <tr><td><i class="ti ti-user" style="vertical-align:-2px;margin-right:6px;"></i>Contato</td><td>${c['CONTATO']||'—'} <button onclick="abrirFormContato('${cnpj.replace(/'/g,'')}','${(c['CLIENTE']||'').replace(/'/g,'')}')" style="margin-left:6px;padding:3px 8px;border:1px solid var(--cinza-300);background:white;border-radius:6px;cursor:pointer;font-size:11px;color:var(--verde-escuro);"><i class="ti ti-plus"></i> contato</button></td></tr>
+            <tr><td><i class="ti ti-user" style="vertical-align:-2px;margin-right:6px;"></i>Contato</td><td>${c['CONTATO']||'—'} <button onclick="abrirFormContato('${cnpj.replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${(c['CLIENTE']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')" style="margin-left:6px;padding:3px 8px;border:1px solid var(--cinza-300);background:white;border-radius:6px;cursor:pointer;font-size:11px;color:var(--verde-escuro);"><i class="ti ti-plus"></i> contato</button></td></tr>
             <tr><td><i class="ti ti-mail" style="vertical-align:-2px;margin-right:6px;"></i>E-mail</td><td>${c['EMAIL']||'—'}</td></tr>
             <tr><td><i class="ti ti-phone" style="vertical-align:-2px;margin-right:6px;"></i>Telefone</td><td>${c['TELEFONE']||'—'}</td></tr>
             <tr><td><i class="ti ti-map-pin" style="vertical-align:-2px;margin-right:6px;"></i>Endereço</td><td>
               ${podeEditarConsultorLead() ? `<input type="text" id="ficha-endereco" value="${endCli.replace(/"/g,'&quot;')}" placeholder="—" style="padding:5px 8px;border:1.5px solid var(--cinza-300);border-radius:6px;font-size:13px;font-family:var(--fonte-corpo);width:60%;">
-              <button onclick="salvarEnderecoFicha('${cnpj.replace(/'/g,'')}')" style="margin-left:6px;padding:5px 10px;border:none;background:var(--verde-medio);color:white;border-radius:6px;cursor:pointer;font-size:12px;"><i class="ti ti-check"></i></button>` : (endCli||'—')}
+              <button onclick="salvarEnderecoFicha('${cnpj.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')" style="margin-left:6px;padding:5px 10px;border:none;background:var(--verde-medio);color:white;border-radius:6px;cursor:pointer;font-size:12px;"><i class="ti ti-check"></i></button>` : (endCli||'—')}
             </td></tr>
             <tr><td><i class="ti ti-map-2" style="vertical-align:-2px;margin-right:6px;"></i>CEP</td><td>${cepCli||'—'}</td></tr>
             <tr><td><i class="ti ti-calendar-repeat" style="vertical-align:-2px;margin-right:6px;"></i>Frequência de coleta</td><td>${c['FREQUENCIA_COLETA']||c['FREQUENCIA']||c['FREQUEN']||'—'}</td></tr>
@@ -1950,25 +1950,25 @@ async function abrirFicha(cnpj, nome) {
               <select id="ficha-consultor" style="padding:5px 8px;border:1.5px solid var(--cinza-300);border-radius:6px;font-size:13px;font-family:var(--fonte-corpo);">
                 ${optionsConsultor(c['CONSULTOR']||'— a definir', true)}
               </select>
-              <button onclick="salvarConsultorFicha('${cnpj.replace(/'/g,'')}')" style="margin-left:6px;padding:5px 10px;border:none;background:var(--verde-medio);color:white;border-radius:6px;cursor:pointer;font-size:12px;"><i class="ti ti-check"></i></button>
+              <button onclick="salvarConsultorFicha('${cnpj.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')" style="margin-left:6px;padding:5px 10px;border:none;background:var(--verde-medio);color:white;border-radius:6px;cursor:pointer;font-size:12px;"><i class="ti ti-check"></i></button>
             </td></tr>
             <tr><td><i class="ti ti-building" style="vertical-align:-2px;margin-right:6px;"></i>Assessoria</td><td>${c['ASSESSORIA']||'—'}</td></tr>
             <tr><td><i class="ti ti-building-community" style="vertical-align:-2px;margin-right:6px;"></i>Grupo / Unidade</td><td>
               ${podeEditarConsultorLead() ? `<input type="text" id="ficha-grupo" list="ficha-grupo-list" value="${(c['GRUPO']||'').replace(/"/g,'&quot;')}" placeholder="grupo (ex: La Braciera)" style="padding:5px 8px;border:1.5px solid var(--cinza-300);border-radius:6px;font-size:13px;width:33%;font-family:var(--fonte-corpo);">
               <datalist id="ficha-grupo-list">${_gruposList().map(g=>`<option value="${String(g).replace(/"/g,'&quot;')}">`).join('')}</datalist>
               <input type="text" id="ficha-unidade" value="${(c['UNIDADE']||'').replace(/"/g,'&quot;')}" placeholder="unidade (ex: Shopping X)" style="padding:5px 8px;border:1.5px solid var(--cinza-300);border-radius:6px;font-size:13px;width:33%;margin-left:6px;font-family:var(--fonte-corpo);">
-              <button onclick="salvarGrupoUnidade('${cnpj.replace(/'/g,'')}','${(c['CLIENTE']||'').replace(/'/g,"\\'")}')" style="margin-left:6px;padding:5px 10px;border:none;background:var(--verde-medio);color:white;border-radius:6px;cursor:pointer;font-size:12px;"><i class="ti ti-check"></i></button>` : `${c['GRUPO']||'—'}${c['UNIDADE']?(' · '+c['UNIDADE']):''}`}
+              <button onclick="salvarGrupoUnidade('${cnpj.replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${(c['CLIENTE']||'').replace(/'/g,"\\'")}')" style="margin-left:6px;padding:5px 10px;border:none;background:var(--verde-medio);color:white;border-radius:6px;cursor:pointer;font-size:12px;"><i class="ti ti-check"></i></button>` : `${c['GRUPO']||'—'}${c['UNIDADE']?(' · '+c['UNIDADE']):''}`}
             </td></tr>
           </table>
           <div id="ficha-origem-lead" style="margin-top:12px;"></div>
           <div class="ficha-botoes">
-            <button class="ficha-btn-primario" onclick="abrirFormAtividade('${cnpj.replace(/'/g,'')}','${(c['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-plus"></i> Registrar atividade</button>
-            <button class="ficha-btn-secundario" style="color:#6B5B95;border-color:#6B5B95;" onclick="abrirFollowUp('null','${(c['CLIENTE']||'').replace(/'/g,'')}','${cnpj.replace(/'/g,'')}')"><i class="ti ti-calendar-clock"></i> Agendar follow-up</button>
-            <button class="ficha-btn-secundario" onclick="imprimirFichaCliente('${cnpj.replace(/'/g,'')}')"><i class="ti ti-printer"></i> Imprimir ficha</button>
-            ${c['TIPO']==='Eventual'?`<button class="ficha-btn-secundario" style="color:var(--verde-escuro);border-color:var(--verde-medio);" onclick="virarContrato('${cnpj.replace(/'/g,'')}','${(c['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-file-text"></i> Mudar para Contrato</button>`:''}
-            <button class="ficha-btn-secundario" onclick="abrirFormInadimplencia('${cnpj.replace(/'/g,'')}')"><i class="ti ti-alert-triangle"></i> Marcar inadimplente</button>
-            <button class="ficha-btn-secundario" style="color:var(--vermelho);border-color:var(--vermelho);" onclick="abrirFormCancelar('${cnpj.replace(/'/g,'')}','${(c['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-circle-x"></i> Cancelar cliente</button>
-            ${podeExcluirCliente()?`<button class="ficha-btn-secundario" style="color:#8a1c1c;border-color:#8a1c1c;" onclick="excluirCliente('${cnpj.replace(/'/g,'')}','${(c['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-trash"></i> Excluir (duplicado)</button>`:''}
+            <button class="ficha-btn-primario" onclick="abrirFormAtividade('${cnpj.replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${(c['CLIENTE']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-plus"></i> Registrar atividade</button>
+            <button class="ficha-btn-secundario" style="color:#6B5B95;border-color:#6B5B95;" onclick="abrirFollowUp('null','${(c['CLIENTE']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${cnpj.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-calendar-clock"></i> Agendar follow-up</button>
+            <button class="ficha-btn-secundario" onclick="imprimirFichaCliente('${cnpj.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-printer"></i> Imprimir ficha</button>
+            ${c['TIPO']==='Eventual'?`<button class="ficha-btn-secundario" style="color:var(--verde-escuro);border-color:var(--verde-medio);" onclick="virarContrato('${cnpj.replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${(c['CLIENTE']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-file-text"></i> Mudar para Contrato</button>`:''}
+            <button class="ficha-btn-secundario" onclick="abrirFormInadimplencia('${cnpj.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-alert-triangle"></i> Marcar inadimplente</button>
+            <button class="ficha-btn-secundario" style="color:var(--vermelho);border-color:var(--vermelho);" onclick="abrirFormCancelar('${cnpj.replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${(c['CLIENTE']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-circle-x"></i> Cancelar cliente</button>
+            ${podeExcluirCliente()?`<button class="ficha-btn-secundario" style="color:#8a1c1c;border-color:#8a1c1c;" onclick="excluirCliente('${cnpj.replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${(c['CLIENTE']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-trash"></i> Excluir (duplicado)</button>`:''}
           </div>
         </div>
       </div>
@@ -2059,7 +2059,7 @@ async function renderAbaAditivos(corpo) {
   const aditNovos = (ra.ok?ra.linhas:[]).filter(a => casaFicha(a['CNPJ'], a['CLIENTE']));
   const podeSolicitar = true; // qualquer consultor pode solicitar
   const btns = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
-    <button class="ficha-btn-primario" onclick="abrirFormAditivo('${alvo}','${(fichaClienteAtual['CLIENTE']||'').replace(/'/g,'')}',false)"><i class="ti ti-plus"></i> Adicionar aditivo</button>
+    <button class="ficha-btn-primario" onclick="abrirFormAditivo('${alvo}','${(fichaClienteAtual['CLIENTE']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}',false)"><i class="ti ti-plus"></i> Adicionar aditivo</button>
     <button class="ficha-btn-secundario" style="color:#6B5B95;border-color:#6B5B95;" onclick="abrirSolicitarAditivoNovo('${(fichaClienteAtual['CLIENTE']||'').replace(/'/g,"\\'")}')"><i class="ti ti-send"></i> Solicitar aditivo</button>
   </div>`;
   let html = btns;
@@ -2134,7 +2134,7 @@ function abrirFormAditivo(cnpj, cliente, ehSolicitacao) {
             <div id="ad-serv-ed"></div>
           </div>`}
           <div class="ficha-botoes">
-            <button class="ficha-btn-primario" onclick="salvarAditivo('${cnpj}','${cliente.replace(/'/g,'')}',${ehSolicitacao})"><i class="ti ti-check"></i> ${ehSolicitacao?'Enviar solicitação':'Salvar aditivo'}</button>
+            <button class="ficha-btn-primario" onclick="salvarAditivo('${cnpj}','${cliente.replace(/'/g,"\\'").replace(/"/g,'&quot;')}',${ehSolicitacao})"><i class="ti ti-check"></i> ${ehSolicitacao?'Enviar solicitação':'Salvar aditivo'}</button>
             <button class="ficha-btn-secundario" onclick="document.getElementById('form-adit-overlay').remove()">Cancelar</button>
           </div>
           <div id="ad-msg"></div>
@@ -2219,7 +2219,7 @@ function abrirFormSolicitarContrato(cnpj, cliente) {
           <div style="margin-bottom:14px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Observação</label>
             <textarea id="sc-obs" rows="2" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;font-family:var(--fonte-corpo);"></textarea></div>
           <div class="ficha-botoes">
-            <button class="ficha-btn-primario" onclick="salvarSolicitacaoContrato('${cnpj}','${cliente.replace(/'/g,'')}')"><i class="ti ti-send"></i> Enviar solicitação</button>
+            <button class="ficha-btn-primario" onclick="salvarSolicitacaoContrato('${cnpj}','${cliente.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-send"></i> Enviar solicitação</button>
             <button class="ficha-btn-secundario" onclick="document.getElementById('form-solctr-overlay').remove()">Cancelar</button>
           </div>
           <div id="sc-msg"></div>
@@ -2266,7 +2266,7 @@ function abrirFormContato(cnpj, cliente) {
           <div style="margin-bottom:14px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">E-mail</label>
             <input type="text" id="ct-email" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
           <div class="ficha-botoes">
-            <button class="ficha-btn-primario" onclick="salvarContato('${cnpj}','${cliente.replace(/'/g,'')}')"><i class="ti ti-check"></i> Salvar contato</button>
+            <button class="ficha-btn-primario" onclick="salvarContato('${cnpj}','${cliente.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-check"></i> Salvar contato</button>
             <button class="ficha-btn-secundario" onclick="document.getElementById('form-contato-overlay').remove()">Cancelar</button>
           </div>
           <div id="ct-msg"></div>
@@ -2563,7 +2563,7 @@ function abrirFollowUp(idLead, cliente, cnpj) {
           <div style="margin-bottom:14px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Anotação (opcional)</label>
             <textarea id="fu-obs" rows="2" placeholder="o que lembrar nesse follow-up" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;font-family:var(--fonte-corpo);"></textarea></div>
           <div class="ficha-botoes">
-            <button class="ficha-btn-primario" onclick="confirmarFollowUp('${idLead}','${cliente.replace(/'/g,'')}','${cnpj}')"><i class="ti ti-check"></i> Agendar</button>
+            <button class="ficha-btn-primario" onclick="confirmarFollowUp('${idLead}','${cliente.replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${cnpj}')"><i class="ti ti-check"></i> Agendar</button>
             <button class="ficha-btn-secundario" onclick="document.getElementById('modal-fu-overlay').remove()">Cancelar</button>
           </div>
           <div id="fu-msg"></div>
@@ -3104,7 +3104,7 @@ async function renderAbaServicos(corpo){
     const preEdit={ id:s['ID'], equipamento:s['EQUIPAMENTO'], residuo:s['RESIDUO'], frequencia:s['FREQUENCIA'], valor:s['VALOR'], valorDestinacao:s['VALOR_DESTINACAO'], destinacao:s['VALOR_DESTINACAO'], modeloPreco:s['MODELO_PRECO'], qtdFechado:s['QTD_FECHADO'], minimaQtd:s['MINIMA_QTD'], minimaUnidade:s['MINIMA_UNIDADE'], minimaPeriodo:s['MINIMA_PERIODO'], minimaObs:s['MINIMA_OBS'],
       unidDestinacao:s['UNID_DESTINACAO'], minimaDestQtd:s['MINIMA_DEST_QTD'], minimaDestUnidade:s['MINIMA_DEST_UNIDADE'], minimaDestPeriodo:s['MINIMA_DEST_PERIODO'], dataInicio:s['DATA_INICIO'], indice:s['INDICE'], numProposta:s['NUM_PROPOSTA'], tempoLocacao:s['TEMPO_LOCACAO'], vaiReajuste:rj };
     const preJsonE=JSON.stringify(preEdit).replace(/'/g,"&#39;").replace(/"/g,'&quot;');
-    const btnExcluir = s['ID'] ? `<button class="ficha-btn-secundario" title="Excluir serviço" style="padding:4px 8px;font-size:11px;border-color:var(--vermelho);color:var(--vermelho);margin-left:4px;" onclick="excluirServicoFront('${String(s['ID']).replace(/'/g,'')}')"><i class="ti ti-trash"></i></button>` : '';
+    const btnExcluir = s['ID'] ? `<button class="ficha-btn-secundario" title="Excluir serviço" style="padding:4px 8px;font-size:11px;border-color:var(--vermelho);color:var(--vermelho);margin-left:4px;" onclick="excluirServicoFront('${String(s['ID']).replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-trash"></i></button>` : '';
     html+=`<tr><td><b>${s['EQUIPAMENTO']||'—'}</b>${extra}</td><td>${s['RESIDUO']||'—'}</td><td>${s['FREQUENCIA']||'—'}</td><td>${vfmt(s['VALOR'])}</td><td>${(parseMoedaReaj(s['VALOR_DESTINACAO'])||0)>0 ? vfmt(s['VALOR_DESTINACAO'])+`<span style="font-size:10.5px;color:var(--cinza-500);"> /${s['UNID_DESTINACAO']==='kg'?'kg':'ton'}</span>` : '—'}</td><td>${s['DATA_INICIO']?fmtDataBR(s['DATA_INICIO']):'—'}</td><td>${badge}</td><td style="white-space:nowrap;"><button class="ficha-btn-secundario" style="padding:4px 9px;font-size:11px;" onclick='abrirFormServico("${alvo}","${(cliente||'').replace(/"/g,'&quot;')}", JSON.parse(this.getAttribute("data-pre")))' data-pre="${preJsonE}"><i class="ti ti-edit"></i> editar</button>${btnExcluir}</td></tr>`;
   });
   derivados.forEach(d=>{
@@ -3300,7 +3300,7 @@ async function renderAbaContratos(corpo) {
   const lista = (r.ok?r.linhas:[]).filter(c => casaFicha(c['CNPJ'], c['CLIENTE']));
   const ehGestao = ['admin','diretor'].includes(usuarioAtual && usuarioAtual.perfil);
   const btnAdd = ehGestao
-    ? `<button class="ficha-btn-primario" style="margin-bottom:14px;" onclick="abrirFormContrato('${(fichaClienteAtual['CLIENTE']||'').replace(/'/g,'')}','${cnpjLimpo(fichaClienteAtual['CNPJ'])}')"><i class="ti ti-plus"></i> Adicionar contrato</button>`
+    ? `<button class="ficha-btn-primario" style="margin-bottom:14px;" onclick="abrirFormContrato('${(fichaClienteAtual['CLIENTE']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${cnpjLimpo(fichaClienteAtual['CNPJ'])}')"><i class="ti ti-plus"></i> Adicionar contrato</button>`
     : `<button class="ficha-btn-primario" style="margin-bottom:14px;" onclick="abrirSolicitarContratoNovo('${(fichaClienteAtual['CLIENTE']||'').replace(/'/g,"\\'")}')"><i class="ti ti-send"></i> Solicitar contrato</button>`;
   if (!lista.length) { corpo.innerHTML = btnAdd + `<div style="text-align:center;color:var(--cinza-500);padding:24px;font-size:13px;">Nenhum contrato para este cliente.</div>`; return; }
   let html = btnAdd;
@@ -3758,13 +3758,13 @@ async function renderAbaContatos(corpo) {
   const nome = fichaClienteAtual['CLIENTE']||'';
   const r = await buscarDados('Contatos');
   const contatos = (r.ok?r.linhas:[]).filter(x=>cnpjLimpo(x['CNPJ'])===cnpj);
-  let html = `<div style="margin-bottom:12px;"><button class="ficha-btn-primario" style="padding:8px 14px;border:none;border-radius:8px;cursor:pointer;font-size:13px;" onclick="abrirFormContato('${cnpj}','${String(nome).replace(/'/g,'')}')"><i class="ti ti-plus"></i> Adicionar contato</button></div>`;
+  let html = `<div style="margin-bottom:12px;"><button class="ficha-btn-primario" style="padding:8px 14px;border:none;border-radius:8px;cursor:pointer;font-size:13px;" onclick="abrirFormContato('${cnpj}','${String(nome).replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-plus"></i> Adicionar contato</button></div>`;
   if (!contatos.length) {
     html += `<div style="text-align:center;color:var(--cinza-500);padding:24px;font-size:13px;">Nenhum contato cadastrado ainda.</div>`;
   } else {
     html += contatos.map(ct=>`
       <div style="background:white;border:1px solid var(--cinza-200);border-radius:10px;padding:12px;margin-bottom:8px;position:relative;">
-        <button onclick="excluirContato('${String(ct['ID']||'').replace(/'/g,'')}','${String(ct['NOME']||'').replace(/'/g,"")}','${cnpj}','${String(nome).replace(/'/g,'')}')" title="Excluir contato" style="position:absolute;top:10px;right:10px;background:none;border:none;color:var(--vermelho);cursor:pointer;font-size:16px;"><i class="ti ti-trash"></i></button>
+        <button onclick="excluirContato('${String(ct['ID']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${String(ct['NOME']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${cnpj}','${String(nome).replace(/'/g,"\\'").replace(/"/g,'&quot;')}')" title="Excluir contato" style="position:absolute;top:10px;right:10px;background:none;border:none;color:var(--vermelho);cursor:pointer;font-size:16px;"><i class="ti ti-trash"></i></button>
         <div style="font-size:14px;font-weight:600;color:var(--cinza-800);padding-right:24px;">${ct['NOME']||'—'}${ct['CARGO']?`<span style="font-size:12px;font-weight:400;color:var(--cinza-500);"> · ${ct['CARGO']}</span>`:''}</div>
         <div style="font-size:12.5px;color:var(--cinza-600);margin-top:4px;">
           ${ct['TELEFONE']?`<i class="ti ti-phone" style="font-size:13px;vertical-align:-1px;"></i> ${ct['TELEFONE']}`:''}
@@ -3791,7 +3791,7 @@ async function renderHistoricoCliente(corpo) {
     return String(a['CLIENTE']||'').trim().toUpperCase()===nomeAlvo;
   }).sort((a,b)=>{ const da=parseDataReaj(a['DATA_REGISTRO'])||0, db=parseDataReaj(b['DATA_REGISTRO'])||0; return db-da; });
   const iconePorTipo = {'Visita técnica':'ti-map-pin','Ligação':'ti-phone','Tratativa':'ti-message','Ocorrência':'ti-alert-circle','E-mail':'ti-mail','Reunião':'ti-users','Proposta Revisada':'ti-file-pencil','Follow-up':'ti-calendar-clock'};
-  let html = `<div style="margin-bottom:12px;"><button class="ficha-btn-primario" style="padding:8px 14px;border:none;border-radius:8px;cursor:pointer;font-size:13px;" onclick="abrirFormAtividade('${cnpj.replace(/'/g,'')}','${(fichaClienteAtual['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-plus"></i> Registrar atividade</button></div>`;
+  let html = `<div style="margin-bottom:12px;"><button class="ficha-btn-primario" style="padding:8px 14px;border:none;border-radius:8px;cursor:pointer;font-size:13px;" onclick="abrirFormAtividade('${cnpj.replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${(fichaClienteAtual['CLIENTE']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-plus"></i> Registrar atividade</button></div>`;
   if (!ativs.length) { corpo.innerHTML = html + `<div style="text-align:center;color:var(--cinza-500);padding:24px;font-size:13px;">Nenhuma atividade registrada ainda.</div>`; return; }
   html += `<div style="position:relative;padding-left:8px;">`;
   ativs.forEach(a => {
@@ -3852,8 +3852,8 @@ function abrirFormAtividade(cnpj, cliente) {
             </div>
           </div>
           <div class="ficha-botoes">
-            <button class="ficha-btn-primario" onclick="salvarAtividade('${cnpj.replace(/'/g,'')}','${cliente.replace(/'/g,'')}', false)"><i class="ti ti-check"></i> Salvar</button>
-            <button class="ficha-btn-secundario" id="at-btn-email" style="display:none;color:var(--verde-escuro);border-color:var(--verde-medio);" onclick="salvarAtividade('${cnpj.replace(/'/g,'')}','${cliente.replace(/'/g,'')}', true)"><i class="ti ti-mail"></i> Salvar e avisar cliente</button>
+            <button class="ficha-btn-primario" onclick="salvarAtividade('${cnpj.replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${cliente.replace(/'/g,"\\'").replace(/"/g,'&quot;')}', false)"><i class="ti ti-check"></i> Salvar</button>
+            <button class="ficha-btn-secundario" id="at-btn-email" style="display:none;color:var(--verde-escuro);border-color:var(--verde-medio);" onclick="salvarAtividade('${cnpj.replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${cliente.replace(/'/g,"\\'").replace(/"/g,'&quot;')}', true)"><i class="ti ti-mail"></i> Salvar e avisar cliente</button>
             <button class="ficha-btn-secundario" onclick="document.getElementById('form-ativ-overlay').remove()">Cancelar</button>
           </div>
           <div id="at-msg"></div>
@@ -3955,7 +3955,7 @@ async function abrirBuscaGlobal() {
     ).slice(0, 20);
     if (!achados.length) { res.innerHTML = '<div style="color:var(--cinza-500);font-size:13px;padding:8px;">Nenhum cliente encontrado.</div>'; return; }
     res.innerHTML = achados.map(c => `
-      <div onclick="abrirFicha('${String(c['CNPJ']).replace(/'/g,'')}')" style="padding:10px 12px;border-radius:8px;cursor:pointer;border-bottom:1px solid var(--cinza-100);" onmouseover="this.style.background='var(--verde-claro-bg)'" onmouseout="this.style.background=''">
+      <div onclick="abrirFicha('${String(c['CNPJ']).replace(/'/g,"\\'").replace(/"/g,'&quot;')}')" style="padding:10px 12px;border-radius:8px;cursor:pointer;border-bottom:1px solid var(--cinza-100);" onmouseover="this.style.background='var(--verde-claro-bg)'" onmouseout="this.style.background=''">
         <b style="font-size:13px;color:var(--cinza-900);">${c['CLIENTE']}</b><br>
         <span style="font-size:12px;color:var(--cinza-500);">${c['CNPJ']||''} · ${c['CONSULTOR']||'sem consultor'}</span>
       </div>`).join('');
@@ -4252,7 +4252,7 @@ function aplicarKanban() {
         : st === 'pendente'
         ? '<span style="display:inline-block;background:#d99a00;color:#3a2a00;font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:5px;vertical-align:1px;">PENDENTE</span>'
         : '';
-      html += `<div class="kanban-card${ehNovo?' card-novo':''}" draggable="true" ondragstart="pegarCard(event,'${String(l['ID_LEAD']||'').replace(/'/g,'')}')" onclick="abrirLead('${String(l['ID_LEAD']||'').replace(/'/g,'')}','${encodeURIComponent(l['CLIENTE']||'')}')" style="border-left-color:${col.cor};${ehNovo?'background:#FFFBEA;box-shadow:0 0 0 1.5px #F0C808;':temFU?'background:#F3F0FA;box-shadow:0 0 0 1.5px #6B5B95;':''}">
+      html += `<div class="kanban-card${ehNovo?' card-novo':''}" draggable="true" ondragstart="pegarCard(event,'${String(l['ID_LEAD']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')" onclick="abrirLead('${String(l['ID_LEAD']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${encodeURIComponent(l['CLIENTE']||'').replace(/'/g,'%27')}')" style="border-left-color:${col.cor};${ehNovo?'background:#FFFBEA;box-shadow:0 0 0 1.5px #F0C808;':temFU?'background:#F3F0FA;box-shadow:0 0 0 1.5px #6B5B95;':''}">
         <div class="cli">${ehNovo?'<span style="display:inline-block;background:#F0C808;color:#5a4a00;font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:5px;vertical-align:1px;">NOVO</span>':''}${tagSt}${temFU?'<span style="display:inline-block;background:#6B5B95;color:white;font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:5px;vertical-align:1px;">FOLLOW-UP</span>':''}${l['CLIENTE']||'—'}</div>
         <div class="meta">${l['CONSULTOR']||'—'}${l['FONTE']?' · '+l['FONTE']:''}</div>
         ${l['DATA_CONTATO']?`<div class="meta" style="margin-top:3px;"><i class="ti ti-calendar-plus" style="font-size:12px;vertical-align:-1px;"></i> Entrada: ${fmtDataBR(l['DATA_CONTATO'])}</div>`:''}
@@ -4261,7 +4261,7 @@ function aplicarKanban() {
         ${l['EMPRESA_COLETA_ATUAL']?`<div class="meta" style="margin-top:3px;"><i class="ti ti-truck" style="font-size:12px;vertical-align:-1px;"></i> ${l['EMPRESA_COLETA_ATUAL']}</div>`:''}
       </div>`;
     });
-    if (doEtapa.length > 40 && !_kanbanExpandido[col.nome]) html += `<div onclick="expandirColunaKanban('${col.nome.replace(/'/g,'')}')" style="font-size:12px;color:${col.cor};text-align:center;padding:8px;cursor:pointer;font-weight:600;border:1px dashed ${col.cor};border-radius:8px;margin-top:6px;">+${doEtapa.length-40} mais — ver todos</div>`;
+    if (doEtapa.length > 40 && !_kanbanExpandido[col.nome]) html += `<div onclick="expandirColunaKanban('${col.nome.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')" style="font-size:12px;color:${col.cor};text-align:center;padding:8px;cursor:pointer;font-weight:600;border:1px dashed ${col.cor};border-radius:8px;margin-top:6px;">+${doEtapa.length-40} mais — ver todos</div>`;
     html += `</div>`;
   });
   html += `</div>`;
@@ -4333,7 +4333,7 @@ function abrirModalMotivoPerda(idLead) {
             </div>
           </div>
           <div class="ficha-botoes">
-            <button class="ficha-btn-primario" style="background:var(--vermelho);" onclick="confirmarDeclinio('${String(idLead).replace(/'/g,'')}')"><i class="ti ti-check"></i> Confirmar</button>
+            <button class="ficha-btn-primario" style="background:var(--vermelho);" onclick="confirmarDeclinio('${String(idLead).replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-check"></i> Confirmar</button>
             <button class="ficha-btn-secundario" onclick="document.getElementById('modal-motivo-overlay').remove()">Cancelar</button>
           </div>
           <div id="mp-msg"></div>
@@ -4478,7 +4478,7 @@ function abrirModalCobertura(idLead) {
           <div style="margin-bottom:14px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Quem atende *</label>
             <select id="cob-quematende" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"><option value="">— selecione a empresa —</option>${LISTA_EMPRESAS.map(e=>`<option>${e}</option>`).join('')}</select></div>
           <div class="ficha-botoes">
-            <button class="ficha-btn-primario" onclick="confirmarCobertura('${String(idLead).replace(/'/g,'')}')"><i class="ti ti-check"></i> Confirmar</button>
+            <button class="ficha-btn-primario" onclick="confirmarCobertura('${String(idLead).replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-check"></i> Confirmar</button>
             <button class="ficha-btn-secundario" onclick="document.getElementById('modal-cob-overlay').remove()">Cancelar</button>
           </div>
           <div id="cob-msg"></div>
@@ -4514,7 +4514,7 @@ function abrirModalFechamento(idLead) {
             <input type="date" id="fc-assinatura" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;">
             <div style="font-size:11px;color:var(--cinza-500);margin-top:4px;">Pode deixar em branco se ainda não assinou.</div></div>
           <div class="ficha-botoes">
-            <button class="ficha-btn-primario" onclick="confirmarFechamento('${String(idLead).replace(/'/g,'')}')"><i class="ti ti-check"></i> Confirmar fechamento</button>
+            <button class="ficha-btn-primario" onclick="confirmarFechamento('${String(idLead).replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-check"></i> Confirmar fechamento</button>
             <button class="ficha-btn-secundario" onclick="document.getElementById('modal-fech-overlay').remove()">Cancelar</button>
           </div>
           <div id="fc-msg"></div>
@@ -4563,10 +4563,10 @@ function abrirCriarClienteDeLead(lead) {
             </div>
           </div>
           <div class="ficha-botoes" style="margin-top:14px;flex-wrap:wrap;">
-            <button class="ficha-btn-primario" style="background:#185FA5;" onclick="salvarClienteDeLead('${String(lead['CNPJ']||'').replace(/'/g,'')}','solicitar')"><i class="ti ti-file-import"></i> Criar cliente e solicitar contrato</button>
-            <button class="ficha-btn-primario" onclick="salvarClienteDeLead('${String(lead['CNPJ']||'').replace(/'/g,'')}','contrato')"><i class="ti ti-file-text"></i> Criar e preencher contrato</button>
-            <button class="ficha-btn-secundario" style="color:var(--verde-escuro);border-color:var(--verde-medio);" onclick="salvarClienteDeLead('${String(lead['CNPJ']||'').replace(/'/g,'')}','eventual')"><i class="ti ti-calendar-event"></i> Criar como Eventual</button>
-            <button class="ficha-btn-secundario" onclick="salvarClienteDeLead('${String(lead['CNPJ']||'').replace(/'/g,'')}','pendente')">Contratual - pendente</button>
+            <button class="ficha-btn-primario" style="background:#185FA5;" onclick="salvarClienteDeLead('${String(lead['CNPJ']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}','solicitar')"><i class="ti ti-file-import"></i> Criar cliente e solicitar contrato</button>
+            <button class="ficha-btn-primario" onclick="salvarClienteDeLead('${String(lead['CNPJ']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}','contrato')"><i class="ti ti-file-text"></i> Criar e preencher contrato</button>
+            <button class="ficha-btn-secundario" style="color:var(--verde-escuro);border-color:var(--verde-medio);" onclick="salvarClienteDeLead('${String(lead['CNPJ']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}','eventual')"><i class="ti ti-calendar-event"></i> Criar como Eventual</button>
+            <button class="ficha-btn-secundario" onclick="salvarClienteDeLead('${String(lead['CNPJ']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}','pendente')">Contratual - pendente</button>
           </div>
           <div style="font-size:11px;color:var(--cinza-500);margin-top:8px;line-height:1.5;"><b>Solicitar contrato:</b> cria o cliente e já manda a solicitação pra Mafe (aba Solicitações). <b>Contrato:</b> cliente com contrato fixo (você preenche agora). <b>Eventual:</b> serviço avulso. <b>Pendente:</b> fechou mas o contrato ainda será preenchido.</div>
           <div id="cl-msg"></div>
@@ -4771,7 +4771,7 @@ function abrirModalProposta(idLead) {
           <div style="margin-bottom:14px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Valor total da proposta (R$) *</label>
             <input type="number" id="pp-valor" step="0.01" placeholder="ex: 1500.00" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
           <div class="ficha-botoes">
-            <button class="ficha-btn-primario" onclick="confirmarProposta('${String(idLead).replace(/'/g,'')}')"><i class="ti ti-check"></i> Confirmar</button>
+            <button class="ficha-btn-primario" onclick="confirmarProposta('${String(idLead).replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-check"></i> Confirmar</button>
             <button class="ficha-btn-secundario" onclick="document.getElementById('modal-prop-overlay').remove()">Cancelar</button>
           </div>
           <div id="pp-msg"></div>
@@ -5026,14 +5026,14 @@ function reajBlocoCarteira(idx){
   if (c) {
     return `<div style="background:var(--verde-ok-bg);border-radius:8px;padding:9px 11px;font-size:12.5px;color:var(--verde-ok);">
       <i class="ti ti-circle-check"></i> Cliente na carteira: <b>${c['CLIENTE']}</b>
-      <span onclick="abrirFicha('${String(c['CNPJ']||'').replace(/'/g,'')}','${String(c['CLIENTE']||'').replace(/'/g,"\\'")}')" style="margin-left:6px;text-decoration:underline;cursor:pointer;">abrir ficha</span>
+      <span onclick="abrirFicha('${String(c['CNPJ']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${String(c['CLIENTE']||'').replace(/'/g,"\\'")}')" style="margin-left:6px;text-decoration:underline;cursor:pointer;">abrir ficha</span>
     </div>`;
   }
   const par = reajParecidos(r);
   return `<div style="background:var(--amarelo-bg);border:1px solid var(--amarelo-borda);border-radius:8px;padding:11px;font-size:12.5px;color:#8a6d00;">
     <b><i class="ti ti-alert-triangle"></i> Este reajuste não tem cliente na aba Clientes.</b>
     <div style="margin-top:4px;font-size:11.5px;">Por isso ele não aparece na Carteira nem em Contratos. Quase sempre é o nome escrito diferente do cadastro — ou o cliente foi excluído depois.</div>
-    ${par.length?`<div style="margin-top:8px;font-size:11.5px;"><b>Clientes com nome parecido:</b><br>${par.map(c=>`<span onclick="abrirFicha('${String(c['CNPJ']||'').replace(/'/g,'')}','${String(c['CLIENTE']||'').replace(/'/g,"\\'")}')" style="cursor:pointer;text-decoration:underline;">${c['CLIENTE']}</span>`).join('<br>')}
+    ${par.length?`<div style="margin-top:8px;font-size:11.5px;"><b>Clientes com nome parecido:</b><br>${par.map(c=>`<span onclick="abrirFicha('${String(c['CNPJ']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${String(c['CLIENTE']||'').replace(/'/g,"\\'")}')" style="cursor:pointer;text-decoration:underline;">${c['CLIENTE']}</span>`).join('<br>')}
       <div style="margin-top:4px;color:var(--cinza-600);">Se for um destes, o certo é acertar o nome no reajuste (botão "Corrigir valores") para os dois casarem.</div></div>`:''}
     <div style="margin-top:10px;">
       <button onclick="criarClienteDeReajuste(${idx})" style="padding:7px 12px;border:none;background:#8a6d00;color:white;border-radius:7px;cursor:pointer;font-size:12px;"><i class="ti ti-user-plus"></i> É cliente mesmo — cadastrar na carteira</button>
@@ -5201,8 +5201,8 @@ function detalheReaj(idx) {
             <div class="ficha-botoes" style="flex-wrap:wrap;">
               <button class="ficha-btn-primario" onclick="abrirFormReajuste(${idx})"><i class="ti ti-trending-up"></i> Reajustar</button>
               ${podeEditarReajuste() ? `<button class="ficha-btn-secundario" style="border-color:var(--laranja);color:#8a5a00;" onclick="abrirCorrigirReajuste(cacheReajustes[${idx}],'modulo')"><i class="ti ti-edit"></i> Corrigir valores</button>` : ''}
-              <button class="ficha-btn-secundario" onclick="verHistoricoReaj('${(r['CNPJ']||'').replace(/'/g,'')}','${(r['TP DE SERVIÇO']||'').replace(/'/g,'')}')"><i class="ti ti-history"></i> Histórico</button>
-              <button class="ficha-btn-secundario" onclick="imprimirFichaDeReaj('${(r['CNPJ']||'').replace(/'/g,'')}')"><i class="ti ti-printer"></i> Imprimir ficha</button>
+              <button class="ficha-btn-secundario" onclick="verHistoricoReaj('${(r['CNPJ']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${(r['TP DE SERVIÇO']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-history"></i> Histórico</button>
+              <button class="ficha-btn-secundario" onclick="imprimirFichaDeReaj('${(r['CNPJ']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-printer"></i> Imprimir ficha</button>
             </div>
           </div>
         </div>
@@ -5427,8 +5427,8 @@ function abrirFormInadimplencia(cnpj) {
             <textarea id="inad-obs" rows="2" placeholder="ex: cliente não respondeu cobranças" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;font-family:var(--fonte-corpo);"></textarea>
           </div>
           <div class="ficha-botoes">
-            <button class="ficha-btn-primario" style="background:var(--vermelho);" onclick="salvarInadimplencia('${cnpj.replace(/'/g,'')}','${(c['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-check"></i> Confirmar</button>
-            <button class="ficha-btn-secundario" onclick="abrirFicha('${cnpj.replace(/'/g,'')}')">Cancelar</button>
+            <button class="ficha-btn-primario" style="background:var(--vermelho);" onclick="salvarInadimplencia('${cnpj.replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${(c['CLIENTE']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-check"></i> Confirmar</button>
+            <button class="ficha-btn-secundario" onclick="abrirFicha('${cnpj.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')">Cancelar</button>
           </div>
           <div id="inad-msg"></div>
         </div>
@@ -5556,7 +5556,7 @@ async function renderInadimplencia(area) {
           <div style="font-size:11px;color:var(--cinza-500);">venc. ${fmtDataBR(n['VENCIMENTO'])} · ${n._atraso}d de atraso</div>
         </div>
         <b style="white-space:nowrap;">${fmtMoeda(n['VALOR_ABERTO'])}</b>
-        ${podeEnviar&&n['ID']?`<button title="Dar baixa (pago)" onclick="darBaixaInadFront('${String(n['ID']||'').replace(/'/g,'')}')" style="padding:4px 9px;border:1.5px solid var(--verde-ok);background:var(--verde-ok-bg);color:var(--verde-ok);border-radius:7px;cursor:pointer;font-size:11px;font-weight:600;"><i class="ti ti-check"></i> baixa</button>`:''}
+        ${podeEnviar&&n['ID']?`<button title="Dar baixa (pago)" onclick="darBaixaInadFront('${String(n['ID']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')" style="padding:4px 9px;border:1.5px solid var(--verde-ok);background:var(--verde-ok-bg);color:var(--verde-ok);border-radius:7px;cursor:pointer;font-size:11px;font-weight:600;"><i class="ti ti-check"></i> baixa</button>`:''}
       </div>`).join('');
     html += `<div class="inad-card ${agCls}">
       <div class="reaj-topo">
@@ -7020,9 +7020,9 @@ async function renderRegulaVisao(area) {
     const sigor = d._sigor;
     const c = sigor ? {cls:'venc',pill:'pill-venc',txt:'Irregular'} : classifVenc(d._dias);
     html += `<div class="reaj-card ${c.cls}" style="cursor:default;">
-      <div class="reaj-topo"><div style="min-width:0;"><div class="reaj-nome" onclick="abrirFicha('${String(d['CNPJ']||'').replace(/'/g,'')}','${String(d['CLIENTE']||'').replace(/'/g,'')}')" style="cursor:pointer;" title="Abrir ficha do cliente">${d['CLIENTE']||'—'}</div><div class="reaj-cnpj">${sigor?'SIGOR/MTR':'SP Regula'} · ${d['CONSULTOR']||'—'}</div></div>
+      <div class="reaj-topo"><div style="min-width:0;"><div class="reaj-nome" onclick="abrirFicha('${String(d['CNPJ']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${String(d['CLIENTE']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')" style="cursor:pointer;" title="Abrir ficha do cliente">${d['CLIENTE']||'—'}</div><div class="reaj-cnpj">${sigor?'SIGOR/MTR':'SP Regula'} · ${d['CONSULTOR']||'—'}</div></div>
       <span class="reaj-pill ${c.pill}">${sigor?'Irregular':(d._ef==='pendente'?'Sem cadastro':c.txt)}</span></div>
-      <button class="ficha-btn-primario" style="width:100%;margin-top:10px;padding:8px;border:none;border-radius:8px;cursor:pointer;font-size:12px;" onclick="abrirEmailAlerta('${sigor?'sigor':'rgg'}','${String(d['ID']||'').replace(/'/g,'')}')"><i class="ti ti-mail"></i> Enviar e-mail de alerta</button>
+      <button class="ficha-btn-primario" style="width:100%;margin-top:10px;padding:8px;border:none;border-radius:8px;cursor:pointer;font-size:12px;" onclick="abrirEmailAlerta('${sigor?'sigor':'rgg'}','${String(d['ID']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-mail"></i> Enviar e-mail de alerta</button>
     </div>`;
   });
   html += `</div>`;
@@ -7031,9 +7031,9 @@ async function renderRegulaVisao(area) {
     vencendo60.slice(0,30).forEach(d => {
       const c = classifVenc(d._dias);
       html += `<div class="reaj-card ${c.cls}" style="cursor:default;">
-        <div class="reaj-topo"><div style="min-width:0;"><div class="reaj-nome" onclick="abrirFicha('${String(d['CNPJ']||'').replace(/'/g,'')}','${String(d['CLIENTE']||'').replace(/'/g,'')}')" style="cursor:pointer;" title="Abrir ficha do cliente">${d['CLIENTE']||'—'}</div><div class="reaj-cnpj">vence ${fmtDataBR(d['DATA_VALIDADE'])} · ${d['CONSULTOR']||'—'}</div></div>
+        <div class="reaj-topo"><div style="min-width:0;"><div class="reaj-nome" onclick="abrirFicha('${String(d['CNPJ']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${String(d['CLIENTE']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')" style="cursor:pointer;" title="Abrir ficha do cliente">${d['CLIENTE']||'—'}</div><div class="reaj-cnpj">vence ${fmtDataBR(d['DATA_VALIDADE'])} · ${d['CONSULTOR']||'—'}</div></div>
         <span class="reaj-pill ${c.pill}">${c.txt}</span></div>
-        <button class="ficha-btn-primario" style="width:100%;margin-top:10px;padding:8px;border:none;border-radius:8px;cursor:pointer;font-size:12px;" onclick="abrirEmailAlerta('rgg','${String(d['ID']||'').replace(/'/g,'')}')"><i class="ti ti-mail"></i> Enviar e-mail de alerta</button>
+        <button class="ficha-btn-primario" style="width:100%;margin-top:10px;padding:8px;border:none;border-radius:8px;cursor:pointer;font-size:12px;" onclick="abrirEmailAlerta('rgg','${String(d['ID']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-mail"></i> Enviar e-mail de alerta</button>
       </div>`;
     });
     html += `</div>`;
@@ -7355,19 +7355,19 @@ function filtraRegula(tipo) {
       const jaEnviado = d['ALERTA_ENVIADO_EM'] ? fmtDataBR(d['ALERTA_ENVIADO_EM']) : null;
       const valProp = d['VALOR_PROPOSTA'] ? fmtMoeda(d['VALOR_PROPOSTA']) : null;
       html += `<div class="reaj-card ${cardCls}" style="cursor:default;">
-        <div class="reaj-topo"><div style="min-width:0;"><div class="reaj-nome" onclick="abrirFicha('${String(d['CNPJ']||'').replace(/'/g,'')}','${String(d['CLIENTE']||'').replace(/'/g,'')}')" style="cursor:pointer;" title="Abrir ficha do cliente">${d['CLIENTE']||'—'}</div><div class="reaj-cnpj">${d['CNPJ']?`<b style="color:var(--cinza-700);">${d['CNPJ']}</b>`:'<span style="color:var(--vermelho);">sem CNPJ</span>'}</div>
+        <div class="reaj-topo"><div style="min-width:0;"><div class="reaj-nome" onclick="abrirFicha('${String(d['CNPJ']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${String(d['CLIENTE']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')" style="cursor:pointer;" title="Abrir ficha do cliente">${d['CLIENTE']||'—'}</div><div class="reaj-cnpj">${d['CNPJ']?`<b style="color:var(--cinza-700);">${d['CNPJ']}</b>`:'<span style="color:var(--vermelho);">sem CNPJ</span>'}</div>
         <div class="reaj-cnpj">${d['RESPONSAVEL_CLIENTE']||''}${d['CONSULTOR']?' · '+d['CONSULTOR']:''}</div></div>
         <span class="reaj-pill ${pillCls}">${pillTxt}</span></div>
         <div class="reaj-linhas"><div><span>Validade</span><b>${ehNovo?'—':fmtDataBR(d['DATA_VALIDADE'])}</b></div><div><span>Consultor</span><b style="font-size:12px;">${d['CONSULTOR']||'—'}</b></div></div>
         ${ehNovo?`<div style="background:var(--vermelho-bg);border-radius:8px;padding:8px 10px;margin-top:8px;font-size:11.5px;color:var(--vermelho);"><i class="ti ti-user-plus"></i> Cliente novo${d['ORIGEM']?' ('+d['ORIGEM']+')':''} — ainda sem cadastro no SP Regula. Atualize o status quando regularizar.</div>`:''}
-        ${podeMoverRegula()?`<div style="margin-top:8px;text-align:right;"><span onclick="moverEntreRegula('rgg','${String(d['ID']||'').replace(/'/g,'')}')" style="font-size:11px;color:#6B5B95;cursor:pointer;text-decoration:underline;"><i class="ti ti-arrows-exchange"></i> é MTR, mover para SIGOR</span></div>`:''}
+        ${podeMoverRegula()?`<div style="margin-top:8px;text-align:right;"><span onclick="moverEntreRegula('rgg','${String(d['ID']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')" style="font-size:11px;color:#6B5B95;cursor:pointer;text-decoration:underline;"><i class="ti ti-arrows-exchange"></i> é MTR, mover para SIGOR</span></div>`:''}
         ${propSolic&&valProp?`<div style="font-size:11px;color:#8a6d00;margin-top:8px;"><i class="ti ti-file-dollar"></i> Proposta: <b>${valProp}</b></div>`:''}
         ${jaEnviado?`<div style="font-size:11px;color:var(--verde-ok);margin-top:8px;"><i class="ti ti-mail-check"></i> Alerta enviado em ${jaEnviado}</div>`:''}
         <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;">
-          ${podeEmail?`<button class="ficha-btn-secundario" style="flex:1;padding:7px;border-radius:7px;cursor:pointer;font-size:12px;" onclick="abrirEmailAlerta('rgg','${String(d['ID']||'').replace(/'/g,'')}')"><i class="ti ti-mail"></i> Alerta</button>`:''}
-          ${emRenov?`<span style="flex:1;padding:7px;border-radius:7px;font-size:12px;text-align:center;background:var(--amarelo-bg);color:#8a6d00;"><i class="ti ti-clock"></i> Em renovação</span>`:`<button class="ficha-btn-secundario" style="flex:1;padding:7px;border-radius:7px;cursor:pointer;font-size:12px;border-color:#8a6d00;color:#8a6d00;" onclick="marcarEmRenovacao('${String(d['ID']||'').replace(/'/g,'')}')"><i class="ti ti-clock"></i> Em renovação</button>`}
-          ${propSolic?`<span style="flex:1;padding:7px;border-radius:7px;font-size:12px;text-align:center;background:var(--amarelo-bg);color:#8a6d00;" title="Clique para editar o valor" onclick="abrirModalPropostaRegula('${String(d['ID']||'').replace(/'/g,'')}')"><i class="ti ti-file-dollar"></i> Proposta ${valProp||''}</span>`:`<button class="ficha-btn-secundario" style="flex:1;padding:7px;border-radius:7px;cursor:pointer;font-size:12px;border-color:#8a6d00;color:#8a6d00;" onclick="abrirModalPropostaRegula('${String(d['ID']||'').replace(/'/g,'')}')"><i class="ti ti-file-dollar"></i> Proposta solicitada</button>`}
-          ${podeRenovar?`<button class="ficha-btn-primario" style="flex:1;padding:7px;border:none;border-radius:7px;cursor:pointer;font-size:12px;" onclick="abrirModalRenovar('${String(d['ID']||'').replace(/'/g,'')}')"><i class="ti ti-refresh"></i> Renovar</button>`:''}
+          ${podeEmail?`<button class="ficha-btn-secundario" style="flex:1;padding:7px;border-radius:7px;cursor:pointer;font-size:12px;" onclick="abrirEmailAlerta('rgg','${String(d['ID']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-mail"></i> Alerta</button>`:''}
+          ${emRenov?`<span style="flex:1;padding:7px;border-radius:7px;font-size:12px;text-align:center;background:var(--amarelo-bg);color:#8a6d00;"><i class="ti ti-clock"></i> Em renovação</span>`:`<button class="ficha-btn-secundario" style="flex:1;padding:7px;border-radius:7px;cursor:pointer;font-size:12px;border-color:#8a6d00;color:#8a6d00;" onclick="marcarEmRenovacao('${String(d['ID']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-clock"></i> Em renovação</button>`}
+          ${propSolic?`<span style="flex:1;padding:7px;border-radius:7px;font-size:12px;text-align:center;background:var(--amarelo-bg);color:#8a6d00;" title="Clique para editar o valor" onclick="abrirModalPropostaRegula('${String(d['ID']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-file-dollar"></i> Proposta ${valProp||''}</span>`:`<button class="ficha-btn-secundario" style="flex:1;padding:7px;border-radius:7px;cursor:pointer;font-size:12px;border-color:#8a6d00;color:#8a6d00;" onclick="abrirModalPropostaRegula('${String(d['ID']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-file-dollar"></i> Proposta solicitada</button>`}
+          ${podeRenovar?`<button class="ficha-btn-primario" style="flex:1;padding:7px;border:none;border-radius:7px;cursor:pointer;font-size:12px;" onclick="abrirModalRenovar('${String(d['ID']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-refresh"></i> Renovar</button>`:''}
         </div>
       </div>`;
     } else {
@@ -7379,20 +7379,20 @@ function filtraRegula(tipo) {
       const OPCOES_SIT = [REG_STATUS_NOVO,'Regular','Regular - Eventual','Irregular','Em análise'];
       const ehNovoSg = String(d['STATUS']||'').toLowerCase().includes('cliente novo');
       html += `<div class="reaj-card ${(irreg||ehNovoSg)?'venc':'ok'}" style="cursor:default;">
-        <div class="reaj-topo"><div style="min-width:0;"><div class="reaj-nome" onclick="abrirFicha('${String(d['CNPJ']||'').replace(/'/g,'')}','${String(d['CLIENTE']||'').replace(/'/g,'')}')" style="cursor:pointer;" title="Abrir ficha do cliente">${d['CLIENTE']||'—'}</div><div class="reaj-cnpj">${d['CNPJ']?`<b style="color:var(--cinza-700);">${d['CNPJ']}</b>`:'<span style="color:var(--vermelho);">sem CNPJ</span>'}</div>
+        <div class="reaj-topo"><div style="min-width:0;"><div class="reaj-nome" onclick="abrirFicha('${String(d['CNPJ']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${String(d['CLIENTE']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')" style="cursor:pointer;" title="Abrir ficha do cliente">${d['CLIENTE']||'—'}</div><div class="reaj-cnpj">${d['CNPJ']?`<b style="color:var(--cinza-700);">${d['CNPJ']}</b>`:'<span style="color:var(--vermelho);">sem CNPJ</span>'}</div>
         <div class="reaj-cnpj">${d['RESPONSAVEL_CLIENTE']||''}${d['CONSULTOR']?' · '+d['CONSULTOR']:''}</div></div>
         <span class="reaj-pill ${irreg?'pill-venc':'pill-ok'}">${d['STATUS']||'—'}</span></div>
         <div class="reaj-linhas"><div><span>Plataforma</span><b style="font-size:13px;">${d['PLATAFORMA']||'Sigor'}</b></div><div><span>Consultor</span><b style="font-size:12px;">${d['CONSULTOR']||'—'}</b></div></div>
         ${ehNovoSg?`<div style="background:var(--vermelho-bg);border-radius:8px;padding:8px 10px;margin-top:8px;font-size:11.5px;color:var(--vermelho);"><i class="ti ti-user-plus"></i> Cliente novo${d['ORIGEM']?' ('+d['ORIGEM']+')':''} — ainda sem emissão de MTR. Atualize a situação quando regularizar.</div>`:''}
         ${jaEnviado?`<div style="font-size:11px;color:var(--verde-ok);margin-top:8px;"><i class="ti ti-mail-check"></i> Alerta enviado em ${jaEnviado}</div>`:''}
-        ${podeMoverRegula()?`<div style="margin-top:8px;text-align:right;"><span onclick="moverEntreRegula('mtr','${String(d['ID']||'').replace(/'/g,'')}')" style="font-size:11px;color:#6B5B95;cursor:pointer;text-decoration:underline;"><i class="ti ti-arrows-exchange"></i> é SP Regula, mover para RGG</span></div>`:''}
+        ${podeMoverRegula()?`<div style="margin-top:8px;text-align:right;"><span onclick="moverEntreRegula('mtr','${String(d['ID']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')" style="font-size:11px;color:#6B5B95;cursor:pointer;text-decoration:underline;"><i class="ti ti-arrows-exchange"></i> é SP Regula, mover para RGG</span></div>`:''}
         <div style="display:flex;gap:6px;align-items:center;margin-top:10px;">
           <select id="sit-sigor-${d['ID']}" style="flex:1;padding:6px;border:1.5px solid var(--cinza-300);border-radius:7px;font-size:12px;">
             ${OPCOES_SIT.map(o=>`<option value="${o}" ${stAtual===o?'selected':''}>${o}</option>`).join('')}
           </select>
-          <button class="ficha-btn-primario" style="padding:6px 10px;border:none;border-radius:7px;cursor:pointer;font-size:12px;" onclick="salvarSituacaoSigor('${String(d['ID']||'').replace(/'/g,'')}')"><i class="ti ti-check"></i></button>
+          <button class="ficha-btn-primario" style="padding:6px 10px;border:none;border-radius:7px;cursor:pointer;font-size:12px;" onclick="salvarSituacaoSigor('${String(d['ID']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-check"></i></button>
         </div>
-        ${irreg?`<button class="ficha-btn-secundario" style="width:100%;margin-top:6px;padding:7px;border-radius:7px;cursor:pointer;font-size:12px;" onclick="abrirEmailAlerta('sigor','${String(d['ID']||'').replace(/'/g,'')}')"><i class="ti ti-mail"></i> Enviar alerta</button>`:''}
+        ${irreg?`<button class="ficha-btn-secundario" style="width:100%;margin-top:6px;padding:7px;border-radius:7px;cursor:pointer;font-size:12px;" onclick="abrirEmailAlerta('sigor','${String(d['ID']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-mail"></i> Enviar alerta</button>`:''}
       </div>`;
     }
   });
@@ -7469,7 +7469,7 @@ function abrirModalPropostaRegula(id) {
           <div style="margin-bottom:14px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Valor da proposta (R$)</label>
             <input type="text" id="pr-valor" value="${d['VALOR_PROPOSTA']?String(d['VALOR_PROPOSTA']).replace(/"/g,'&quot;'):''}" placeholder="ex: 1.500,00" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
           <div class="ficha-botoes">
-            <button class="ficha-btn-primario" onclick="salvarPropostaRegula('${String(id).replace(/'/g,'')}')"><i class="ti ti-check"></i> Salvar</button>
+            <button class="ficha-btn-primario" onclick="salvarPropostaRegula('${String(id).replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-check"></i> Salvar</button>
             <button class="ficha-btn-secundario" onclick="fecharFicha()">Cancelar</button>
           </div>
           <div id="pr-msg"></div>
@@ -7599,7 +7599,7 @@ function abrirModalRenovar(id) {
           <div id="ren-valor-wrap" style="margin-bottom:12px;display:none;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Valor da assessoria (R$)</label>
             <input type="text" id="ren-valor" placeholder="ex: 1.500,00" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;"></div>
           <div class="ficha-botoes">
-            <button class="ficha-btn-primario" onclick="salvarRenovacao('${String(id).replace(/'/g,'')}')"><i class="ti ti-check"></i> Registrar renovação</button>
+            <button class="ficha-btn-primario" onclick="salvarRenovacao('${String(id).replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-check"></i> Registrar renovação</button>
             <button class="ficha-btn-secundario" onclick="fecharFicha()">Cancelar</button>
           </div>
           <div id="ren-msg"></div>
@@ -8038,8 +8038,8 @@ async function renderPrecificacao(area) {
         <div style="font-size:13px;color:var(--cinza-700);margin:8px 0;">${l['DESCRICAO_SERVICO']||''}</div>
         ${l['TP_RESIDUO']?`<div style="font-size:12px;color:var(--cinza-600);">Resíduo: ${l['TP_RESIDUO']}</div>`:''}
         ${l['OBS_VENDEDOR']?`<div style="font-size:12px;color:var(--cinza-500);font-style:italic;margin-top:4px;">"${l['OBS_VENDEDOR']}"</div>`:''}
-        ${podeResponder?`<button class="ficha-btn-primario" style="width:100%;margin-top:10px;padding:8px;border:none;border-radius:7px;cursor:pointer;font-size:12px;" onclick="abrirFormResponderPreco('${l['ID']}','${(l['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-tag"></i> Definir preço</button>`:`<div style="font-size:12px;color:var(--cinza-500);margin-top:8px;text-align:center;">Aguardando Roberto precificar</div>`}
-        ${podeExcluirPreco()?`<button onclick="excluirPedidoPreco('${l['ID']}','${(l['CLIENTE']||'').replace(/'/g,'')}')" style="width:100%;margin-top:6px;padding:6px;border:1px solid var(--vermelho);background:white;color:var(--vermelho);border-radius:7px;cursor:pointer;font-size:11px;"><i class="ti ti-trash"></i> Excluir (duplicado)</button>`:''}
+        ${podeResponder?`<button class="ficha-btn-primario" style="width:100%;margin-top:10px;padding:8px;border:none;border-radius:7px;cursor:pointer;font-size:12px;" onclick="abrirFormResponderPreco('${l['ID']}','${(l['CLIENTE']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-tag"></i> Definir preço</button>`:`<div style="font-size:12px;color:var(--cinza-500);margin-top:8px;text-align:center;">Aguardando Roberto precificar</div>`}
+        ${podeExcluirPreco()?`<button onclick="excluirPedidoPreco('${l['ID']}','${(l['CLIENTE']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')" style="width:100%;margin-top:6px;padding:6px;border:1px solid var(--vermelho);background:white;color:var(--vermelho);border-radius:7px;cursor:pointer;font-size:11px;"><i class="ti ti-trash"></i> Excluir (duplicado)</button>`:''}
       </div>`;
     });
     html += `</div>`;
@@ -8714,7 +8714,7 @@ function filtrarClientesLead(termo) {
   if (t.length < 2) { box.style.display='none'; return; }
   const achados = (cacheClientes||[]).filter(c => String(c['CLIENTE']||'').toLowerCase().includes(t)).slice(0, 20);
   if (!achados.length) { box.innerHTML='<div style="padding:8px;font-size:12px;color:var(--cinza-500);">Nenhum cliente encontrado.</div>'; box.style.display='block'; return; }
-  box.innerHTML = achados.map(c=>`<div onclick="selecionarClienteLead('${(c['CNPJ']||'').replace(/'/g,'')}','${(c['CLIENTE']||'').replace(/'/g,"\\'")}')" style="padding:8px 10px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--cinza-100);" onmouseover="this.style.background='var(--cinza-100)'" onmouseout="this.style.background='white'"><b>${c['CLIENTE']}</b><br><span style="font-size:11px;color:var(--cinza-500);">${c['CNPJ']||''}${c['CONSULTOR']?' · '+c['CONSULTOR']:''}</span></div>`).join('');
+  box.innerHTML = achados.map(c=>`<div onclick="selecionarClienteLead('${(c['CNPJ']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${(c['CLIENTE']||'').replace(/'/g,"\\'")}')" style="padding:8px 10px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--cinza-100);" onmouseover="this.style.background='var(--cinza-100)'" onmouseout="this.style.background='white'"><b>${c['CLIENTE']}</b><br><span style="font-size:11px;color:var(--cinza-500);">${c['CNPJ']||''}${c['CONSULTOR']?' · '+c['CONSULTOR']:''}</span></div>`).join('');
   box.style.display='block';
 }
 function selecionarClienteLead(cnpj, nome) {
@@ -8894,7 +8894,7 @@ function filtraContratos() {
     const venceLogo = d!=null && d>=0 && d<=90;
     const vencido = d!=null && d<0;
     const cardCls = vencido?'cancelado':urgente?'':'ativo-status';
-    html += `<div class="card-cli ${cardCls}" onclick="abrirFicha('${String(c['CNPJ']||'').replace(/'/g,'')}')" style="${urgente?'border:1.5px solid var(--laranja);':''}">
+    html += `<div class="card-cli ${cardCls}" onclick="abrirFicha('${String(c['CNPJ']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')" style="${urgente?'border:1.5px solid var(--laranja);':''}">
       <div class="card-cli-topo">
         <div class="card-cli-avatar" style="${urgente?'background:var(--laranja);':''}">${iniciais(c['CLIENTE'])}</div>
         <div style="min-width:0;"><div class="card-cli-nome">${c['CLIENTE']||'—'}</div><div class="card-cli-cnpj">Contrato ${c['Nº CTO']||'—'}</div></div>
@@ -9740,9 +9740,9 @@ async function renderPendencias(area){
     return `<div onclick="selecionarModulo('crm');setTimeout(()=>selecionarSub('crm-solicitacoes','Solicitações'),50);" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px dashed var(--cinza-200);font-size:13px;cursor:pointer;">
       <div style="min-width:0;"><b>${l['CLIENTE']||'—'}</b> <span style="color:${ad?'#6B5B95':'#185FA5'};font-size:11px;">${ad?'Aditivo':'Contrato'}</span>${veTudo&&l['CONSULTOR']?`<span style="color:var(--cinza-500);font-size:11px;"> · ${l['CONSULTOR']}</span>`:''}</div>
       <span class="reaj-pill" style="background:${st.bg};color:${st.cor};white-space:nowrap;">${st.nome}</span></div>`; };
-  const fuLinha = f => `<div onclick="${f.idLead?`abrirLead('${String(f.idLead).replace(/'/g,'')}','${encodeURIComponent(f.cliente||'')}')`:`abrirFicha('${String(f.cnpj||'').replace(/'/g,'')}','${String(f.cliente||'').replace(/'/g,"\\'")}')`}" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px dashed var(--cinza-200);font-size:13px;cursor:pointer;">
+  const fuLinha = f => `<div onclick="${f.idLead?`abrirLead('${String(f.idLead).replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${encodeURIComponent(f.cliente||'')}')`:`abrirFicha('${String(f.cnpj||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${String(f.cliente||'').replace(/'/g,"\\'")}')`}" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px dashed var(--cinza-200);font-size:13px;cursor:pointer;">
       <div style="min-width:0;"><b>${f.cliente||'—'}</b></div>${dataBadge(f.data)}</div>`;
-  const agLinha = a => `<div onclick="abrirFicha('${String(a.cnpj||'').replace(/'/g,'')}','${String(a.cliente||'').replace(/'/g,"\\'")}')" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px dashed var(--cinza-200);font-size:13px;cursor:pointer;">
+  const agLinha = a => `<div onclick="abrirFicha('${String(a.cnpj||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${String(a.cliente||'').replace(/'/g,"\\'")}')" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px dashed var(--cinza-200);font-size:13px;cursor:pointer;">
       <div style="min-width:0;"><span style="background:var(--verde-claro-bg);color:var(--verde-escuro);border-radius:4px;padding:1px 6px;font-size:10px;margin-right:6px;">${a.tipo}</span><b>${a.cliente||'—'}</b>${a.titulo?`<span style="color:var(--cinza-500);"> — ${a.titulo}</span>`:''}</div>${dataBadge(a.data)}</div>`;
 
   const totalPend = fus.length + agend.length + solicPend.length;
@@ -10739,10 +10739,10 @@ async function abrirLead(id, nomeEnc) {
             ${linha('Informação adicional', l['INFO_ADICIONAL'])}
           </table>
           <div class="ficha-botoes" style="flex-wrap:wrap;">
-            <button class="ficha-btn-primario" onclick="abrirFormAtividade('${cnpjOuVazio||idLead}','${(l['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-plus"></i> Registrar atividade / anotação</button>
-            <button class="ficha-btn-secundario" style="color:#6B5B95;border-color:#6B5B95;" onclick="abrirFollowUp('${idLead}','${(l['CLIENTE']||'').replace(/'/g,'')}','${cnpjOuVazio}')"><i class="ti ti-calendar-clock"></i> Agendar follow-up</button>
+            <button class="ficha-btn-primario" onclick="abrirFormAtividade('${cnpjOuVazio||idLead}','${(l['CLIENTE']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-plus"></i> Registrar atividade / anotação</button>
+            <button class="ficha-btn-secundario" style="color:#6B5B95;border-color:#6B5B95;" onclick="abrirFollowUp('${idLead}','${(l['CLIENTE']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${cnpjOuVazio}')"><i class="ti ti-calendar-clock"></i> Agendar follow-up</button>
             ${l['CNPJ']?`<button class="ficha-btn-secundario" onclick="abrirFicha('${cnpjOuVazio}')"><i class="ti ti-user"></i> Ver ficha do cliente</button>`:''}
-            ${podeArquivarLead()?`<button class="ficha-btn-secundario" style="color:var(--vermelho);border-color:var(--vermelho);" onclick="arquivarLead('${idLead}','${(l['CLIENTE']||'').replace(/'/g,'')}')"><i class="ti ti-trash"></i> Arquivar lead (cadastro errado)</button>`:''}
+            ${podeArquivarLead()?`<button class="ficha-btn-secundario" style="color:var(--vermelho);border-color:var(--vermelho);" onclick="arquivarLead('${idLead}','${(l['CLIENTE']||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-trash"></i> Arquivar lead (cadastro errado)</button>`:''}
           </div>
           <div id="lead-proximos" style="margin-top:14px;"></div>
           <div id="lead-hist" style="margin-top:14px;"></div>
@@ -10952,7 +10952,7 @@ function abrirFormCancelar(cnpj, cliente) {
           <div style="margin-bottom:14px;"><label style="font-size:13px;color:var(--cinza-700);display:block;margin-bottom:5px;">Texto do e-mail</label>
             <textarea id="cc-emailtexto" rows="4" placeholder="cole aqui o conteúdo do e-mail de rescisão" style="width:100%;padding:9px;border:1.5px solid var(--cinza-300);border-radius:8px;font-family:var(--fonte-corpo);"></textarea></div>
           <div class="ficha-botoes">
-            <button class="ficha-btn-primario" style="background:var(--vermelho);" onclick="salvarCancelamento('${cnpj.replace(/'/g,'')}','${cliente.replace(/'/g,'')}')"><i class="ti ti-check"></i> Confirmar cancelamento</button>
+            <button class="ficha-btn-primario" style="background:var(--vermelho);" onclick="salvarCancelamento('${cnpj.replace(/'/g,"\\'").replace(/"/g,'&quot;')}','${cliente.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-check"></i> Confirmar cancelamento</button>
             <button class="ficha-btn-secundario" onclick="fecharFicha()">Voltar</button>
           </div>
           <div id="cc-msg"></div>
@@ -12052,7 +12052,7 @@ function FIN_renderResultados(){
       <h2>Fechamentos por consultor</h2>
       <p style="font-size:12px;color:var(--cinza-500);margin-bottom:8px;">Clique num consultor para ver os clientes que ele fechou.</p>
       <table><thead><tr><th>Consultor</th><th>Fechamentos</th><th>Valor (R$)</th></tr></thead><tbody>
-      ${Object.entries(porCons).sort((a,b)=>b[1].v-a[1].v).map(([c,o])=>`<tr class="clicavel" onclick="FIN_verFechamentos('${c.replace(/'/g,"")}')"><td><b>${c}</b> <i class="ti ti-chevron-right" style="font-size:12px;"></i></td><td>${o.n}</td><td>${finFmtM(o.v)}</td></tr>`).join('')}
+      ${Object.entries(porCons).sort((a,b)=>b[1].v-a[1].v).map(([c,o])=>`<tr class="clicavel" onclick="FIN_verFechamentos('${c.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><td><b>${c}</b> <i class="ti ti-chevron-right" style="font-size:12px;"></i></td><td>${o.n}</td><td>${finFmtM(o.v)}</td></tr>`).join('')}
       </tbody></table>
     </div>
     <div id="detalhe-fech"></div>
