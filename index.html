@@ -393,7 +393,7 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.25</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.26</div>
       </div>
     </aside>
     <!-- VERSÃO DO DASHBOARD: v2026.08.20 — desempenho: canal exclusivo pra salvar, cache deixou de ser apagado inteiro a cada salvamento, CRM atualiza a linha na memória em vez de rebuscar a aba. ANTERIOR: v2026.08.19b — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
@@ -7080,8 +7080,12 @@ async function renderRegula(area, tipo) {
       <span style="font-size:12.5px;color:var(--cinza-600);align-self:center;"><i class="ti ti-building-community"></i> Grupo:</span>
       <span class="filtro-chip ${!window._regGrupo?'ativo':''}" onclick="setGrupoReg('${tipo}','')">Todos</span>
       ${Object.keys(GRUPOS_EMPRESA).map(g=>{
-        const n=dados.filter(x=>!regEstaCancelado(x) && FIN_grupoEmpresaDe({cnpj:x['CNPJ']})===g).length;
-        return n?`<span class="filtro-chip ${window._regGrupo===g?'ativo':''}" onclick="setGrupoReg('${tipo}','${g}')">${g} (${n})</span>`:'';
+        const n=dados.filter(x=>!regEstaCancelado(x) && grupoEmpresaDeRegistro(x)===g).length;
+        // aparece mesmo zerado: assim você vê que o filtro existe e que faltam os cadastros,
+        // em vez de achar que o filtro sumiu.
+        return n
+          ? `<span class="filtro-chip ${window._regGrupo===g?'ativo':''}" onclick="setGrupoReg('${tipo}','${g}')">${g} (${n})</span>`
+          : `<span class="filtro-chip" style="opacity:.55;cursor:help;" title="Nenhuma unidade ${g} encontrada nesta aba. O sistema reconhece pela raiz do CNPJ (${(GRUPOS_EMPRESA[g].raizes||[]).join(', ')}) ou pelo nome (${(GRUPOS_EMPRESA[g].nomes||[]).slice(0,4).join(', ')}...). Use 'Importar da planilha' para cadastr\u00e1-las.">${g} (0)</span>`;
       }).join('')}
       ${podeMoverRegula()?`<button class="filtro-chip" style="margin-left:auto;border:1.5px solid var(--verde-medio);color:var(--verde-escuro);font-weight:600;" onclick="abrirImportarRegula('${tipo}')"><i class="ti ti-table-import"></i> Importar da planilha</button>`:''}
     </div>
@@ -7296,7 +7300,7 @@ function filtraRegula(tipo) {
     });
   }
   // filtro por grupo empresarial (DASA e afins), pela raiz do CNPJ
-  if (window._regGrupo) lista = lista.filter(d => FIN_grupoEmpresaDe({cnpj:d['CNPJ']}) === window._regGrupo);
+  if (window._regGrupo) lista = lista.filter(d => grupoEmpresaDeRegistro(d) === window._regGrupo);
 
   // filtro por PERÍODO DE VENCIMENTO (só RGG, que tem DATA_VALIDADE): mostra quem vence entre De e Até
   if (tipo==='rgg') {
@@ -12223,9 +12227,32 @@ const GRUPOS_EMPRESA = {
     raizes: ['61486650',   // Delboni Auriemo / Lavoisier / Alta Excelência (DA-, LV-, AE-)
              '04539279',   // Cientifica Lâmina (ADM-CL, ARMAZEM-CL)
              '45796554'],  // Salomão Zoppi (SZ-)
-    obs: 'Delboni, Lavoisier, Alta Excelência, Cientifica Lâmina e Salomão Zoppi'
+    obs: 'Delboni, Lavoisier, Alta Excelência, Cientifica Lâmina e Salomão Zoppi',
+    // Pedaços de nome, para reconhecer a unidade quando o CNPJ estiver em branco ou digitado
+    // de outro jeito. Era por isso que o filtro DASA não aparecia no SP Regula: os cadastros
+    // estavam lá, mas o sistema só sabia agrupar pela raiz do CNPJ.
+    nomes: ['DASA','DELBONI','AURIEMO','LAVOISIER','ALTA EXCELENCIA','CIENTIFICA LAMINA','LAMINA','SALOMAO ZOPPI','ZOPPI']
   }
 };
+function _semAcento(v){
+  return String(v==null?'':v).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/\s+/g,' ').trim();
+}
+// Grupo empresarial de um cadastro do SP Regula / SIGOR: tenta pela raiz do CNPJ e, se o
+// CNPJ não resolver, pelo nome da unidade.
+function grupoEmpresaDeRegistro(d){
+  if (!d) return '';
+  const porCnpj = FIN_grupoEmpresaDe({ cnpj: d['CNPJ'] });
+  if (porCnpj) return porCnpj;
+  const nome = _semAcento(d['CLIENTE']);
+  if (!nome) return '';
+  for (const g in GRUPOS_EMPRESA) {
+    const lista = GRUPOS_EMPRESA[g].nomes || [];
+    for (let i = 0; i < lista.length; i++) {
+      if (nome.indexOf(_semAcento(lista[i])) !== -1) return g;
+    }
+  }
+  return '';
+}
 function _raizCnpj(cnpj){ return String(cnpj||'').replace(/\D/g,'').slice(0,8); }
 // nome do grupo empresarial de uma coleta ('' se não pertence a nenhum)
 function FIN_grupoEmpresaDe(c){
