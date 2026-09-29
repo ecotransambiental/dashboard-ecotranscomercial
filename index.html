@@ -393,7 +393,7 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.24</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.25</div>
       </div>
     </aside>
     <!-- VERSÃO DO DASHBOARD: v2026.08.20 — desempenho: canal exclusivo pra salvar, cache deixou de ser apagado inteiro a cada salvamento, CRM atualiza a linha na memória em vez de rebuscar a aba. ANTERIOR: v2026.08.19b — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
@@ -7623,14 +7623,45 @@ async function salvarRenovacao(id) {
       dados:{ id:String(id), validade:validadeBR, assessoria, valor,
         cliente: d?d['CLIENTE']:'', cnpj: d?(d['CNPJ']||''):'', consultor: d?(d['CONSULTOR']||''):'' }})});
     const r = await resp.json();
-    if (r.ok) {
-      if (d) { d['DATA_VALIDADE'] = validadeBR; d['STATUS'] = 'Vigente'; }
-      cacheRenov = null; // força recarregar o histórico
-      msg.innerHTML = '<div style="background:var(--verde-ok-bg);border-radius:8px;padding:10px;margin-top:10px;color:var(--verde-ok);font-size:13px;"><i class="ti ti-circle-check"></i> Renovação salva no sistema! Todos já veem a nova validade.</div>';
-      setTimeout(()=>{ fecharFicha(); renderRegula(document.getElementById('area-conteudo'),'rgg'); }, 1500);
-    } else {
+    if (!r.ok) {
       msg.innerHTML = '<div class="sem-acesso" style="margin-top:10px;">Falhou ao salvar: '+(r.erro||'verifique o Apps Script.')+'</div>';
+      return;
     }
+    // ============================================================
+    // ATENÇÃO: o servidor responde ok:true mesmo quando NÃO encontrou o cadastro para
+    // atualizar — ele só avisa disso no campo 'atualizou'. Era por isso que a tela dizia
+    // "renovação salva" e, ao recarregar a página, a validade continuava a antiga: o
+    // histórico era gravado, mas a data em Clientes_RGG não. Agora conferimos 'atualizou'.
+    // ============================================================
+    let gravou = (r.atualizou !== false);
+    let viaPlanoB = false;
+    if (!gravou) {
+      // PLANO B: o cadastro não foi achado pelo ID (cadastro antigo, ID em branco ou
+      // digitado direto na planilha). Tenta de novo casando por CNPJ + nome do cliente,
+      // usando a ação 'salvar' que já existe no Apps Script.
+      if (d && (d['CLIENTE'] || d['CNPJ'])) {
+        try {
+          const r2 = await apiPost({ acao:'salvar', aba:'Clientes_RGG', token: sessaoToken, chaveExtra:'CLIENTE',
+            dados:{ 'CNPJ': d['CNPJ']||'', 'CLIENTE': d['CLIENTE']||'', 'DATA_VALIDADE': validadeBR, 'STATUS':'Vigente' } });
+          const d2 = r2.ok ? r2.dados : null;
+          if (d2 && d2.ok) { gravou = true; viaPlanoB = true; }
+        } catch(e) {}
+      }
+    }
+    if (!gravou) {
+      msg.innerHTML = `<div class="sem-acesso" style="margin-top:10px;line-height:1.5;">
+        <b>A validade NÃO foi atualizada.</b><br>
+        Não encontrei o cadastro <b>${(d&&d['CLIENTE'])||'(sem nome)'}</b> na aba Clientes_RGG — nem pelo código (ID <b>${String(id)||'vazio'}</b>), nem pelo CNPJ e nome.
+        <br><span style="font-size:11.5px;">A renovação ficou registrada no histórico, mas a data de validade continua a antiga. Normalmente é a coluna ID em branco na planilha: preencha e tente de novo.</span></div>`;
+      return;
+    }
+    if (d) { d['DATA_VALIDADE'] = validadeBR; d['STATUS'] = 'Vigente'; }
+    cacheRenov = null; cacheRGG = null;   // força recarregar histórico e cadastros
+    limparCacheDaAcao({ acao:'salvarRenovacaoSP' });
+    msg.innerHTML = '<div style="background:var(--verde-ok-bg);border-radius:8px;padding:10px;margin-top:10px;color:var(--verde-ok);font-size:13px;"><i class="ti ti-circle-check"></i> Renovação salva e <b>conferida</b>! Todos já veem a nova validade.'
+      + (viaPlanoB ? '<div style="font-size:11.5px;margin-top:4px;color:#8a6d00;">Este cadastro estava sem código (ID); atualizei casando por CNPJ e nome.</div>' : '')
+      + '</div>';
+    setTimeout(()=>{ fecharFicha(); renderRegula(document.getElementById('area-conteudo'),'rgg'); }, 1500);
   } catch(e) {
     msg.innerHTML = '<div class="sem-acesso" style="margin-top:10px;">Erro de conexão: '+e.message+'</div>';
   }
