@@ -393,7 +393,7 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.26</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.27</div>
       </div>
     </aside>
     <!-- VERSÃO DO DASHBOARD: v2026.08.20 — desempenho: canal exclusivo pra salvar, cache deixou de ser apagado inteiro a cada salvamento, CRM atualiza a linha na memória em vez de rebuscar a aba. ANTERIOR: v2026.08.19b — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
@@ -1236,12 +1236,59 @@ function _telaErro(area, nome, e, subQuandoPediu){
     <button class="ficha-btn-primario" style="margin-top:14px;padding:10px 18px;border:none;border-radius:8px;cursor:pointer;font-size:13px;" onclick="renderConteudo(subAtual, subNomeAtual)"><i class="ti ti-refresh"></i> Tentar de novo</button>
   </div>`;
 }
+// ============================================================
+// TELA QUE NÃO TERMINA DE CARREGAR
+// ------------------------------------------------------------
+// Até aqui, se um pedido ao Google nunca respondesse, a tela ficava girando pra sempre e
+// a pessoa não tinha nenhuma informação nem saída. Agora um relógio dispara depois de
+// 40 segundos e mostra o que está acontecendo, com botões pra sair do lugar. Se os dados
+// chegarem depois, a tela normal aparece por cima e o painel some sozinho.
+// ============================================================
+function limparTudoERecarregar(){
+  try { localStorage.removeItem('ecotrans_cache_leitura'); } catch(e){}
+  try { if (typeof FIN_LS_KEY !== 'undefined') localStorage.removeItem(FIN_LS_KEY); } catch(e){}
+  location.reload();
+}
+function _painelTravado(area, nome, t0){
+  if (!area) return;
+  const seg = Math.round((Date.now()-t0)/1000);
+  const naFila = (typeof window._apiNaFila === 'function') ? window._apiNaFila() : '?';
+  area.innerHTML = `
+    <div style="max-width:620px;margin:30px auto;background:white;border:1.5px solid var(--amarelo,#E8C547);border-radius:12px;padding:22px;">
+      <div style="font-size:16px;font-weight:600;color:#8a6d00;margin-bottom:8px;">
+        <i class="ti ti-clock-exclamation"></i> ${nome||'Esta tela'} está demorando demais</div>
+      <div style="font-size:13px;color:var(--cinza-700);line-height:1.6;">
+        Já são <b>${seg} segundos</b> esperando o servidor do Google.
+        ${naFila>0?`Ainda há <b>${naFila} pedido(s)</b> na fila — continuo tentando.`:'Não há nenhum pedido em andamento, o que normalmente quer dizer que a resposta se perdeu.'}
+        <br><br>Isso quase sempre é o Google recusando pedidos por excesso de uso — não é perda de dado.
+        Nada do que estava salvo foi afetado.
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;">
+        <button onclick="location.reload()" style="padding:9px 14px;border:none;background:var(--verde-medio);color:white;border-radius:8px;cursor:pointer;font-size:13px;"><i class="ti ti-refresh"></i> Tentar de novo</button>
+        <button onclick="limparTudoERecarregar()" style="padding:9px 14px;border:1.5px solid var(--verde-medio);background:white;color:var(--verde-escuro);border-radius:8px;cursor:pointer;font-size:13px;"><i class="ti ti-eraser"></i> Limpar o que está guardado e recarregar</button>
+        <button onclick="window.open(API_URL,'_blank')" style="padding:9px 14px;border:1.5px solid var(--cinza-300);background:white;color:var(--cinza-700);border-radius:8px;cursor:pointer;font-size:13px;"><i class="ti ti-stethoscope"></i> Testar o servidor</button>
+      </div>
+      <div style="font-size:11.5px;color:var(--cinza-500);margin-top:12px;line-height:1.5;">
+        <b>Testar o servidor</b> abre o endereço do Apps Script numa aba nova. Se vier uma página de erro do Google,
+        o problema é lá e passa sozinho — em geral em alguns minutos.
+      </div>
+    </div>`;
+}
 function _tela(fn, area, nome, arg2){
   const subPedido = (typeof subAtual !== 'undefined') ? subAtual : null;
+  const t0 = Date.now();
+  let pronto = false;
+  const relogio = setTimeout(()=>{
+    if (pronto) return;
+    if (typeof subAtual !== 'undefined' && subAtual !== subPedido) return;   // pessoa já trocou de tela
+    _painelTravado(area, nome, t0);
+  }, 40000);
+  const fim = () => { pronto = true; clearTimeout(relogio); };
   try {
     const p = (arg2!==undefined) ? fn(area, arg2) : fn(area);
-    if (p && typeof p.catch === 'function') p.catch(e=>_telaErro(area, nome, e, subPedido));
-  } catch(e) { _telaErro(area, nome, e, subPedido); }
+    if (p && typeof p.then === 'function') p.then(fim, e=>{ fim(); _telaErro(area, nome, e, subPedido); });
+    else fim();
+  } catch(e) { fim(); _telaErro(area, nome, e, subPedido); }
 }
 // ---- Conteúdo: telas-chave já leem dados reais; resto é placeholder ----
 async function renderConteudo(subId, subNome) {
