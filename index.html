@@ -393,7 +393,7 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.27</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.28</div>
       </div>
     </aside>
     <!-- VERSÃO DO DASHBOARD: v2026.08.20 — desempenho: canal exclusivo pra salvar, cache deixou de ser apagado inteiro a cada salvamento, CRM atualiza a linha na memória em vez de rebuscar a aba. ANTERIOR: v2026.08.19b — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
@@ -9772,7 +9772,25 @@ async function renderPendencias(area){
   const soMeuCons = v => ehMeuRegistro(v) || String(v||'').trim().toUpperCase()===meuNome;
   // solicitações: diretoria/Mafe/Dany veem todas; consultor só as suas
   const meuCons = v => veTudo || ehMeuRegistro(v) || String(v||'').trim().toUpperCase()===meuNome;
-  const [ra, rs] = await Promise.all([_pAtiv, _pSolic, _pLeads]);
+  // ============================================================
+  // A ABA Atividades_Cliente NÃO SEGURA MAIS A TELA INTEIRA
+  // ------------------------------------------------------------
+  // Ela guarda TODA tratativa já registrada, então cresce sem parar e hoje é de longe a
+  // leitura mais pesada do sistema. Como ela entrava no mesmo Promise.all das outras duas,
+  // a tela ficava parada em "Carregando..." esperando só por ela.
+  // Agora: abrimos com solicitações e leads (rápidos) e damos 9 segundos para as
+  // atividades. Se não chegarem, a tela abre mesmo assim avisando o que falta; quando elas
+  // chegam, a tela se redesenha sozinha — de graça, porque aí já estão no cache.
+  // ============================================================
+  const rs = await _pSolic;
+  await _pLeads;
+  let ra = await Promise.race([ _pAtiv, new Promise(r=>setTimeout(()=>r({ ok:false, _demorou:true }), 9000)) ]);
+  if (ra && ra._demorou) {
+    _pAtiv.then(()=>{
+      // só redesenha se a pessoa ainda estiver nesta tela
+      if (typeof subAtual !== 'undefined' && subAtual === 'pend-home') renderPendencias(area);
+    });
+  }
   // Se as DUAS leituras falharam, não há o que mostrar: avisa e oferece tentar de novo,
   // em vez de deixar a pessoa olhando "Carregando..." sem fim.
   if ((ra && ra._falhou) && (rs && rs._falhou)) {
@@ -9790,6 +9808,7 @@ async function renderPendencias(area){
   // uma falhou só: mostra o que deu certo e avisa o que ficou faltando
   const _avisoParcial = (ra && ra._falhou) ? 'follow-ups e visitas'
                       : (rs && rs._falhou) ? 'contratos e aditivos' : '';
+  const _aindaVem = !!(ra && ra._demorou);
   const hojeD = new Date(); hojeD.setHours(0,0,0,0);
   const diasDe = d => { const x=parseDataReaj(d); if(!x) return null; const xx=new Date(x); xx.setHours(0,0,0,0); return Math.round((xx-hojeD)/864e5); };
   // FOLLOW-UPS (leads com FOLLOWUP + atividades tipo Follow-up não concluídas)
@@ -9833,6 +9852,9 @@ async function renderPendencias(area){
       <div style="font-size:20px;font-family:var(--fonte-display);font-weight:600;color:var(--cinza-900);">Olá, ${(usuarioAtual.nome||'').split(' ')[0]}! 👋</div>
       <div style="font-size:13px;color:var(--cinza-500);">Follow-ups e visitas são sempre seus.${veTudo?' Contratos e aditivos você vê de toda a equipe.':''} ${totalPend?('Você tem <b>'+totalPend+'</b> item(ns) pendente(s).'):'Tudo em dia por aqui!'}</div>
     </div>
+    ${_aindaVem?`<div style="background:var(--verde-claro-bg);border:1px solid var(--verde-medio);border-radius:10px;padding:11px 13px;margin-bottom:14px;font-size:13px;color:var(--verde-escuro);">
+      <i class="ti ti-loader"></i> Seus <b>follow-ups e visitas</b> ainda estão vindo — é a parte mais pesada. O que já chegou está aí embaixo, e a tela se completa sozinha em instantes.
+    </div>`:''}
     ${_avisoParcial?`<div style="background:var(--amarelo-bg);border:1px solid var(--amarelo-borda);border-radius:10px;padding:11px 13px;margin-bottom:14px;font-size:13px;color:#8a6d00;">
       <i class="ti ti-alert-triangle"></i> Parte dos dados não carregou (<b>${_avisoParcial}</b>). O resto está aí embaixo.
       <button onclick="renderPendencias(document.getElementById('area-conteudo'))" style="margin-left:8px;padding:4px 10px;border:none;background:#8a6d00;color:white;border-radius:6px;cursor:pointer;font-size:12px;">Tentar de novo</button>
