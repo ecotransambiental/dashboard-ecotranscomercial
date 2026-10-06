@@ -393,7 +393,7 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.29</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.30</div>
       </div>
     </aside>
     <!-- VERSÃO DO DASHBOARD: v2026.08.20 — desempenho: canal exclusivo pra salvar, cache deixou de ser apagado inteiro a cada salvamento, CRM atualiza a linha na memória em vez de rebuscar a aba. ANTERIOR: v2026.08.19b — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
@@ -11164,7 +11164,17 @@ async function finSincronizarAposUpload(tipoDados, st){
     if (st) { st.textContent = 'Salvo! Todos da equipe já veem estes dados.'; st.style.color='var(--verde-medio)'; }
     if (typeof finInvalidarCache==='function') finInvalidarCache();
   } catch(e){
-    if (st) { st.innerHTML = 'Processado, mas <b>falhou ao salvar no sistema</b>. Verifique a conexão e o Apps Script.<br><span style="font-size:11px;">'+e.message+'</span>'; st.style.color='var(--vermelho)'; }
+    if (st) {
+      const per = e && e._periodo ? String(e._periodo) : '';
+      st.innerHTML = `<b>N\u00e3o consegui salvar no sistema.</b>`
+        + (per?`<div style="font-size:12px;margin-top:4px;">Per\u00edodo afetado: <b>${per}</b>${e._esperado?` (${e._esperado} linhas)`:''}.</div>`:'')
+        + `<div style="font-size:12px;margin-top:6px;color:var(--cinza-700);line-height:1.5;">O arquivo foi lido certinho e <b>continua na mem\u00f3ria</b> \u2014 voc\u00ea n\u00e3o precisa escolher o arquivo de novo. `
+        + `Tentei 3 vezes; o Google recusou as tr\u00eas. <b>Confira na aba Coletas se o per\u00edodo est\u00e1 completo antes de usar os n\u00fameros.</b></div>`
+        + `<div style="margin-top:9px;"><button onclick="finSincronizarAposUpload('${tipoDados}', this.closest('div').parentElement)" style="padding:7px 12px;border:none;background:var(--verde-medio);color:white;border-radius:7px;cursor:pointer;font-size:12px;"><i class="ti ti-refresh"></i> Tentar salvar de novo</button></div>`
+        + `<div style="font-size:11px;color:var(--cinza-500);margin-top:6px;">Detalhe t\u00e9cnico: ${e.message}</div>`;
+      st.style.color='var(--vermelho)';
+      st._mesesEnviar = st._mesesEnviar;   // preserva os meses para a nova tentativa
+    }
   }
 }
 
@@ -11264,12 +11274,43 @@ async function finEnviarSheets(tipo, valorPeriodo, statusEl){
       dados:{ aba:cfg.aba, colunas, linhas:[], modo, campoPeriodo:cfg.campoPeriodo, valorPeriodo, primeiroLote:true }})});
     return;
   }
-  for (let i=0;i<aEnviar.length;i+=LOTE){
-    const lote = aEnviar.slice(i,i+LOTE);
-    if (statusEl) statusEl.textContent = `Enviando ${Math.min(i+LOTE,aEnviar.length)} de ${aEnviar.length}...`;
-    await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'salvarFinanceiro',token:sessaoToken,
-      dados:{ aba:cfg.aba, colunas, linhas:lote, modo, campoPeriodo:cfg.campoPeriodo, valorPeriodo, primeiroLote:primeiro }})});
-    primeiro = false;
+  // ============================================================
+  // ENVIO COM REPETIÇÃO SEGURA
+  // ------------------------------------------------------------
+  // Antes, o laço abaixo ignorava o resultado de cada lote. Se o Google recusasse um pedido
+  // no meio (a famosa "página de erro"), o envio parava ali — e, como o PRIMEIRO lote já
+  // tinha apagado o mês inteiro para reescrevê-lo, o mês ficava pela metade na planilha,
+  // sem ninguém saber. Pior que não salvar: salvar errado e parecer certo.
+  //
+  // Agora, se qualquer lote falhar, refazemos o PERÍODO INTEIRO do zero. Isso é seguro
+  // justamente porque o primeiro lote limpa o período antes de gravar — então repetir
+  // nunca duplica. Melhor reenviar tudo do que deixar meio mês gravado.
+  // ============================================================
+  const _mandaTudo = async (tentativa) => {
+    let pri = true;
+    for (let i=0;i<aEnviar.length;i+=LOTE){
+      const lote = aEnviar.slice(i,i+LOTE);
+      const feito = Math.min(i+LOTE,aEnviar.length);
+      if (statusEl) statusEl.innerHTML = `Enviando <b>${feito} de ${aEnviar.length}</b>${tentativa>1?` <span style="color:#8a6d00;">(tentativa ${tentativa})</span>`:''}...`;
+      const resp = await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'salvarFinanceiro',token:sessaoToken,
+        dados:{ aba:cfg.aba, colunas, linhas:lote, modo, campoPeriodo:cfg.campoPeriodo, valorPeriodo, primeiroLote:pri }})});
+      const r = await resp.json();
+      if (!r || !r.ok) throw new Error((r && r.erro) || 'o servidor n\u00e3o confirmou a grava\u00e7\u00e3o');
+      pri = false;
+    }
+  };
+  const TENTATIVAS = 3;
+  for (let t = 1; t <= TENTATIVAS; t++) {
+    try { await _mandaTudo(t); return; }
+    catch(e) {
+      if (t === TENTATIVAS) {
+        const err = new Error('N\u00e3o consegui gravar ' + (valorPeriodo||cfg.aba) + ' depois de ' + TENTATIVAS + ' tentativas. \u00daltimo erro: ' + (e.message||e));
+        err._periodo = valorPeriodo; err._aba = cfg.aba; err._esperado = aEnviar.length;
+        throw err;
+      }
+      if (statusEl) statusEl.innerHTML = `<span style="color:#8a6d00;">O servidor recusou. Esperando para tentar de novo (${t} de ${TENTATIVAS-1})...</span>`;
+      await new Promise(r=>setTimeout(r, 6000*t));
+    }
   }
 }
 
