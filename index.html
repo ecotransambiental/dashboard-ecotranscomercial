@@ -393,7 +393,7 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.28</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.29</div>
       </div>
     </aside>
     <!-- VERSÃO DO DASHBOARD: v2026.08.20 — desempenho: canal exclusivo pra salvar, cache deixou de ser apagado inteiro a cada salvamento, CRM atualiza a linha na memória em vez de rebuscar a aba. ANTERIOR: v2026.08.19b — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
@@ -4399,12 +4399,45 @@ async function confirmarDeclinio(idLead) {
   const motivo = motivoSel;
   const lead = achaLead(idLead);
   const overlay = document.getElementById('modal-motivo-overlay');
-  if (overlay) overlay.remove();
+  const _msg = document.getElementById('mp-msg');
+  if (_msg) _msg.innerHTML = '<div style="font-size:12.5px;color:var(--cinza-500);margin-top:10px;"><i class="ti ti-loader"></i> Salvando...</div>';
   if (ehCobertura) {
     await mudarEtapaLead(idLead, 'Cobertura', motivo, { _cobertura:true, quemAtende, obsPerda: obs });
   } else {
     await mudarEtapaLead(idLead, 'Declinado', motivo, { obsPerda: obs });
   }
+  // ============================================================
+  // GRAVA O MOTIVO E O DETALHE DE VERDADE
+  // ------------------------------------------------------------
+  // A rotina que move o lead grava MOTIVO_PERDA só quando a etapa é exatamente "Declinado",
+  // e NÃO grava OBS_PERDA em nenhum caso — o detalhe digitado ficava só na tela e sumia
+  // ao recarregar a página. Gravamos aqui pela ação atualizarLeadCampos, que já existe,
+  // casa pelo ID_LEAD e ainda cria a coluna OBS_PERDA caso ela não exista na planilha.
+  // ============================================================
+  const _moveuOk = lead && ['Declinado','Cobertura'].indexOf(String(lead['ETAPA'])) !== -1;
+  let _gravouMotivo = true;
+  if (_moveuOk) {
+    if (!String(idLead||'').trim()) {
+      _gravouMotivo = false;   // lead sem código: gravar pelo ID em branco acertaria outro lead
+    } else {
+      const campos = { 'MOTIVO_PERDA': motivo };
+      if (obs) campos['OBS_PERDA'] = obs;
+      try {
+        const rj = await apiPost({ acao:'atualizarLeadCampos', token: sessaoToken, dados:{ idLead:String(idLead), campos } });
+        const dj = rj.ok ? rj.dados : null;
+        _gravouMotivo = !!(dj && dj.ok);
+      } catch(e) { _gravouMotivo = false; }
+      if (_gravouMotivo) { lead['MOTIVO_PERDA'] = motivo; if (obs) lead['OBS_PERDA'] = obs; }
+    }
+  }
+  if (_moveuOk && !_gravouMotivo) {
+    if (_msg) _msg.innerHTML = `<div class="sem-acesso" style="margin-top:10px;line-height:1.5;">
+      O lead foi movido, mas <b>não consegui gravar o motivo${obs?' e o detalhe':''}</b>.
+      <span style="font-size:11.5px;">${String(idLead||'').trim()?'Tente de novo em instantes.':'Este lead está sem código (ID_LEAD vazio na planilha) — preencha e refaça.'}</span>
+      <div style="margin-top:8px;"><button onclick="document.getElementById('modal-motivo-overlay').remove()" style="padding:6px 11px;border:1px solid var(--cinza-300);background:white;border-radius:7px;cursor:pointer;font-size:12px;">Fechar</button></div></div>`;
+    return;   // deixa o modal aberto com o texto digitado, em vez de perder o que ela escreveu
+  }
+  if (overlay) overlay.remove();
   // registra o motivo como TRATATIVA (pra ficar no histórico de atividades do lead/cliente)
   if (lead) {
     const tit = ehCobertura ? 'Cobertura' : 'Declínio';
@@ -10839,6 +10872,7 @@ async function abrirLead(id, nomeEnc) {
             ${linha('Data do contato', fmtDataBR(l['DATA_CONTATO']))}
             ${linha('Envio proposta', fmtDataBR(l['DATA_ENVIO_PROPOSTA']))}
             ${linha('Motivo da perda', l['MOTIVO_PERDA'])}
+            ${linha('Detalhe do decl\u00ednio', l['OBS_PERDA'])}
             ${linha('Observações', l['OBSERVACOES'])}
             ${linha('Informação adicional', l['INFO_ADICIONAL'])}
           </table>
