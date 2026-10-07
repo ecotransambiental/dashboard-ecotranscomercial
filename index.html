@@ -393,7 +393,7 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.31</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.09.01</div>
       </div>
     </aside>
     <!-- VERSÃO DO DASHBOARD: v2026.08.31 (o número que vale é o da barra lateral, abaixo do botão Sair). HISTÓRICO ANTIGO: v2026.08.20 — desempenho: canal exclusivo pra salvar, cache deixou de ser apagado inteiro a cada salvamento, CRM atualiza a linha na memória em vez de rebuscar a aba. ANTERIOR: v2026.08.19b — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
@@ -11157,6 +11157,25 @@ async function finSincronizarAposUpload(tipoDados, st){
     // porque os meses antigos ficam onde estão.
     if (tipoDados==='coletas' && Array.isArray(st && st._mesesEnviar) && st._mesesEnviar.length) {
       for (const ym of st._mesesEnviar) await finEnviarSheets('coletas', ym, st);
+      // ============================================================
+      // CONFERIR SE O MÊS FICOU CERTO — e consertar sozinho se não ficou
+      // ------------------------------------------------------------
+      // O envio por período manda o servidor apagar o mês antes de regravar. Quando essa
+      // limpeza não acontece (basta a coluna do mês estar guardada num formato diferente
+      // do que mandamos, e a comparação deixa de bater), cada reenvio ACRESCENTA uma cópia
+      // inteira em vez de substituir — e ninguém percebe, porque não dá erro nenhum.
+      // Agora conferimos relendo a aba: se a quantidade de linhas do mês não bater com o
+      // que mandamos, reescrevemos a aba inteira a partir da memória, que é o único jeito
+      // que não depende daquela comparação.
+      // ============================================================
+      if (st) st.innerHTML = 'Conferindo se o m\u00eas ficou certo...';
+      const _conf = await finConferirColetas(st._mesesEnviar);
+      if (_conf.problema) {
+        if (st) st.innerHTML = `<span style="color:#8a6d00;">Encontrei linhas repetidas (${_conf.detalhe}). Reescrevendo a aba inteira para corrigir \u2014 pode levar um pouco.</span>`;
+        await finEnviarSheetsCompleto('coletas', st);
+        const _conf2 = await finConferirColetas(st._mesesEnviar);
+        if (_conf2.problema) throw new Error('Mesmo reescrevendo, a aba continuou diferente do esperado (' + _conf2.detalhe + ').');
+      }
     } else {
       // demais relatórios: reescreve a aba inteira do tipo (a memória é a fonte da verdade)
       await finEnviarSheetsCompleto(tipoDados, st);
@@ -11176,6 +11195,25 @@ async function finSincronizarAposUpload(tipoDados, st){
       st._mesesEnviar = st._mesesEnviar;   // preserva os meses para a nova tentativa
     }
   }
+}
+
+// Relê a aba Fin_Coletas e compara, mês a mês, a quantidade de linhas que ESTÁ lá com a
+// quantidade que deveria estar (a que temos em memória). Devolve {problema, detalhe}.
+async function finConferirColetas(meses){
+  try {
+    const resp = await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'dados',token:sessaoToken,aba:'Fin_Coletas'})});
+    const r = await resp.json();
+    if (!r || !r.ok || !Array.isArray(r.linhas)) return { problema:false, detalhe:'n\u00e3o consegui conferir' };
+    const naPlanilha = {}, naMemoria = {};
+    r.linhas.forEach(l => { const k = String(l.ym||''); naPlanilha[k] = (naPlanilha[k]||0) + 1; });
+    (FINdados.coletas||[]).forEach(c => { const k = String(c.ym||''); naMemoria[k] = (naMemoria[k]||0) + 1; });
+    const ruins = [];
+    (meses||[]).forEach(ym => {
+      const tem = naPlanilha[ym] || 0, devia = naMemoria[ym] || 0;
+      if (tem !== devia) ruins.push(`${finRotMes(ym)}: ${tem} na planilha x ${devia} esperadas`);
+    });
+    return { problema: ruins.length > 0, detalhe: ruins.join(' \u00b7 ') };
+  } catch(e) { return { problema:false, detalhe:'n\u00e3o consegui conferir: '+(e.message||e) }; }
 }
 
 // reescreve a aba inteira do tipo no Sheets (modo 'tudo'), em lotes. Fonte = memória (FINdados[tipo]).
