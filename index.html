@@ -393,10 +393,10 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.30</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.08.31</div>
       </div>
     </aside>
-    <!-- VERSÃO DO DASHBOARD: v2026.08.20 — desempenho: canal exclusivo pra salvar, cache deixou de ser apagado inteiro a cada salvamento, CRM atualiza a linha na memória em vez de rebuscar a aba. ANTERIOR: v2026.08.19b — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
+    <!-- VERSÃO DO DASHBOARD: v2026.08.31 (o número que vale é o da barra lateral, abaixo do botão Sair). HISTÓRICO ANTIGO: v2026.08.20 — desempenho: canal exclusivo pra salvar, cache deixou de ser apagado inteiro a cada salvamento, CRM atualiza a linha na memória em vez de rebuscar a aba. ANTERIOR: v2026.08.19b — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
 
     <!-- Coluna nível 2: submódulos -->
     <div class="subcoluna" id="subcoluna">
@@ -11383,6 +11383,36 @@ function finNormNome(s){ return finLc(s).toUpperCase().replace(/\([^)]*\)/g,'').
 
 const FIN_MESES={'janeiro':'01','fevereiro':'02','março':'03','marco':'03','abril':'04','maio':'05','junho':'06','julho':'07','agosto':'08','setembro':'09','outubro':'10','novembro':'11','dezembro':'12'};
 const FIN_MESNOME={'01':'Jan','02':'Fev','03':'Mar','04':'Abr','05':'Mai','06':'Jun','07':'Jul','08':'Ago','09':'Set','10':'Out','11':'Nov','12':'Dez'};
+// ============================================================
+// RECONHECER A COLUNA DE MÊS NO RELATÓRIO DE VARIAÇÃO
+// ------------------------------------------------------------
+// Até aqui só valia o nome do mês escrito por extenso e exatamente igual ('julho').
+// Qualquer outra forma — 'Julho/2026', 'Jul', 'jul/26', ou a célula que o Excel converteu
+// em data — era ignorada em silêncio: a coluna sumia e o mês simplesmente não aparecia
+// na ficha do cliente, sem nenhum aviso.
+// Devolve sempre o nome canônico ('Julho') para a chave ficar igual à dos meses antigos.
+// ============================================================
+const _FIN_MESES_ORD = ['Janeiro','Fevereiro','Mar\u00e7o','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+function finMesDeCabecalho(c){
+  if (c instanceof Date && !isNaN(c)) return _FIN_MESES_ORD[c.getMonth()];
+  const bruto = String(c==null?'':c).trim();
+  if (!bruto) return '';
+  const sem = bruto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
+  for (let i=0;i<_FIN_MESES_ORD.length;i++){
+    const n = _FIN_MESES_ORD[i].toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    const ab = n.slice(0,3);
+    // 'julho' | 'julho/2026' | 'julho 2026' | 'julho-26' | 'jul' | 'jul/26' | 'jul.'
+    if (sem === n || sem === ab) return _FIN_MESES_ORD[i];
+    if (new RegExp('^'+n+'[\\s/\\-.]').test(sem)) return _FIN_MESES_ORD[i];
+    if (new RegExp('^'+ab+'[\\s/\\-.]').test(sem)) return _FIN_MESES_ORD[i];
+  }
+  // '07/2026' ou '2026-07'
+  let m = sem.match(/^(\d{1,2})[\/\-](\d{2,4})$/);
+  if (m && +m[1]>=1 && +m[1]<=12) return _FIN_MESES_ORD[+m[1]-1];
+  m = sem.match(/^(\d{4})[\/\-](\d{1,2})$/);
+  if (m && +m[2]>=1 && +m[2]<=12) return _FIN_MESES_ORD[+m[2]-1];
+  return '';
+}
 function finCompYM(v){ const s=finLc(v).toLowerCase(); const m=s.match(/([a-zç]+)\/(\d{4})/); return (m&&FIN_MESES[m[1]])?`${m[2]}-${FIN_MESES[m[1]]}`:''; }
 function finRotMes(ym){ if(!ym) return '—'; const [a,m]=ym.split('-'); return (FIN_MESNOME[m]||m)+'/'+a.slice(2); }
 
@@ -12743,22 +12773,42 @@ function FIN_processarFaturamentoVar(wb, st){
   const cab=grade[hrow].map(v=>finLc(v));
   const iCli=cab.findIndex(c=>c.toLowerCase()==='cliente');
   // meses = colunas que são nome de mês
-  const idxMeses=[]; const nomesMeses=[];
-  cab.forEach((c,i)=>{ if(FIN_MESES[c.toLowerCase().trim()]){ idxMeses.push(i); nomesMeses.push(c.trim()); } });
-  if(!idxMeses.length){ st.textContent='Não achei colunas de mês (Abril, Maio...).'; st.style.color='var(--vermelho)'; return; }
-  // substitui tudo (é um retrato completo, não incremental como os títulos)
-  FINdados.faturamento=[];
-  let n=0;
+  const idxMeses=[]; const nomesMeses=[]; const ignoradas=[];
+  cab.forEach((c,i)=>{
+    if (i===iCli) return;
+    const mes = finMesDeCabecalho(c);
+    if (mes) { idxMeses.push(i); nomesMeses.push(mes); }
+    else if (String(c||'').trim()) ignoradas.push(String(c).trim());
+  });
+  if(!idxMeses.length){ st.innerHTML='N\u00e3o achei nenhuma coluna de m\u00eas.<br><span style="font-size:11px;">Colunas lidas: '+cab.filter(Boolean).join(', ')+'</span>'; st.style.color='var(--vermelho)'; return; }
+  // ============================================================
+  // MESCLA POR MÊS — não apaga mais o que já estava
+  // ------------------------------------------------------------
+  // Antes esta linha era FINdados.faturamento=[], ou seja: o arquivo novo substituía TUDO.
+  // Se o relatório trouxesse só julho em diante, janeiro a junho desapareciam da ficha de
+  // todo mundo. Agora cada mês que vem no arquivo substitui o mesmo mês, e os meses que
+  // não vieram ficam onde estavam — a mesma regra que já vale para as Coletas.
+  // ============================================================
+  if (!Array.isArray(FINdados.faturamento)) FINdados.faturamento = [];
+  const porNome = {};
+  FINdados.faturamento.forEach(x => { porNome[_finNormNome(x.cliente)] = x; });
+  let n=0, novos=0;
   for(let i=hrow+1;i<grade.length;i++){
     const cli=finLc(grade[i][iCli]);
     if(!cli || /^\d+$/.test(cli) || cli.toLowerCase().startsWith('total')) continue;
-    const valores={};
-    idxMeses.forEach((idx,k)=>{ valores[nomesMeses[k]]=finParseValorBR(grade[i][idx]); });
-    FINdados.faturamento.push({ cliente:cli, valores });
+    const chave=_finNormNome(cli);
+    let item=porNome[chave];
+    if(!item){ item={ cliente:cli, valores:{} }; porNome[chave]=item; FINdados.faturamento.push(item); novos++; }
+    idxMeses.forEach((idx,k)=>{ item.valores[nomesMeses[k]] = finParseValorBR(grade[i][idx]); });
     n++;
   }
   window._fatVarMeses = nomesMeses;
-  st.textContent=`${n} clientes carregados (meses: ${nomesMeses.join(', ')}).`; st.style.color='var(--verde-medio)';
+  const todosMeses = _FIN_MESES_ORD.filter(m => FINdados.faturamento.some(x => x.valores && x.valores[m]!==undefined));
+  st.innerHTML = `<b>${n} clientes</b> lidos (${novos} novos).<br>`
+    + `Meses <b>deste arquivo</b>: ${nomesMeses.join(', ')}.<br>`
+    + `<span style="color:var(--cinza-600);">Meses no sistema depois desta carga: ${todosMeses.join(', ')||'nenhum'}.</span>`
+    + (ignoradas.length ? `<br><span style="color:#8a6d00;"><i class="ti ti-alert-triangle"></i> Colunas que n\u00e3o reconheci como m\u00eas (foram ignoradas): <b>${ignoradas.join(', ')}</b>. Se alguma dessas era um m\u00eas, me avise o nome exato.</span>` : '');
+  st.style.color='var(--verde-medio)';
 }
 
 // reescreve no Sheets todo o faturamento que está em memória (corrige quando só um mês foi salvo lá)
