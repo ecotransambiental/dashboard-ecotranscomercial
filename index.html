@@ -393,7 +393,7 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.09.01</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.09.03</div>
       </div>
     </aside>
     <!-- VERSÃO DO DASHBOARD: v2026.08.31 (o número que vale é o da barra lateral, abaixo do botão Sair). HISTÓRICO ANTIGO: v2026.08.20 — desempenho: canal exclusivo pra salvar, cache deixou de ser apagado inteiro a cada salvamento, CRM atualiza a linha na memória em vez de rebuscar a aba. ANTERIOR: v2026.08.19b — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
@@ -508,7 +508,8 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbw-nMudRjf8DkkzdJi9mLFx
     // ficha limpar o cache inteiro — e a tela seguinte rebuscava tudo do zero.
     try {
       const b = (opts && opts.body) ? String(opts.body) : '';
-      ehLeitura = b.indexOf('"acao":"dados"') >= 0 || b.indexOf('"acao":"dadosFicha"') >= 0;
+      ehLeitura = b.indexOf('"acao":"dados"') >= 0 || b.indexOf('"acao":"dadosFicha"') >= 0
+                || b.indexOf('"acao":"atividadesPendentes"') >= 0;
     } catch(e){}
     // Lê o corpo uma vez só: serve pra saber se é leitura e, se for gravação, pra atualizar
     // o cache DEPOIS que o servidor confirmar (ver _depoisDeGravar).
@@ -516,7 +517,7 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbw-nMudRjf8DkkzdJi9mLFx
     if (!ehLeitura) {
       try {
         const c = JSON.parse(opts.body);
-        const SO_LEEM = { login:1, dados:1, dadosFicha:1 };
+        const SO_LEEM = { login:1, dados:1, dadosFicha:1, atividadesPendentes:1 };
         if (c && c.acao && !SO_LEEM[c.acao]) corpoEscrita = c;
       } catch(e) {}
     }
@@ -982,6 +983,37 @@ async function buscarDados(aba, forcar, filtroCnpj) {
   } finally {
     window._reqAtivas--; _reqMostrar();
   }
+}
+// ============================================================
+// ATIVIDADES AGENDADAS — pede ao servidor só o que está em aberto
+// ------------------------------------------------------------
+// A aba Atividades_Cliente guarda toda tratativa já registrada e cresce sem parar; baixar
+// ela inteira para montar a lista de pendências era a leitura mais cara do sistema.
+// A rotina 'atividadesPendentes' no Apps Script devolve só o que está agendado e em aberto.
+// SE O APPS SCRIPT AINDA NÃO FOI REPUBLICADO, ele responde "Ação desconhecida" e nós
+// voltamos sozinhos ao caminho antigo — a tela funciona dos dois jeitos, só mais devagar.
+// ============================================================
+let _ativPendIndisponivel = false;
+window._ativPendTotal = null;    // tamanho real da aba, quando o servidor informa
+async function buscarAtivPendentes(){
+  const CHAVE = 'Atividades_Cliente::pendentes';
+  const c = _cacheDados[CHAVE];
+  if (c && (Date.now() - c.t < _CACHE_TTL)) return c.dados;
+  if (!_ativPendIndisponivel) {
+    try {
+      const resp = await fetch(API_URL, { method:'POST', body: JSON.stringify({ acao:'atividadesPendentes', token: sessaoToken }) });
+      const r = await resp.json();
+      if (r && r.ok && Array.isArray(r.linhas)) {
+        if (typeof r.total === 'number') window._ativPendTotal = r.total;
+        _cacheDados[CHAVE] = { t: Date.now(), dados: r };
+        _cacheGravar();
+        return r;
+      }
+      // só desiste de vez quando a ação não existe no script publicado
+      if (r && !r.ok && /desconhecid/i.test(String(r.erro||''))) _ativPendIndisponivel = true;
+    } catch(e) { /* erro de rede: cai no caminho antigo desta vez */ }
+  }
+  return await buscarDados('Atividades_Cliente');
 }
 function limparCacheBusca(){ for (const k in _cacheDados) delete _cacheDados[k]; try{ localStorage.removeItem(_CACHE_LS); }catch(e){} }
 
@@ -5817,7 +5849,7 @@ async function atualizarSino(forcarBusca) {
       // follow-ups de carteira: atividades agendadas do tipo Follow-up
       let fusCart = [];
       try {
-        const ra = _semRede ? (dadosEmCache('Atividades_Cliente')||{ok:false,linhas:[]}) : await buscarDados('Atividades_Cliente');
+        const ra = _semRede ? (dadosEmCache('Atividades_Cliente')||{ok:false,linhas:[]}) : await buscarAtivPendentes();
         fusCart = (ra.ok?ra.linhas:[]).filter(a=>String(a['TIPO']||'')==='Follow-up' && a['DATA_AGENDADA'])
           .filter(a=>{ const d=parseDataReaj(a['DATA_AGENDADA']); return d && d>=hoje && d<=fim; })
           .map(a=>({id:'fuc-'+(a['CNPJ']||'')+'-'+(a['DATA_AGENDADA']||''), cnpj:a['CNPJ'], cliente:a['CLIENTE'], data:a['DATA_AGENDADA'], consultor:a['REGISTRADO_POR']||'', origem:'Carteira'}));
@@ -9795,7 +9827,7 @@ async function renderPendencias(area){
   // do mesmo jeito (antes, uma falha sozinha travava tudo em "Carregando..." pra sempre).
   const _pegar = (p) => p.then(r=>r).catch(e=>({ok:false, _falhou:true, _erro:String((e&&e.message)||e)}));
   const _pLeads = _pegar((typeof carregarLeads==='function') ? carregarLeads() : Promise.resolve());
-  const _pAtiv = _pegar(buscarDados('Atividades_Cliente'));
+  const _pAtiv = _pegar(buscarAtivPendentes());
   const _pSolic = _pegar(buscarDados('Solicitacoes'));
   const gere = (typeof podeGerirSolic==='function') && podeGerirSolic(); // diretoria/admin/Dany veem tudo
   const veTudo = gere || (usuarioAtual && ['admin','diretor'].includes(usuarioAtual.perfil));
@@ -11324,11 +11356,16 @@ async function finEnviarSheets(tipo, valorPeriodo, statusEl){
   // justamente porque o primeiro lote limpa o período antes de gravar — então repetir
   // nunca duplica. Melhor reenviar tudo do que deixar meio mês gravado.
   // ============================================================
+  // Cada tentativa usa lotes MENORES que a anterior. Se o Google está recusando porque o
+  // pedido é pesado demais (500 linhas de uma vez), um lote menor passa. Se ele está
+  // recusando por excesso de uso, o lote menor não atrapalha — só demora um pouco mais.
+  const _TAMANHOS = [LOTE, 200, 80];
   const _mandaTudo = async (tentativa) => {
+    const tam = _TAMANHOS[Math.min(tentativa,_TAMANHOS.length)-1];
     let pri = true;
-    for (let i=0;i<aEnviar.length;i+=LOTE){
-      const lote = aEnviar.slice(i,i+LOTE);
-      const feito = Math.min(i+LOTE,aEnviar.length);
+    for (let i=0;i<aEnviar.length;i+=tam){
+      const lote = aEnviar.slice(i,i+tam);
+      const feito = Math.min(i+tam,aEnviar.length);
       if (statusEl) statusEl.innerHTML = `Enviando <b>${feito} de ${aEnviar.length}</b>${tentativa>1?` <span style="color:#8a6d00;">(tentativa ${tentativa})</span>`:''}...`;
       const resp = await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'salvarFinanceiro',token:sessaoToken,
         dados:{ aba:cfg.aba, colunas, linhas:lote, modo, campoPeriodo:cfg.campoPeriodo, valorPeriodo, primeiroLote:pri }})});
@@ -11346,8 +11383,8 @@ async function finEnviarSheets(tipo, valorPeriodo, statusEl){
         err._periodo = valorPeriodo; err._aba = cfg.aba; err._esperado = aEnviar.length;
         throw err;
       }
-      if (statusEl) statusEl.innerHTML = `<span style="color:#8a6d00;">O servidor recusou. Esperando para tentar de novo (${t} de ${TENTATIVAS-1})...</span>`;
-      await new Promise(r=>setTimeout(r, 6000*t));
+      if (statusEl) statusEl.innerHTML = `<span style="color:#8a6d00;">O servidor recusou. Esperando ${15*t}s para tentar de novo, com lotes menores (${t} de ${TENTATIVAS-1})...</span>`;
+      await new Promise(r=>setTimeout(r, 15000*t));
     }
   }
 }
