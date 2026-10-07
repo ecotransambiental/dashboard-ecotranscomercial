@@ -393,7 +393,7 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.09.05</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.09.06</div>
       </div>
     </aside>
     <!-- VERSÃO DO DASHBOARD: v2026.08.31 (o número que vale é o da barra lateral, abaixo do botão Sair). HISTÓRICO ANTIGO: v2026.08.20 — desempenho: canal exclusivo pra salvar, cache deixou de ser apagado inteiro a cada salvamento, CRM atualiza a linha na memória em vez de rebuscar a aba. ANTERIOR: v2026.08.19b — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
@@ -11225,6 +11225,9 @@ async function finSincronizarAposUpload(tipoDados, st){
   const cfg = FIN_MAPA_SHEETS[tipoDados];
   if (!cfg) return;
   try {
+    window._impLog = [];
+    impLog('in\u00edcio: tipo=' + tipoDados + (Array.isArray(st&&st._mesesEnviar)?(' meses=['+st._mesesEnviar.join(', ')+']'):''));
+    impLog('linhas em mem\u00f3ria: ' + ((FINdados[tipoDados]||[]).length));
     if (st) { st.textContent = 'Salvando no sistema (compartilhado)...'; st.style.color='var(--cinza-500)'; }
     // COLETAS: manda só os meses que vieram no arquivo, em vez de reescrever a aba inteira.
     // Com dois meses carregados eram ~80 idas ao servidor a cada upload; agora são poucas,
@@ -11264,6 +11267,7 @@ async function finSincronizarAposUpload(tipoDados, st){
         + `<div style="font-size:12px;margin-top:6px;color:var(--cinza-700);line-height:1.5;">O arquivo foi lido certinho e <b>continua na mem\u00f3ria</b> \u2014 voc\u00ea n\u00e3o precisa escolher o arquivo de novo. `
         + `Tentei 3 vezes; o Google recusou as tr\u00eas. <b>Confira na aba Coletas se o per\u00edodo est\u00e1 completo antes de usar os n\u00fameros.</b></div>`
         + `<div style="margin-top:9px;"><button onclick="finSincronizarAposUpload('${tipoDados}', this.closest('div').parentElement)" style="padding:7px 12px;border:none;background:var(--verde-medio);color:white;border-radius:7px;cursor:pointer;font-size:12px;"><i class="ti ti-refresh"></i> Tentar salvar de novo</button></div>`
+        + `<div style="margin-top:9px;"><button onclick="impCopiarDiagnostico()" style="padding:7px 12px;border:1.5px solid var(--cinza-400);background:white;color:var(--cinza-700);border-radius:7px;cursor:pointer;font-size:12px;"><i class="ti ti-clipboard-text"></i> Copiar diagn\u00f3stico</button> <span style="font-size:11.5px;color:var(--cinza-600);">\u2190 clique e cole na conversa comigo</span></div>`
         + `<div style="font-size:11px;color:var(--cinza-500);margin-top:6px;">Detalhe t\u00e9cnico: ${e.message}</div>`;
       st.style.color='var(--vermelho)';
       st._mesesEnviar = st._mesesEnviar;   // preserva os meses para a nova tentativa
@@ -11366,6 +11370,35 @@ const FIN_MAPA_SHEETS = {
   faturamento: { aba:'Fin_Faturamento',      campoPeriodo:null }, // substitui tudo
 };
 
+// ============================================================
+// DIÁRIO DE BORDO DA IMPORTAÇÃO
+// ------------------------------------------------------------
+// Chega de adivinhar. Cada passo do envio é anotado aqui com horário e resultado.
+// Se der errado, aparece um botão que copia tudo — é isso que me diz onde está travando.
+// ============================================================
+window._impLog = [];
+function impLog(txt){
+  const t = new Date().toLocaleTimeString('pt-BR');
+  window._impLog.push(t + '  ' + txt);
+}
+function impCopiarDiagnostico(){
+  const v = (document.querySelector('aside div[style*="rgba(255,255,255,0.45)"]')||{}).textContent || '?';
+  const cab = [
+    'DIAGN\u00d3STICO DA IMPORTA\u00c7\u00c3O \u2014 Ecotrans',
+    'Vers\u00e3o do sistema: ' + v,
+    'Usu\u00e1rio: ' + ((usuarioAtual&&usuarioAtual.nome)||'?'),
+    'Quando: ' + new Date().toLocaleString('pt-BR'),
+    'Navegador: ' + navigator.userAgent,
+    ''
+  ];
+  const txt = cab.concat(window._impLog||[]).join('\n');
+  const ok = () => { const a=document.createElement('div'); a.textContent='Diagn\u00f3stico copiado! Cole na conversa.';
+    a.style.cssText='position:fixed;bottom:20px;right:20px;background:var(--verde-escuro);color:white;padding:10px 18px;border-radius:8px;font-size:13px;z-index:99999;';
+    document.body.appendChild(a); setTimeout(()=>a.remove(),2500); };
+  try { navigator.clipboard.writeText(txt).then(ok, ()=>{ prompt('Copie este texto:', txt); }); }
+  catch(e) { prompt('Copie este texto:', txt); }
+}
+
 // envia os dados de um tipo para o Sheets, em lotes, substituindo o período informado.
 async function finEnviarSheets(tipo, valorPeriodo, statusEl){
   const cfg = FIN_MAPA_SHEETS[tipo];
@@ -11417,11 +11450,18 @@ async function finEnviarSheets(tipo, valorPeriodo, statusEl){
   if (modo === 'periodo' && cfg.campoPeriodo && valorPeriodo != null) {
     try {
       if (statusEl) statusEl.innerHTML = `Limpando ${finRotMes ? finRotMes(valorPeriodo) : valorPeriodo} antes de gravar...`;
+      const t0 = Date.now();
       const resp0 = await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'limparPeriodoFinanceiro',token:sessaoToken,
         dados:{ aba:cfg.aba, campoPeriodo:cfg.campoPeriodo, valorPeriodo }})});
       const r0 = await resp0.json();
-      if (r0 && r0.ok) { _limpouFora = true; _removidas = r0.removidas; }
-    } catch(e) { /* sem problema: o caminho antigo assume */ }
+      const seg = Math.round((Date.now()-t0)/1000);
+      if (r0 && r0.ok) {
+        _limpouFora = true; _removidas = r0.removidas;
+        impLog(`limpeza de ${valorPeriodo}: OK em ${seg}s \u2014 removeu ${r0.removidas} linha(s) em ${r0.blocos} bloco(s); a aba tinha ${r0.linhasAntes} linhas`);
+      } else {
+        impLog(`limpeza de ${valorPeriodo}: o servidor respondeu "${(r0&&r0.erro)||'sem erro informado'}" em ${seg}s \u2014 vou pelo caminho antigo`);
+      }
+    } catch(e) { impLog(`limpeza de ${valorPeriodo}: FALHOU (${e.message||e}) \u2014 vou pelo caminho antigo`); }
   }
   const _mandaTudo = async (tentativa) => {
     const tam = _TAMANHOS[Math.min(tentativa,_TAMANHOS.length)-1];
@@ -11431,10 +11471,21 @@ async function finEnviarSheets(tipo, valorPeriodo, statusEl){
       const lote = aEnviar.slice(i,i+tam);
       const feito = Math.min(i+tam,aEnviar.length);
       if (statusEl) statusEl.innerHTML = `Enviando <b>${feito} de ${aEnviar.length}</b>${tentativa>1?` <span style="color:#8a6d00;">(tentativa ${tentativa})</span>`:''}...`;
-      const resp = await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'salvarFinanceiro',token:sessaoToken,
-        dados:{ aba:cfg.aba, colunas, linhas:lote, modo, campoPeriodo:cfg.campoPeriodo, valorPeriodo, primeiroLote:pri }})});
-      const r = await resp.json();
-      if (!r || !r.ok) throw new Error((r && r.erro) || 'o servidor n\u00e3o confirmou a grava\u00e7\u00e3o');
+      const tl = Date.now();
+      let r;
+      try {
+        const resp = await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'salvarFinanceiro',token:sessaoToken,
+          dados:{ aba:cfg.aba, colunas, linhas:lote, modo, campoPeriodo:cfg.campoPeriodo, valorPeriodo, primeiroLote:pri }})});
+        r = await resp.json();
+      } catch(e) {
+        impLog(`t${tentativa} lote ${feito}/${aEnviar.length} (${lote.length} linhas, limpa=${pri}): ERRO ap\u00f3s ${Math.round((Date.now()-tl)/1000)}s \u2014 ${e.message||e}`);
+        throw e;
+      }
+      if (!r || !r.ok) {
+        impLog(`t${tentativa} lote ${feito}/${aEnviar.length}: servidor recusou ap\u00f3s ${Math.round((Date.now()-tl)/1000)}s \u2014 "${(r&&r.erro)||'sem erro informado'}"`);
+        throw new Error((r && r.erro) || 'o servidor n\u00e3o confirmou a grava\u00e7\u00e3o');
+      }
+      impLog(`t${tentativa} lote ${feito}/${aEnviar.length} (${lote.length} linhas, limpa=${pri}): OK em ${Math.round((Date.now()-tl)/1000)}s`);
       pri = false;
     }
   };
