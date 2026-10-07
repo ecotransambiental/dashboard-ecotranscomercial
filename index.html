@@ -393,7 +393,7 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.09.04</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.09.05</div>
       </div>
     </aside>
     <!-- VERSÃO DO DASHBOARD: v2026.08.31 (o número que vale é o da barra lateral, abaixo do botão Sair). HISTÓRICO ANTIGO: v2026.08.20 — desempenho: canal exclusivo pra salvar, cache deixou de ser apagado inteiro a cada salvamento, CRM atualiza a linha na memória em vez de rebuscar a aba. ANTERIOR: v2026.08.19b — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
@@ -584,7 +584,14 @@ const TELAS_OFF = {
   'crm-precificacao': true,   // Precificação
   'crm-atividades':   true,   // Atividades (lia a aba inteira de tratativas — a mais pesada)
   'crm-roteirizacao': true,   // Roteirização
-  'pend-home':        false,  // Minhas pendências — MANTIDA LIGADA (ver explicação abaixo)
+  'pend-home':        false,  // Minhas pendências — MANTIDA LIGADA (é o único lembrete que sobrou)
+  'cart-visao':       true,   // Carteira › Visão Geral
+  'cart-buscar':      true,   // Carteira › Buscar Cliente
+  'ag-dia':           true,   // Agenda › Dia      \
+  'ag-mes':           true,   // Agenda › Mês       > o módulo Agenda inteiro some do menu
+  'ag-semana':        true,   // Agenda › Semana   /
+  'cart-aprovacoes':  true,   // Financeiro › Aprovações (de reajuste)
+  'cart-graficos':    true,   // Financeiro › Gráficos
 };
 const SINO_OFF = true;        // o sininho lê várias abas a cada sessão; desligado por ora
 
@@ -11395,9 +11402,31 @@ async function finEnviarSheets(tipo, valorPeriodo, statusEl){
   // pedido é pesado demais (500 linhas de uma vez), um lote menor passa. Se ele está
   // recusando por excesso de uso, o lote menor não atrapalha — só demora um pouco mais.
   const _TAMANHOS = [LOTE, 200, 80];
+  // ============================================================
+  // LIMPAR O MÊS ANTES, NUM PEDIDO SÓ
+  // ------------------------------------------------------------
+  // Até agora quem limpava o mês era o PRIMEIRO LOTE: o servidor lia a aba inteira, montava
+  // os outros meses na memória, apagava tudo e regravava. Como a Fin_Coletas só cresce,
+  // esse primeiro lote virou a operação mais cara do sistema — e passou a estourar o tempo
+  // máximo que o Google dá para um script, matando a importação logo no começo.
+  // Agora pedimos a limpeza à parte, numa rotina que lê só a coluna do mês e apaga as
+  // linhas daquele mês. Depois disso, cada lote é só acrescentar — rápido e leve.
+  // Se o Apps Script ainda não tiver essa rotina, voltamos ao jeito antigo sozinhos.
+  // ============================================================
+  let _limpouFora = false, _removidas = null;
+  if (modo === 'periodo' && cfg.campoPeriodo && valorPeriodo != null) {
+    try {
+      if (statusEl) statusEl.innerHTML = `Limpando ${finRotMes ? finRotMes(valorPeriodo) : valorPeriodo} antes de gravar...`;
+      const resp0 = await fetch(API_URL,{method:'POST',body:JSON.stringify({acao:'limparPeriodoFinanceiro',token:sessaoToken,
+        dados:{ aba:cfg.aba, campoPeriodo:cfg.campoPeriodo, valorPeriodo }})});
+      const r0 = await resp0.json();
+      if (r0 && r0.ok) { _limpouFora = true; _removidas = r0.removidas; }
+    } catch(e) { /* sem problema: o caminho antigo assume */ }
+  }
   const _mandaTudo = async (tentativa) => {
     const tam = _TAMANHOS[Math.min(tentativa,_TAMANHOS.length)-1];
-    let pri = true;
+    // se a limpeza já foi feita à parte, nenhum lote precisa limpar de novo
+    let pri = !_limpouFora;
     for (let i=0;i<aEnviar.length;i+=tam){
       const lote = aEnviar.slice(i,i+tam);
       const feito = Math.min(i+tam,aEnviar.length);
