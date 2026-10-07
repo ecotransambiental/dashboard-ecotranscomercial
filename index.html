@@ -393,7 +393,7 @@
         <div class="user-role" id="footer-role">—</div>
         <button class="sair" onclick="recarregarDados()" style="margin-bottom:6px;"><i class="ti ti-refresh"></i> Recarregar dados</button>
         <button class="sair" onclick="sair()"><i class="ti ti-logout"></i> Sair</button>
-        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.09.03</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center;margin-top:8px;">v2026.09.04</div>
       </div>
     </aside>
     <!-- VERSÃO DO DASHBOARD: v2026.08.31 (o número que vale é o da barra lateral, abaixo do botão Sair). HISTÓRICO ANTIGO: v2026.08.20 — desempenho: canal exclusivo pra salvar, cache deixou de ser apagado inteiro a cada salvamento, CRM atualiza a linha na memória em vez de rebuscar a aba. ANTERIOR: v2026.08.19b — corrige o casamento de cliente sem CNPJ (linhas de outros clientes apareciam na ficha), CNPJ editável, endereço salvo por nome, Rogério só o próprio CRM. NÃO usa nenhuma ação nova do Apps Script. -->
@@ -568,6 +568,25 @@ const USUARIOS = [
   { id: 'guilherme', nome: 'Guilherme Fernandes', role: 'Admin — Diretoria',     perfil: 'admin' },
   { id: 'leonardo', nome: 'Leonardo Fernandes', role: 'Admin — Diretoria',       perfil: 'admin' },
 ];
+
+// ============================================================
+// TELAS DESLIGADAS TEMPORARIAMENTE
+// ------------------------------------------------------------
+// Cada tela aqui some do menu e deixa de fazer suas leituras no Google. Enquanto o sistema
+// novo (Supabase) não fica pronto, desligar o que ninguém usa hoje é o que mais alivia:
+// não há otimização melhor do que um pedido que não acontece.
+//
+// PARA RELIGAR QUALQUER UMA: troque true por false na linha dela e publique. Só isso.
+// Nada foi apagado — o código das telas continua inteiro no arquivo.
+// ============================================================
+const TELAS_OFF = {
+  'crm-propostas':    true,   // Propostas
+  'crm-precificacao': true,   // Precificação
+  'crm-atividades':   true,   // Atividades (lia a aba inteira de tratativas — a mais pesada)
+  'crm-roteirizacao': true,   // Roteirização
+  'pend-home':        false,  // Minhas pendências — MANTIDA LIGADA (ver explicação abaixo)
+};
+const SINO_OFF = true;        // o sininho lê várias abas a cada sessão; desligado por ora
 
 // Definição dos módulos (nível 1) e submódulos (nível 2)
 const MODULOS = [
@@ -1164,7 +1183,7 @@ function iniciarApp() {
   // O sininho lê várias abas. Como o servidor atende um pedido por vez, se ele disparar
   // junto com a primeira tela, os dois disputam a fila e tudo parece travado.
   // Por isso ele espera a tela inicial acabar de carregar (ou 8s, o que vier primeiro).
-  const _iniciarSino = () => { if (window._sinoIniciado) return; window._sinoIniciado = true; atualizarSino(false); };
+  const _iniciarSino = () => { if (SINO_OFF || window._sinoIniciado) return; window._sinoIniciado = true; atualizarSino(false); };
   const _esperaFila = setInterval(()=>{ if ((window._reqAtivas||0) === 0) { clearInterval(_esperaFila); _iniciarSino(); } }, 1200);
   setTimeout(()=>{ clearInterval(_esperaFila); _iniciarSino(); }, 8000);
 }
@@ -1180,7 +1199,8 @@ function renderModulos() {
   const permitidos = ACESSO[perfilEfetivo] || [];
   const nav = document.getElementById('nav-modulos');
   nav.innerHTML = '';
-  const modsVisiveis = MODULOS.filter(m => permitidos.includes(m.id));
+  const modsVisiveis = MODULOS.filter(m => permitidos.includes(m.id))
+    .filter(m => (m.subs||[]).some(sb => !TELAS_OFF[sb.id]));   // módulo sem nenhuma tela ligada não aparece
   modsVisiveis.forEach((m, i) => {
     const btn = document.createElement('button');
     btn.className = 'nav-mod' + (i === 0 ? ' ativo' : '');
@@ -1205,6 +1225,7 @@ function selecionarModulo(modId) {
   const bloqueados = SUBMODULOS_BLOQUEADOS[usuarioAtual.perfil] || [];
   const idUser = String(usuarioAtual.id||'').toLowerCase();
   const subsVisiveis = mod.subs.filter(s => {
+    if (TELAS_OFF[s.id]) return false;            // tela desligada temporariamente
     if (bloqueados.includes(s.id)) return false;
     // "Quem atende quem": só Rogério e Danielly veem
     if (s.id === 'cart-quematende') return IDS_VE_TABELA_CONSULTA.includes(idUser);
@@ -1335,6 +1356,16 @@ async function renderConteudo(subId, subNome) {
 
   // Telas ricas (componentes próprios)
   if (subId === 'cart-clientes') { _tela(renderClientes, area, subNome); return; }
+  // Alguns botões pelo sistema chamam telas direto por código. Se a tela estiver desligada,
+  // avisamos em vez de carregar — senão ela voltaria pela porta dos fundos, fazendo as
+  // leituras que a gente quis evitar.
+  if (TELAS_OFF[subId]) {
+    area.innerHTML = `<div class="placeholder"><i class="ti ti-plug-off"></i>
+      <h2>${subNome||'Esta tela'} est\u00e1 desativada</h2>
+      <p>Desligamos esta tela temporariamente para deixar o resto do sistema mais r\u00e1pido, enquanto o sistema novo n\u00e3o fica pronto.</p>
+      <p style="font-size:12px;color:var(--cinza-500);margin-top:6px;">Nenhum dado foi apagado. Se voltar a precisar dela, fale com a Mafe que religamos.</p></div>`;
+    return;
+  }
   if (subId === 'pend-home')     { _tela(renderPendencias, area, subNome); return; }
   if (subId === 'crm-funil')     { _tela(renderKanban, area, subNome); return; }
   if (subId === 'cart-reajustes'){ _tela(renderReajustes, area, subNome); return; }
@@ -5792,6 +5823,9 @@ Ecotrans Ambiental`);
 // calculado quando você clica no sino. Um badge não vale segurar o trabalho de ninguém.
 let _sinoJaBuscou = false;
 async function atualizarSino(forcarBusca) {
+  // desligado: sai antes de qualquer leitura (várias chamadas espalhadas pelo sistema
+  // pedem o sino depois de salvar algo — todas param aqui)
+  if (SINO_OFF) { const b = document.getElementById('sino-badge'); if (b) b.style.display='none'; return; }
   if (!usuarioAtual) return;
   const _semRede = !forcarBusca && !_sinoJaBuscou;
   if (forcarBusca) _sinoJaBuscou = true;
@@ -5903,6 +5937,7 @@ async function abrirAvisoDestino(tipo, cliente, idLead) {
 }
 
 async function abrirAvisos() {
+  if (SINO_OFF) return;   // sininho desligado: não abre nem busca nada
   // agora é aqui que os avisos são realmente buscados — e uma vez por sessão
   if (!_sinoJaBuscou) {
     const cont0 = document.getElementById('ficha-container');
